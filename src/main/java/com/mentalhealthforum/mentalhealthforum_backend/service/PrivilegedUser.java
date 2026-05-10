@@ -81,6 +81,10 @@ public interface PrivilegedUser {
         return isAdmin() || isModerator() || isPeerSupporter();
     }
 
+    public default boolean isModeratorOrAdmin() {
+        return isAdmin() || isModerator();
+    }
+
     public default OnboardingPolicy.Result checkOnboardingPolicy(OnboardingProfileData onboardingProfileData) {
         List<OnboardingPolicy.Violation> violations = new ArrayList<>();
         List<OnboardingPolicy.FieldRequirement> requirements = new ArrayList<>();

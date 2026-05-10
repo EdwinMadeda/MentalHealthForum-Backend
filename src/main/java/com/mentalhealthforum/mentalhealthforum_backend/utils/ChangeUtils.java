@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.utils;
 
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import reactor.core.publisher.Mono;
 
 import java.util.HashSet;
@@ -72,6 +73,18 @@ public final class ChangeUtils {
 
         if (!safeNew.equals(safeCurrent)) {
             setter.accept(safeNew);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Generic version for any type (enums, numbers, etc.)
+     * Only updates if values are different (null-safe)
+     */
+    public static <T> boolean setIfChanged(T newValue, T currentValue, Consumer<T> setter){
+        if(!Objects.equals(newValue, currentValue)){
+            setter.accept(newValue);
             return true;
         }
         return false;

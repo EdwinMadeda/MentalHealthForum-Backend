@@ -1,5 +1,8 @@
 package com.mentalhealthforum.mentalhealthforum_backend.utils;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 public class NormalizeUtils {
     private NormalizeUtils(){
         // Prevent instantiation
@@ -26,5 +29,27 @@ public class NormalizeUtils {
                 .replaceAll("ç", "c")
                 .replaceAll("Ç", "C")
                 .replaceAll("ß", "ss");
+    }
+
+    public static List<String> normalizeTags(List<String> tags){
+        if(tags == null || tags.isEmpty()) {
+            return List.of();
+        }
+        return tags.stream()
+                .map(NormalizeUtils::normalizeTag)
+                .filter(tag -> !tag.isEmpty())
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private static String normalizeTag(String tag){
+        if(tag == null) return "";
+        return normalizeUnicode(tag)
+                .toLowerCase()
+                .trim()
+                .replaceAll("\\s+", "-")
+                .replaceAll("[^a-z0-9-]", "")
+                .replaceAll("-+", "-")
+                .replaceAll("^-|-$", "");
     }
 }

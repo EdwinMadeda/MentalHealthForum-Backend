@@ -4,8 +4,11 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.timezone.TimezonesResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.service.TimezoneService;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.timezone.TimezoneValidator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.TextStyle;
@@ -14,6 +17,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class TimezoneServiceImpl implements TimezoneService {
+
+    private static final Logger log = LoggerFactory.getLogger(TimezoneServiceImpl.class);
+
     @Override
     public TimezonesResponse getTimezonesGrouped() {
         Map<String, List<TimezoneDetails>> grouped = ZoneId.getAvailableZoneIds().stream()
@@ -46,16 +52,28 @@ public class TimezoneServiceImpl implements TimezoneService {
     }
 
     private TimezoneDetails createTimezoneResponse(String zoneId) {
-        ZoneId zone = ZoneId.of(zoneId);
-        ZonedDateTime now = ZonedDateTime.now(zone);
+        ZoneId zone;
+        try {
+            zone = ZoneId.of(zoneId);
+        } catch (DateTimeException e){
+            log.warn("Invalid timezone ID: '{}', falling back to UTC, zoneId", zoneId);
+            zone = ZoneId.of("UTC");
+        }
 
+        ZonedDateTime now = ZonedDateTime.now(zone);
         String offset = now.getOffset().getId().replace("Z", "+00:00");
 
-        String displayName = zone.getDisplayName(TextStyle.FULL, Locale.ENGLISH);
-        if(displayName.equals(zoneId)){
-            displayName = Arrays.stream(zoneId.split("/"))
-                    .map(part -> part.replace("_", " "))
-                    .collect(Collectors.joining(" - "));
+        String displayName;
+        try {
+            displayName = zone.getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+            if(displayName.equals(zoneId)){
+                displayName = Arrays.stream(zoneId.split("/"))
+                        .map(part -> part.replace("_", " "))
+                        .collect(Collectors.joining(" - "));
+            }
+
+        } catch (Exception e){
+            displayName = zoneId;
         }
 
         String region = zoneId.contains("/")? zoneId.substring(0, zoneId.indexOf("/")): "Other";

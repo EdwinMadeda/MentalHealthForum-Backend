@@ -54,6 +54,10 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                         .withEnum("onboarding_stage_enum", OnboardingStage.class)
                         .withEnum("otp_purpose_enum", OtpPurpose.class)
                         .withEnum("content_warning_enum", ContentWarningType.class)
+                        .withEnum("thread_type_enum", ThreadType.class)
+                        .withEnum("thread_status_enum", ThreadStatus.class)
+                        .withEnum("post_type_enum", PostType.class)
+                        .withEnum("edit_reason_enum", EditReason.class)
                         .build())
                 .build();
     }
@@ -81,7 +85,15 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                 new OtpPurposeWritingConverter(),
                 new OtpPurposeReadingConverter(),
                 new ContentWarningTypeWritingConverter(),
-                new ContentWarningTypeReadingConverter()
+                new ContentWarningTypeReadingConverter(),
+                new ThreadTypeWritingConverter(),
+                new ThreadTypeReadingConverter(),
+                new ThreadStatusWritingConverter(),
+                new ThreadStatusReadingConverter(),
+                new PostTypeReadingConverter(),
+                new PostTypeWritingConverter(),
+                new EditReasonReadingConverter(),
+                new EditReasonWritingConverter()
         );
     }
 
@@ -101,6 +113,14 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
         converters.add(new OtpPurposeReadingConverter());
         converters.add(new ContentWarningTypeWritingConverter());
         converters.add(new ContentWarningTypeReadingConverter());
+        converters.add(new ThreadTypeWritingConverter());
+        converters.add(new ThreadTypeReadingConverter());
+        converters.add(new ThreadStatusWritingConverter());
+        converters.add(new ThreadStatusReadingConverter());
+        converters.add(new PostTypeReadingConverter());
+        converters.add(new PostTypeWritingConverter());
+        converters.add(new EditReasonWritingConverter());
+        converters.add(new EditReasonReadingConverter());
 
         // Add JSONB converters
         converters.add(new JsonNodeToJsonWriteConverter(objectMapper));
