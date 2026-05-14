@@ -58,6 +58,7 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                         .withEnum("thread_status_enum", ThreadStatus.class)
                         .withEnum("post_type_enum", PostType.class)
                         .withEnum("edit_reason_enum", EditReason.class)
+                        .withEnum("reaction_enum", ReactionType.class)
                         .build())
                 .build();
     }
@@ -93,7 +94,9 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                 new PostTypeReadingConverter(),
                 new PostTypeWritingConverter(),
                 new EditReasonReadingConverter(),
-                new EditReasonWritingConverter()
+                new EditReasonWritingConverter(),
+                new ReactionTypeReadingConverter(),
+                new ReactionTypeWritingConverter()
         );
     }
 
@@ -121,6 +124,8 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
         converters.add(new PostTypeWritingConverter());
         converters.add(new EditReasonWritingConverter());
         converters.add(new EditReasonReadingConverter());
+        converters.add(new ReactionTypeReadingConverter());
+        converters.add(new ReactionTypeWritingConverter());
 
         // Add JSONB converters
         converters.add(new JsonNodeToJsonWriteConverter(objectMapper));
