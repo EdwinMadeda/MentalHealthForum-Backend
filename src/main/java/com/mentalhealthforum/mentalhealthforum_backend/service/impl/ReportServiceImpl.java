@@ -17,6 +17,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -173,9 +174,13 @@ public class ReportServiceImpl implements ReportService {
                                 return contentReportRepository.save(report).
                                         flatMap(this::mapToResponse);
                             },
-                            report -> report.isPending() && !report.isAssigned(),
-                            "Only pending and unassigned reports can be assigned"
-                            );
+                            List.of(
+                                    new ValidationRule(
+                                            report -> !report.isPending() && report.isAssigned(),
+                                            "Only pending and unassigned reports can be assigned"
+                                    )
+                            )
+                    );
                 });
     }
 
@@ -184,20 +189,19 @@ public class ReportServiceImpl implements ReportService {
         UUID reviewerId = UUID.fromString(viewerContext.getUserId());
         boolean isAdmin = viewerContext.isAdmin();
 
-        // FAIL FAST - Check if user has permission for this action
         if(!request.getActionTaken().isAllowedFor(viewerContext)){
             return Mono.error(new ApiException(
-                    String.format("You don't have permission to perform action: %s. This action requires %s group.",
+                    String.format("You don't have permission to perform action: %s. This action requires %s.",
                             request.getActionTaken().getDisplayName(),
                             request.getActionTaken().getRequiredGroup().getDisplayName()),
                             ErrorCode.FORBIDDEN)
             );
         }
 
-        return performModeratorAction(reportId, viewerContext,
-                "resolve report",
+        return performModeratorAction(reportId, viewerContext, "resolve report",
                 report -> {
 
+                    // Perform escalation
                     report.setStatus(ReportStatus.ACTION_TAKEN);
                     report.setActionTaken(request.getActionTaken());
                     report.setActionTakenDetails(request.getActionTakenDetails());
@@ -209,15 +213,23 @@ public class ReportServiceImpl implements ReportService {
                     // dismissalReason remains null for resolve actions
                     return contentReportRepository.save(report)
                             .flatMap(this::mapToResponse);
-                },
-                report -> {
-                    if(report.isUnderReview()) return isAdmin || report.isAssignedTo(reviewerId);
-                    if(report.isEscalated()) return isAdmin;
-                    return false;
-                },
-                "Report must be under review (and assigned to you) or escalated (admin only)"
 
-        );
+                },
+                List.of(
+                        new ValidationRule(
+                                report -> !report.isUnderReview() && !report.isEscalated(),
+                                "Report must be in UNDER_REVIEW or ESCALATED status to resolve"
+                        ),
+                        new ValidationRule(
+                                report -> report.isUnderReview() && !isAdmin && !report.isAssignedTo(reviewerId),
+                                "You can only resolve reports assigned to you"
+                        ),
+                        new ValidationRule(
+                                report -> report.isEscalated() && !isAdmin,
+                                "Only admins can resolve escalated reports"
+                        )
+                )
+                );
     }
 
     @Override
@@ -241,12 +253,20 @@ public class ReportServiceImpl implements ReportService {
                     return contentReportRepository.save(report)
                             .flatMap(this::mapToResponse);
                 },
-                report -> {
-                    if(report.isUnderReview()) return isAdmin || report.isAssignedTo(reviewerId);
-                    if(report.isEscalated()) return isAdmin;
-                    return false;
-                },
-                "Report must be under review (and assigned to you) or escalated (admin only)"
+                List.of(
+                        new ValidationRule(
+                                report -> !report.isUnderReview() && !report.isEscalated(),
+                                "Report must be in UNDER_REVIEW or ESCALATED status to dismiss"
+                        ),
+                        new ValidationRule(
+                                report -> report.isUnderReview() && !isAdmin && !report.isAssignedTo(reviewerId),
+                                "You can only dismiss reports assigned to you"
+                        ),
+                        new ValidationRule(
+                                report -> report.isEscalated() && !isAdmin,
+                                "Only admins can dismiss escalated reports"
+                        )
+                )
         );
     }
 
@@ -269,14 +289,20 @@ public class ReportServiceImpl implements ReportService {
                     return contentReportRepository.save(report)
                             .flatMap(this::mapToResponse);
                 },
-                report -> {
-                    // Can only escalate if:
-                    // 1. Report is UNDER_REVIEW
-                    // 2. Either admin OR assigned to current moderator
-                    // 3. Not already escalated
-                   return report.isUnderReview() && (isAdmin || report.isAssignedTo(moderatorId)) && !report.isEscalated();
-                },
-                "Only assigned reports under review can be escalated"
+                List.of(
+                        new ValidationRule(
+                                report -> !report.isUnderReview(),
+                                "Only reports under review can be escalated"
+                        ),
+                        new ValidationRule(
+                                report -> !isAdmin && !report.isAssignedTo(moderatorId),
+                                "You can only escalate reports assigned to you"
+                        ),
+                        new ValidationRule(
+                                ContentReportEntity::isEscalated,
+                                "Report is already escalated"
+                        )
+                )
         );
     }
 
@@ -319,15 +345,24 @@ public class ReportServiceImpl implements ReportService {
                     }
                     return Mono.just(report).flatMap(this::mapToResponse);
                 },
-                report -> {
-
-                    if(report.isResolvedOrDismissed()) return false;
-                    if(report.isUnderReview()) return isAdmin || !report.isAssignedToSomeoneElse(moderatorId);
-                    if(report.isEscalated()) return isAdmin;
-
-                    return false;
-                },
-                "Cannot update reports that are resolved/dismissed or not under review/escalated or assigned to another moderator"
+                List.of(
+                        new ValidationRule(
+                                ContentReportEntity::isResolvedOrDismissed,
+                                "Cannot update reports that are resolved or dismissed"
+                        ),
+                        new ValidationRule(
+                                report -> !report.isUnderReview() && !report.isEscalated(),
+                                "Only reports under review or escalated can be updated"
+                        ),
+                        new ValidationRule(
+                                report -> report.isUnderReview() && !isAdmin && report.isAssignedToSomeoneElse(moderatorId),
+                                "Cannot update reports assigned to another moderator"
+                        ),
+                        new ValidationRule(
+                                report -> report.isEscalated() && !isAdmin,
+                                "Only admins can update escalated reports"
+                        )
+                )
 
         );
     }
@@ -395,13 +430,14 @@ public class ReportServiceImpl implements ReportService {
                 .switchIfEmpty(Mono.error(new ApiException("Report not found", ErrorCode.RESOURCE_NOT_FOUND)));
     }
 
+    private record ValidationRule(Predicate<ContentReportEntity> condition, String errorMessage){};
+
     private <T> Mono<T> performModeratorAction(
             UUID reportId,
             ViewerContext viewerContext,
             String actionDescription,
             Function<ContentReportEntity, Mono<T>> action,
-            Predicate<ContentReportEntity> validator,
-            String validationErrorMessage
+            List<ValidationRule> validators
     ){
         if(!viewerContext.isModeratorOrAdmin()){
             return Mono.error(new ApiException("Only moderators can " + actionDescription, ErrorCode.FORBIDDEN));
@@ -409,8 +445,11 @@ public class ReportServiceImpl implements ReportService {
 
         return findReport(reportId)
                 .flatMap(report -> {
-                    if(validator != null && !validator.test(report)){
-                        return Mono.error(new ApiException(validationErrorMessage, ErrorCode.VALIDATION_FAILED));
+                    for(ValidationRule rule: validators){
+                        // Condition is FAILURE condition - if true, we error
+                        if(rule.condition().test(report)){
+                            return Mono.error(new ApiException(rule.errorMessage, ErrorCode.VALIDATION_FAILED));
+                        }
                     }
                     return action.apply(report);
                 })

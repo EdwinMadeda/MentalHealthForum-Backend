@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsCompre
 
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ModerationAction;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,7 +14,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ResolveReportRequest {
 
-    @NotBlank(message = "Action taken is required")
+    @NotNull(message = "Action taken is required")
     private ModerationAction actionTaken;
 
     @NotBlank(message = "Action taken details is required")

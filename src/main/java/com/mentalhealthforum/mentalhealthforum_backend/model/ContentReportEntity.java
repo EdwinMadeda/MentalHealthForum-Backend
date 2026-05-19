@@ -115,7 +115,7 @@ public class ContentReportEntity {
         return status == ReportStatus.ACTION_TAKEN || status == ReportStatus.DISMISSED;
     }
 
-    public boolean isEscalated() { return  status == ReportStatus.ESCALATED}
+    public boolean isEscalated() { return  status == ReportStatus.ESCALATED; }
 
     public boolean isAssigned(){
         return assignedModeratorId != null;

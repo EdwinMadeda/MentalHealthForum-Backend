@@ -115,28 +115,4 @@ public class PublicContentReportController {
                         ResponseEntity.ok(new StandardSuccessResponse<>("Report templates retrieved successfully", templates)));
     }
 
-    @GetMapping("/templates/actions")
-    public Mono<ResponseEntity<StandardSuccessResponse<List<ModerationActionTemplateResponse>>>> getModeratorActionTemplates(
-            @AuthenticationPrincipal Jwt jwt
-    ){
-        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-
-        return reportService.getModerationActionTemplates(viewerContext)
-                .collectList()
-                .map(templates ->
-                        ResponseEntity.ok(new StandardSuccessResponse<>("Moderation action templates retrieved successfully", templates)));
-    }
-
-    @GetMapping("/templates/dismissal-reason")
-    public Mono<ResponseEntity<StandardSuccessResponse<List<DismissalReasonTemplateResponse>>>> getDismissalReasonTemplates(
-            @AuthenticationPrincipal Jwt jwt
-    ){
-        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-
-        return reportService.getDismissalReasonTemplates(viewerContext)
-                .collectList()
-                .map(templates ->
-                        ResponseEntity.ok(new StandardSuccessResponse<>("Dismissal reason templates retrieved successfully", templates)));
-    }
-
 }
