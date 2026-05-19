@@ -1,0 +1,15 @@
+package com.mentalhealthforum.mentalhealthforum_backend.enums;
+
+public enum ReportReasonCode {
+    SPAM_PROMOTIONAL,
+    SPAM_OFFTOPIC,
+    HARASSMENT_BULLYING,
+    HARASSMENT_PERSONAL_ATTACK,
+    SELF_HARM_DETAILED,
+    SUICIDE_EXPRESSION,
+    VIOLENCE_THREATS,
+    MISINFORMATION_DANGEROUS,
+    PRIVACY_DOXING,
+    INAPPROPRIATE_CONTENT,
+    OTHER_REASON
+}

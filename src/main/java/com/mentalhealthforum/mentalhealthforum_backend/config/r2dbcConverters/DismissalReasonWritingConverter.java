@@ -1,0 +1,5 @@
+package com.mentalhealthforum.mentalhealthforum_backend.config.r2dbcConverters;
+
+import com.mentalhealthforum.mentalhealthforum_backend.enums.DismissalReason;
+
+public class DismissalReasonWritingConverter extends AbstractPostgresEnumWritingConverter<DismissalReason>{}

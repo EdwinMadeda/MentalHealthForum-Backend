@@ -16,6 +16,8 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
 
     Flux<ForumThreadEntity> findByCreatorIdOrderByCreatedAtDesc(UUID creatorId);
 
+    Mono<ForumThreadEntity> findByIdAndIsDeletedFalse(UUID threadId);
+
     // ==================== REFERENCE TABLES ====================
     @Query("""
         SELECT * FROM forum_threads
@@ -163,6 +165,8 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
     Mono<Void> clearBestAnswer(
             @Param("threadId") UUID threadId
     );
+
+
 
     // ==================== EXISTENCE CHECKS ====================
     Mono<Boolean> existsByIdAndIsDeletedFalse(UUID id);

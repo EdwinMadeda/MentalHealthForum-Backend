@@ -12,6 +12,7 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.r2dbc.config.AbstractR2dbcConfiguration;
+import org.springframework.data.r2dbc.config.EnableR2dbcAuditing;
 import org.springframework.data.r2dbc.convert.R2dbcCustomConversions;
 import org.springframework.data.r2dbc.dialect.PostgresDialect;
 import org.springframework.data.r2dbc.repository.config.EnableR2dbcRepositories;
@@ -27,6 +28,7 @@ import java.util.List;
  */
 @Configuration
 @EnableR2dbcRepositories
+@EnableR2dbcAuditing
 public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
 
     private final R2dbcProperties properties;
@@ -59,6 +61,13 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                         .withEnum("post_type_enum", PostType.class)
                         .withEnum("edit_reason_enum", EditReason.class)
                         .withEnum("reaction_enum", ReactionType.class)
+                        .withEnum("report_target_type_enum", ReportTargetType.class)
+                        .withEnum("report_category_enum", ReportCategory.class)
+                        .withEnum("severity_enum", Severity.class)
+                        .withEnum("report_status_enum", ReportStatus.class)
+                        .withEnum("moderation_action_enum", ModerationAction.class)
+                        .withEnum("dismissal_reason_enum", DismissalReason.class)
+                        .withEnum("report_reason_code_enum", ReportReasonCode.class)
                         .build())
                 .build();
     }
@@ -96,7 +105,21 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                 new EditReasonReadingConverter(),
                 new EditReasonWritingConverter(),
                 new ReactionTypeReadingConverter(),
-                new ReactionTypeWritingConverter()
+                new ReactionTypeWritingConverter(),
+                new ReportTargetTypeReadingConverter(),
+                new ReportTargetTypeWritingConverter(),
+                new ReportCategoryReadingConverter(),
+                new ReportCategoryWritingConverter(),
+                new SeverityReadingConverter(),
+                new SeverityWritingConverter(),
+                new ReportStatusReadingConverter(),
+                new ReportStatusWritingConverter(),
+                new ModerationActionReadingConverter(),
+                new ModerationActionWritingConverter(),
+                new DismissalReasonReadingConverter(),
+                new DismissalReasonWritingConverter(),
+                new ReportReasonCodeReadingConverter(),
+                new ReportReasonCodeWritingConverter()
         );
     }
 
@@ -126,6 +149,21 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
         converters.add(new EditReasonReadingConverter());
         converters.add(new ReactionTypeReadingConverter());
         converters.add(new ReactionTypeWritingConverter());
+        converters.add(new ReportTargetTypeReadingConverter());
+        converters.add(new ReportTargetTypeWritingConverter());
+        converters.add(new ReportCategoryReadingConverter());
+        converters.add(new ReportCategoryWritingConverter());
+        converters.add(new SeverityReadingConverter());
+        converters.add(new SeverityWritingConverter());
+        converters.add(new ReportStatusReadingConverter());
+        converters.add(new ReportStatusWritingConverter());
+        converters.add(new ModerationActionReadingConverter());
+        converters.add(new ModerationActionWritingConverter());
+        converters.add(new DismissalReasonReadingConverter());
+        converters.add(new DismissalReasonWritingConverter());
+        converters.add(new ReportReasonCodeReadingConverter());
+        converters.add(new ReportReasonCodeWritingConverter());
+
 
         // Add JSONB converters
         converters.add(new JsonNodeToJsonWriteConverter(objectMapper));

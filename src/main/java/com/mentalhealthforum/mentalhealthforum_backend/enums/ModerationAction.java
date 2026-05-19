@@ -1,0 +1,64 @@
+package com.mentalhealthforum.mentalhealthforum_backend.enums;
+
+import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import lombok.Getter;
+
+@Getter
+public enum ModerationAction {
+    // Content actions
+    POST_DELETED("Delete post", GroupPath.MODERATORS),
+    POST_EDITED("Edit post", GroupPath.MODERATORS),
+    POST_FLAGGED("Flag post", GroupPath.MODERATORS),
+    POST_CONTENT_WARNING_ADDED("Add content warning", GroupPath.MODERATORS),
+    POST_RESTORED("Restore post", GroupPath.ADMINISTRATORS),
+
+    // Thread actions
+    THREAD_LOCKED("Lock thread", GroupPath.MODERATORS),
+    THREAD_UNLOCKED("Unlock thread", GroupPath.MODERATORS),
+    THREAD_DELETED("Delete thread", GroupPath.ADMINISTRATORS),
+    THREAD_MOVED("Move thread", GroupPath.MODERATORS),
+    THREAD_MERGED("Merge threads", GroupPath.ADMINISTRATORS),
+    THREAD_SPLIT("Split thread", GroupPath.ADMINISTRATORS),
+    THREAD_STATUS_CHANGED("Change thread status", GroupPath.MODERATORS),
+    THREAD_FEATURED("Feature thread", GroupPath.ADMINISTRATORS),
+    THREAD_UNFEATURED("Unfeature thread", GroupPath.ADMINISTRATORS),
+
+    // User actions
+    USER_WARNED("Warn user", GroupPath.MODERATORS),
+    USER_MUTED("Mute user", GroupPath.MODERATORS),
+    USER_UNMUTED("Unmute user", GroupPath.MODERATORS),
+    USER_SUSPENDED("Suspend user", GroupPath.ADMINISTRATORS),
+    USER_UNSUSPENDED("Unsuspend user", GroupPath.ADMINISTRATORS),
+    USER_BANNED("Ban user", GroupPath.ADMINISTRATORS),
+    USER_UNBANNED("Unban user", GroupPath.ADMINISTRATORS),
+    USER_REPUTATION_ADJUSTED("Adjust reputation", GroupPath.ADMINISTRATORS),
+
+    // Role/permission changes
+    ROLE_GRANTED("Grant role", GroupPath.ADMINISTRATORS),
+    ROLE_REVOKED("Revoke role", GroupPath.ADMINISTRATORS),
+    GROUP_ADDED("Add to group", GroupPath.ADMINISTRATORS),
+    GROUP_REMOVED("Remove from group", GroupPath.ADMINISTRATORS),
+
+    // Report handling
+    REPORT_ASSIGNED("Assign report", GroupPath.MODERATORS),
+    REPORT_ESCALATED("Escalate report", GroupPath.MODERATORS),
+    REPORT_ACTIONED("Action report", GroupPath.MODERATORS),
+    REPORT_DISMISSED("Dismiss report", GroupPath.MODERATORS),
+
+    // System/bulk actions
+    BULK_ACTION("Bulk action", GroupPath.ADMINISTRATORS),
+    CATEGORY_ACCESS_CHANGED("Change category access", GroupPath.ADMINISTRATORS);
+
+    private final String displayName;
+    private final GroupPath requiredGroup;
+
+
+    ModerationAction(String displayName, GroupPath requiredGroup) {
+        this.displayName = displayName;
+        this.requiredGroup = requiredGroup;
+    }
+
+    public boolean isAllowedFor(ViewerContext viewerContext){
+        return viewerContext.isInGroup(requiredGroup);
+    }
+}
