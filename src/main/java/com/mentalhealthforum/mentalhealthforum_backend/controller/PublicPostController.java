@@ -96,7 +96,7 @@ public class PublicPostController {
     }
 
     @DeleteMapping("/{postId}")
-    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> updateOwnPost(
+    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> deleteOwnPost(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID postId
     ){
@@ -104,19 +104,5 @@ public class PublicPostController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
         return postService.softDeleteOwnPost(postId, viewerContext)
                 .then(Mono.just(ResponseEntity.ok(new StandardSuccessResponse<>("Post soft deleted successfully"))));
-    }
-
-    // ==================== USER FLAG ACTIONS ====================
-    @PostMapping("/{postId}/flag")
-    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> flagPost(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID postId,
-            @Valid @RequestBody FlagPostRequest request
-            ){
-
-        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-        return postService.flagPostAsUser(postId, request, viewerContext)
-                        .then(Mono.just(ResponseEntity.ok(new StandardSuccessResponse<>("Post flagged successfully"))));
-
     }
 }

@@ -46,4 +46,7 @@ public class PostEditHistoryEntity {
     @Column("edit_reason_custom_text")
     private String editReasonCustomText;
 
+    @Column("is_moderator_edit")
+    private boolean isModeratorEdit;
+
 }

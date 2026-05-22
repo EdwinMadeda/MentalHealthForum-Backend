@@ -9,10 +9,9 @@ import reactor.core.publisher.Mono;
 public enum ModerationAction {
     // Content actions
     POST_DELETED("Delete post", GroupPath.MODERATORS),
-    POST_EDITED("Edit post", GroupPath.MODERATORS),
-    POST_FLAGGED("Flag post", GroupPath.MODERATORS),
     POST_CONTENT_WARNING_ADDED("Add content warning", GroupPath.MODERATORS),
-    POST_RESTORED("Restore post", GroupPath.ADMINISTRATORS),
+    POST_RESTORED("Restore post", GroupPath.MODERATORS),
+    POST_PERMANENTLY_DELETED("Permanently delete post", GroupPath.ADMINISTRATORS),
 
     // Thread actions
     THREAD_LOCKED("Lock thread", GroupPath.MODERATORS),
