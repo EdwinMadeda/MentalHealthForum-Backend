@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
 import java.util.UUID;
 
 @Repository
@@ -103,6 +104,9 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
             @Param("search") String search
     );
 
+
+
+
     // ==================== SOFT DELETE ====================
 
     @Query("UPDATE forum_posts SET is_deleted = true, updated_at = NOW() WHERE id = :postId")
@@ -142,5 +146,20 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
         LIMIT 1
     """)
     Mono<PostEntity> findFirstPostInThread(@Param("threadId") UUID threadId);
+
+
+    // ==================== THREAD ACTIONS ====================\
+
+    @Query("SELECT COUNT(*) FROM forum_posts WHERE id IN (:postIds)")
+    Mono<Long> countPostsInIds(@Param("postIds") List<UUID> postIds);
+
+    @Query("SELECT COUNT(*) FROM forum_posts WHERE id IN (:postIds) AND thread_id = :threadId AND is_deleted = false")
+    Mono<Long> countPostsInIdsAndThread(@Param("postIds") List<UUID> postIds,@Param("threadId") UUID threadId);
+
+    @Query("UPDATE forum_posts SET thread_id = :newThreadId WHERE id IN (:postIds)")
+    Mono<Void> movePostsToThread(@Param("postIds") List<UUID> postIds,@Param("newThreadId") UUID newThreadId);
+
+    @Query("UPDATE forum_posts SET thread_id = :targetThreadId WHERE thread_id = :sourceThreadId")
+    Mono<Void> moveAllPostsToThread(@Param("sourceThreadId") UUID sourceThreadId,@Param("targetThreadId") UUID targetThreadId);
 
 }

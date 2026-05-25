@@ -16,13 +16,24 @@ public enum ModerationAction {
     // Thread actions
     THREAD_LOCKED("Lock thread", GroupPath.MODERATORS),
     THREAD_UNLOCKED("Unlock thread", GroupPath.MODERATORS),
-    THREAD_DELETED("Delete thread", GroupPath.ADMINISTRATORS),
+    THREAD_SOFT_DELETED("Soft delete thread", GroupPath.MODERATORS),
+    THREAD_RESTORED("Restore thread", GroupPath.MODERATORS),
     THREAD_MOVED("Move thread", GroupPath.MODERATORS),
     THREAD_MERGED("Merge threads", GroupPath.ADMINISTRATORS),
     THREAD_SPLIT("Split thread", GroupPath.ADMINISTRATORS),
-    THREAD_STATUS_CHANGED("Change thread status", GroupPath.MODERATORS),
+    THREAD_ARCHIVED("Archive thread", GroupPath.MODERATORS),
+    THREAD_UNARCHIVED("Unarchive thread", GroupPath.MODERATORS),
     THREAD_FEATURED("Feature thread", GroupPath.ADMINISTRATORS),
-    THREAD_UNFEATURED("Unfeature thread", GroupPath.ADMINISTRATORS),
+    THREAD_UNFEATURED("Un-feature thread", GroupPath.ADMINISTRATORS),
+    THREAD_TYPE_CHANGED("Change thread type", GroupPath.MODERATORS),
+    THREAD_STICKY_TOGGLED("Toggle sticky status", GroupPath.MODERATORS),
+    THREAD_BEST_ANSWER_SET("Set best answer", GroupPath.MODERATORS),
+    THREAD_BEST_ANSWER_CLEARED("Clear best answer", GroupPath.MODERATORS),
+    THREAD_PERMANENTLY_DELETED("Permanently delete thread", GroupPath.ADMINISTRATORS),
+    THREAD_METADATA_EDITED("Edit thread metadata", GroupPath.MODERATORS),
+    THREAD_CONTENT_WARNING_ADDED("Add content warning to thread", GroupPath.MODERATORS),
+    VIEW_DELETED_THREADS("View deleted threads", GroupPath.MODERATORS),
+
 
     // User actions
     USER_WARNED("Warn user", GroupPath.MODERATORS),

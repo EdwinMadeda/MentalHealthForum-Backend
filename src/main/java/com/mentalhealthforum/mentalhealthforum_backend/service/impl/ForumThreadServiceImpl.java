@@ -2,10 +2,9 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.AddContentWarningRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.*;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.*;
@@ -21,6 +20,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -35,6 +35,8 @@ public class ForumThreadServiceImpl implements ForumThreadService {
     private final AppUserRepository appUserRepository;
     private final ForumCategoryRepository forumCategoryRepository;
     private final ForumThreadRepository forumThreadRepository;
+    private final ThreadEditHistoryRepository threadEditHistoryRepository;
+    private final PostRepository postRepository;
     private final ThreadTypeDefinitionRepository threadTypeDefinitionRepository;
     private final ThreadStatusDefinitionRepository threadStatusDefinitionRepository;
 
@@ -42,13 +44,16 @@ public class ForumThreadServiceImpl implements ForumThreadService {
             TransactionalOperator transactionalOperator,
             AppUserRepository appUserRepository,
             ForumCategoryRepository forumCategoryRepository,
-            ForumThreadRepository forumThreadRepository,
+            ForumThreadRepository forumThreadRepository, ThreadEditHistoryRepository threadEditHistoryRepository,
+            PostRepository postRepository,
             ThreadTypeDefinitionRepository threadTypeDefinitionRepository,
             ThreadStatusDefinitionRepository threadStatusDefinitionRepository) {
         this.transactionalOperator = transactionalOperator;
         this.appUserRepository = appUserRepository;
         this.forumCategoryRepository = forumCategoryRepository;
         this.forumThreadRepository = forumThreadRepository;
+        this.threadEditHistoryRepository = threadEditHistoryRepository;
+        this.postRepository = postRepository;
         this.threadTypeDefinitionRepository = threadTypeDefinitionRepository;
         this.threadStatusDefinitionRepository = threadStatusDefinitionRepository;
     }
@@ -128,6 +133,16 @@ public class ForumThreadServiceImpl implements ForumThreadService {
             ViewerContext viewerContext
     ) {
 
+        UUID currentUserId = UUID.fromString(viewerContext.getUserId());
+
+        if((isDeleted != null && isDeleted)){
+            boolean canViewAllDeleted = ModerationAction.VIEW_DELETED_THREADS.isAllowedFor(viewerContext);
+            // Silent: force filter to current user without error
+            if(!canViewAllDeleted) {
+                creatorId = currentUserId;
+            }
+        }
+
         if(page < 0 || size <= 0){
             log.error("Invalid pagination parameters: page={}, size={}", page, size);
             throw new InvalidPaginationException();
@@ -179,6 +194,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
 
     @Override
     public Mono<ThreadResponse> updateOwnThread(UUID threadId, UpdateOwnThreadRequest request, ViewerContext viewerContext){
+        UUID creatorId = UUID.fromString(viewerContext.getUserId());
         return performUserAction(
                 threadId,
                 viewerContext,
@@ -186,7 +202,20 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                 thread -> {
                     boolean updated = false;
 
-                    // Creator can update these
+                    // Save edit history BEFORE changes
+                    ThreadEditHistoryEntity history = ThreadEditHistoryEntity.builder()
+                            .threadId(threadId)
+                            .previousTitle(thread.getTitle())
+                            .previousTags(thread.getTags())
+                            .previousContentWarningType(thread.getContentWarningType())
+                            .previousContentWarningCustomText(thread.getContentWarningCustomText())
+                            .editedBy(creatorId)
+                            .editReasonType(request.getEditReason())
+                            .editReasonCustomText(request.getEditReasonCustomText())
+                            .isModeratorEdit(false)
+                            .build();
+
+                    // Apply updates
                     if(request.getTitle() != null && !request.getTitle().equals(thread.getTitle())){
                         thread.setTitle(request.getTitle());
                         updated = true;
@@ -210,7 +239,9 @@ public class ForumThreadServiceImpl implements ForumThreadService {
 
                     if(updated){
                         thread.setUpdatedAt(Instant.now());
-                        return forumThreadRepository.save(thread).flatMap(this::mapToResponse);
+                        return threadEditHistoryRepository.save(history)
+                                        .then(forumThreadRepository.save(thread))
+                                .flatMap(this::mapToResponse);
                     }
                     return Mono.just(thread).flatMap(this::mapToResponse);
                 },
@@ -250,161 +281,401 @@ public class ForumThreadServiceImpl implements ForumThreadService {
     // ==================== MODERATOR ACTIONS ====================
 
     @Override
-    public Mono<ThreadResponse> updateThreadStatus(UUID threadId, UpdateThreadStatusRequest request, ViewerContext viewerContext){
-        // TODO: Store lockReason somewhere if needed (e.g., in thread_settings JSONB) later on will factor in where lockReason fits
-        return performModeratorAction(
-            threadId,
-            viewerContext,
-            "update thread status",
-            thread -> {
-                thread.setThreadStatus(request.toThreadStatus());
-                thread.setUpdatedAt(Instant.now());
-                return forumThreadRepository.save(thread).flatMap(this::mapToResponse);
-            },
-            thread -> !(request.toThreadStatus() == ThreadStatus.RESOLVED && thread.getThreadType() != ThreadType.QUESTION),
-            "Only QUESTION threads can be marked as resolved",
-                true
-            );
+    public Mono<ThreadResponse> archiveThread(UUID threadId, ViewerContext viewerContext){
+
+        return ModerationAction.THREAD_ARCHIVED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.updateThreadStatus(threadId, ThreadStatus.ARCHIVED.name())
+                                    .then(forumThreadRepository.clearLockMetadata(threadId))
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadStatus() == ThreadStatus.ARCHIVED,
+                                        "Thread already archived",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
+    }
+
+    @Override
+    public Mono<ThreadResponse> unArchiveThread(UUID threadId, ViewerContext viewerContext){
+
+        return ModerationAction.THREAD_UNARCHIVED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.updateThreadStatus(threadId, ThreadStatus.OPEN.name())
+                                    .then(forumThreadRepository.clearLockMetadata(threadId))
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadStatus() != ThreadStatus.ARCHIVED,
+                                        "Thread is not archived",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
+    }
+
+    @Override
+    public Mono<ThreadResponse> lockThread(UUID threadId, LockThreadRequest request, ViewerContext viewerContext){
+        UUID moderatorId = UUID.fromString(viewerContext.getUserId());
+        return ModerationAction.THREAD_LOCKED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.updateThreadStatus(threadId, ThreadStatus.CLOSED.name())
+                                    .then(forumThreadRepository.updateLockReason(threadId, request.reason(), moderatorId))
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadStatus() == ThreadStatus.CLOSED,
+                                        "Thread is already locked",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
+    }
+
+    @Override
+    public Mono<ThreadResponse> unlockThread(UUID threadId, ViewerContext viewerContext){
+        return ModerationAction.THREAD_UNLOCKED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.updateThreadStatus(threadId, ThreadStatus.OPEN.name())
+                                    .then(forumThreadRepository.clearLockMetadata(threadId))
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadStatus() != ThreadStatus.CLOSED,
+                                        "Thread is not locked",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
     }
 
     @Override
     public Mono<ThreadResponse> updateThreadType(UUID threadId, UpdateThreadTypeRequest request, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "update thread type",
-                thread -> {
-                    ThreadType oldType = thread.getThreadType();
-                    ThreadType newType = request.threadType();
+        ThreadType newThreadType = request.threadType();
 
-                    // If changing from QUESTION to something else, clear resolution data
-                    if(oldType == ThreadType.QUESTION && newType != ThreadType.QUESTION){
-                        thread.setBestAnswerPostId(null);
-                        thread.setResolvedAt(null);
-                        thread.setResolvedByUserId(null);
+        return ModerationAction.THREAD_TYPE_CHANGED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            ThreadType oldThreadType = thread.getThreadType();
 
-                        // Also change status from RESOLVED to OPEN if needed
-                        if(thread.getThreadStatus() == ThreadStatus.RESOLVED){
-                            thread.setThreadStatus(ThreadStatus.OPEN);
-                        }
-                    }
+                            // If changing from QUESTION to something else, clear resolution data
+                            if(oldThreadType == ThreadType.QUESTION && newThreadType != ThreadType.QUESTION){
+                                thread.setBestAnswerPostId(null);
+                                thread.setResolvedAt(null);
+                                thread.setResolvedByUserId(null);
 
-                    // If changing TO QUESTION, no special action needed initially
-                    // (status remains whatever it was, no best answer yet)
+                                // Also change status from RESOLVED to OPEN if needed
+                                if(thread.getThreadStatus() == ThreadStatus.RESOLVED){
+                                    thread.setThreadStatus(ThreadStatus.OPEN);
+                                }
+                            }
 
-                    thread.setThreadType(request.threadType());
-                    thread.setUpdatedAt(Instant.now());
-                    return forumThreadRepository.save(thread).flatMap(this::mapToResponse);
-                },
-                null,
-                null,
-                true
-        );
+                            // If changing TO QUESTION, no special action needed initially
+                            // (status remains whatever it was, no best answer yet)
+
+                            thread.setThreadType(newThreadType);
+                            thread.setUpdatedAt(Instant.now());
+                            return forumThreadRepository.save(thread).flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadType() == newThreadType,
+                                        "Thread already has this type",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
     }
 
     @Override
     public Mono<ThreadResponse> toggleSticky(UUID threadId, boolean sticky, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "update thread sticky",
-                thread -> {
-                    thread.setIsSticky(sticky);
-                    thread.setUpdatedAt(Instant.now());
-                    return forumThreadRepository.save(thread).flatMap(this::mapToResponse);
-                },
-                null,
-                null,
-                true
-        );
+        return ModerationAction.THREAD_STICKY_TOGGLED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.updateStickyStatus(threadId, sticky)
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                            new ValidationRule(
+                                thread -> thread.getIsSticky() == sticky,
+                                    sticky? "Thread is already sticky" : "Thread is not sticky",
+                                    ErrorCode.VALIDATION_FAILED
+                            )
+                        ),
+                        true
+                ));
     }
 
     @Override
     public Mono<ThreadResponse> toggleFeatured(UUID threadId, boolean featured, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "update thread featured",
-                thread -> {
-                    thread.setIsFeatured(featured);
-                    thread.setUpdatedAt(Instant.now());
-                    return forumThreadRepository.save(thread).flatMap(this::mapToResponse);
-                },
-                null,
-                null,
-                true
-        );
+        ModerationAction moderationAction = featured? ModerationAction.THREAD_FEATURED : ModerationAction.THREAD_UNFEATURED;
+
+        return moderationAction.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.updateFeaturedStatus(threadId, featured)
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getIsFeatured() == featured,
+                                        featured? "Thread is already featured" : "Thread is not featured",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
+    }
+
+    @Override
+    public Mono<ThreadResponse> moveThread(UUID threadId, UUID newCategoryId, ViewerContext viewerContext){
+        return ModerationAction.THREAD_MOVED.checkPermission(viewerContext)
+                .then(validateCategoryExists(newCategoryId))
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return forumThreadRepository.moveThread(threadId, newCategoryId)
+                                            .then(findThread(threadId))
+                                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getCategoryId().equals(newCategoryId),
+                                        "Thread is already in this category",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
     }
 
     @Override
     public Mono<Void> softDeleteThread(UUID threadId, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "soft delete thread",
-                thread -> {
-                    return  forumThreadRepository.softDeleteThread(threadId);
-                },
-                thread -> !thread.getIsDeleted(),
-                "Thread is already deleted",
-                true
-        );
+        return ModerationAction.THREAD_SOFT_DELETED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            return  forumThreadRepository.softDeleteThread(threadId);
+                        },
+                        List.of(
+                            new ValidationRule(
+                                    ForumThreadEntity::getIsDeleted,
+                                    "Thread is already deleted",
+                                    ErrorCode.VALIDATION_FAILED
+                            )
+                        ),
+                        true
+                ));
     }
 
     @Override
     public Mono<Void> restoreThread(UUID threadId, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "restore threads",
-                thread -> forumThreadRepository.restoreThread(threadId),
-                ForumThreadEntity::getIsDeleted,
-                "Thread is not soft deleted",
-                false
-        );
+        return ModerationAction.THREAD_RESTORED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> forumThreadRepository.restoreThread(threadId),
+                        List.of(
+                            new ValidationRule(
+                                thread -> !thread.getIsDeleted(),
+                                "Thread is not soft deleted",
+                                ErrorCode.VALIDATION_FAILED
+                            )
+                        ),
+                        false
+                ));
     }
 
     @Override
-    public Mono<Void> setBestAnswer(UUID threadId, UUID postId, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "set best answer",
-                thread -> {
-                    // Though I think in future it might be best to get resolved at from somewhere else
-                    return forumThreadRepository.setBestAnswer(postId, threadId, UUID.fromString(viewerContext.getUserId()));
-                },
-                thread -> thread.getThreadType() == ThreadType.QUESTION,
-                "Only QUESTION threads can have a best answer",
-                true
-        );
+    public Mono<ThreadResponse> setBestAnswer(UUID threadId, UUID postId, ViewerContext viewerContext) {
+        UUID moderatorId = UUID.fromString(viewerContext.getUserId());
+        return ModerationAction.THREAD_BEST_ANSWER_SET.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+                            // Though I think in future it might be best to get resolved at from somewhere else
+                            return forumThreadRepository.setBestAnswer(postId, threadId, moderatorId)
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadType() != ThreadType.QUESTION,
+                                        "Only QUESTION threads can have a best answer",
+                                        ErrorCode.VALIDATION_FAILED
+                                ),
+                                new ValidationRule(
+                                        thread -> thread.getBestAnswerPostId() != null,
+                                        "Thread already has a best answer. Clear it first",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
     }
 
     @Override
-    public Mono<Void> clearBestAnswer(UUID threadId, ViewerContext viewerContext) {
-        return performModeratorAction(
-                threadId,
-                viewerContext,
-                "clear best answer",
-                thread -> {
-                    return forumThreadRepository.clearBestAnswer(threadId);
-                },
-                thread -> thread.getThreadType() == ThreadType.QUESTION,
-                "Only QUESTION threads can have a best answer",
-                true
-        );
+    public Mono<ThreadResponse> clearBestAnswer(UUID threadId, ViewerContext viewerContext) {
+        return ModerationAction.THREAD_BEST_ANSWER_CLEARED.checkPermission(viewerContext)
+                .then(performModeratorAction(
+                        threadId,
+                        thread -> {
+                            return forumThreadRepository.clearBestAnswer(threadId)
+                                    .then(findThread(threadId))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        thread -> thread.getThreadType() != ThreadType.QUESTION,
+                                        "Only QUESTION threads can have a best answer",
+                                        ErrorCode.VALIDATION_FAILED
+                                ),
+                                new ValidationRule(
+                                        thread -> thread.getBestAnswerPostId() == null,
+                                        "Thread does not have a best answer to clear",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
     }
+
+    @Override
+    public Mono<ThreadResponse> addThreadContentWarning(UUID threadId, AddContentWarningRequest request, ViewerContext viewerContext){
+        UUID moderatorId = UUID.fromString(viewerContext.getUserId());
+
+        return ModerationAction.THREAD_CONTENT_WARNING_ADDED.checkPermission(viewerContext)
+                .then(performModeratorAction(threadId,
+                        thread -> {
+
+                            // Save edit history BEFORE changes
+                            ThreadEditHistoryEntity history = ThreadEditHistoryEntity.builder()
+                                    .threadId(threadId)
+                                    .previousTitle(thread.getTitle())
+                                    .previousTags(thread.getTags())
+                                    .previousContentWarningType(thread.getContentWarningType())
+                                    .previousContentWarningCustomText(thread.getContentWarningCustomText())
+                                    .editedBy(moderatorId)
+                                    .editReasonType(EditReason.CONTENT_WARNING_ADDED)
+                                    .isModeratorEdit(true)
+                                    .build();
+
+                            // Apply updates
+                            thread.setContentWarningType(request.contentWarningType());
+                            thread.setContentWarningCustomText(request.contentWarningCustomText());
+                            thread.setUpdatedAt(Instant.now());
+                            return threadEditHistoryRepository.save(history)
+                                    .then(forumThreadRepository.save(thread))
+                                    .flatMap(this::mapToResponse);
+                        },
+                        List.of(
+                            new ValidationRule(
+                                thread -> thread.getContentWarningType() == request.contentWarningType() &&
+                                        Objects.equals(thread.getContentWarningCustomText(), request.contentWarningCustomText()),
+                                "Thread already has this content warning",
+                                ErrorCode.VALIDATION_FAILED
+                            )
+                        ),
+                        true
+                ));
+    }
+
+    @Override
+    public Mono<ThreadResponse> mergeThreads(MergeThreadRequest request, ViewerContext viewerContext){
+        UUID sourceThreadId = request.sourceThreadId();
+        UUID destinationThreadId = request.destinationThreadId();
+        return ModerationAction.THREAD_MERGED.checkPermission(viewerContext)
+                .then(validateThreadsExist(sourceThreadId, destinationThreadId))
+                .then(validateThreadsNotIdentical(sourceThreadId, destinationThreadId))
+                .then(validateThreadsNotDeleted(sourceThreadId, destinationThreadId))
+                .then(Mono.zip(findThread(sourceThreadId), findThread(destinationThreadId)))
+                .flatMap(tuple -> {
+
+                    ForumThreadEntity sourceThread = tuple.getT1();
+                    ForumThreadEntity destinationThread = tuple.getT2();
+
+                    int sourcePostCount = sourceThread.getPostCount();
+
+                    return postRepository.moveAllPostsToThread(sourceThreadId, destinationThreadId)
+                            .then(forumThreadRepository.incrementPostCount(destinationThreadId, sourcePostCount))
+                            .then(forumThreadRepository.updateLastActivity(destinationThreadId))
+                            .then(forumThreadRepository.softDeleteThread(sourceThreadId))
+                            .then(mapToResponse(destinationThread));
+                })
+                .as(transactionalOperator::transactional);
+    }
+
+    @Override
+    public Mono<ThreadResponse> splitThread(UUID sourceThreadId, SplitThreadRequest request, ViewerContext viewerContext){
+        return ModerationAction.THREAD_SPLIT.checkPermission(viewerContext)
+                .then(validatePostsExist(request.postIds()))
+                .then(validatePostsBelongToThread(request.postIds(), sourceThreadId))
+                .then(performModeratorAction(sourceThreadId,
+                        sourceThread -> {
+                            // Create new thread
+                            ForumThreadEntity newThread = ForumThreadEntity.builder()
+                                    .title(request.newThreadTitle())
+                                    .creatorId(sourceThread.getCreatorId())
+                                    .categoryId(sourceThread.getCategoryId())
+                                    .threadType(sourceThread.getThreadType())
+                                    .threadStatus(ThreadStatus.OPEN)
+                                    .viewCount(0)
+                                    .lastActivityAt(Instant.now())
+                                    .build();
+
+                            return forumThreadRepository.save(newThread)
+                                    .flatMap(savedThread ->
+                                            // Move posts to new thread
+                                            postRepository.movePostsToThread(request.postIds(), savedThread.getId())
+                                                    .then(forumThreadRepository.recalculatePostCount(savedThread.getId()))
+                                                    .then(forumThreadRepository.decrementPostCount(sourceThreadId, request.postIds().size()))
+                                                    .then(findThread(savedThread.getId()))
+                                                    .flatMap(this::mapToResponse)
+                                    );
+
+                        },
+                        List.of(
+                                new ValidationRule(
+                                        ForumThreadEntity::getIsDeleted,
+                                        "Cannot split from a deleted thread",
+                                        ErrorCode.VALIDATION_FAILED
+                                ),
+                                new ValidationRule(
+                                        thread -> request.postIds() == null || request.postIds().isEmpty(),
+                                        "At least one post must be selected to split",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
+                        ),
+                        true
+                ));
+    }
+
+    // ==================== ADMIN ACTIONS ====================
 
     @Override
     public Mono<Void> permanentlyDeleteThread(UUID threadId, ViewerContext viewerContext) {
-        // Only Admin can hard delete
-        if (!viewerContext.isAdmin()) {
-            return Mono.error(new ApiException("Only admins can permanently delete threads", ErrorCode.FORBIDDEN));
-        }
-        return findThread(threadId)
+        return ModerationAction.THREAD_PERMANENTLY_DELETED.checkPermission(viewerContext)
+                .then(findThread(threadId))
                 .flatMap(thread -> {
-                    // TODO: Also need to delete all posts? Posts have ON DELETE CASCADE
-                    return forumThreadRepository.delete(thread);
+                    return threadEditHistoryRepository.deleteByThreadId(thread.getId())
+                            .then(forumThreadRepository.delete(thread));
                 })
                 .as(transactionalOperator::transactional);
     }
@@ -451,6 +722,92 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                 )));
     }
 
+    private Mono<ForumThreadEntity> findActiveThread(UUID threadId) {
+        return findThread(threadId)
+                .flatMap(thread -> {
+                    if (thread.getIsDeleted()) {
+                        return Mono.error(new ApiException("Cannot modify a deleted thread", ErrorCode.VALIDATION_FAILED));
+                    }
+                    return Mono.just(thread);
+                });
+    }
+
+    private Mono<Void> validateCategoryExists(UUID categoryId) {
+        return forumCategoryRepository.findById(categoryId)
+                .switchIfEmpty(Mono.error(new ApiException(
+                        "Category with id '" + categoryId + "' not found",
+                        ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(category -> {
+                    if(!category.getIsActive()){
+                        return Mono.error(new ApiException(
+                                "Cannot move thread to inactive category",
+                                ErrorCode.VALIDATION_FAILED
+                        ));
+                    }
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> validateThreadsExist(UUID sourceThreadId, UUID destinationThreadId) {
+        return Mono.zip(
+                forumThreadRepository.existsById(sourceThreadId),
+                forumThreadRepository.existsById(destinationThreadId)
+        ).flatMap(tuple -> {
+            if (!tuple.getT1()) {
+                return Mono.error(new ApiException("Source thread not found", ErrorCode.RESOURCE_NOT_FOUND));
+            }
+            if (!tuple.getT2()) {
+                return Mono.error(new ApiException("Target thread not found", ErrorCode.RESOURCE_NOT_FOUND));
+            }
+            return Mono.empty();
+        });
+    }
+
+    private Mono<Object> validateThreadsNotIdentical(UUID sourceThreadId, UUID destinationThreadId) {
+        if(sourceThreadId.equals(destinationThreadId)){
+            return Mono.error(new ApiException("Cannot merge a thread with itself", ErrorCode.VALIDATION_FAILED));
+        }
+        return Mono.empty();
+    }
+
+    private Mono<Void> validateThreadsNotDeleted(UUID sourceThreadId, UUID destinationThreadId) {
+        return Mono.zip(
+                forumThreadRepository.existsByIdAndIsDeletedFalse(sourceThreadId),
+                forumThreadRepository.existsByIdAndIsDeletedFalse(destinationThreadId)
+        ).flatMap(tuple -> {
+
+            if (!tuple.getT1()) {
+                return Mono.error(new ApiException("Source thread is deleted", ErrorCode.VALIDATION_FAILED));
+            }
+            if (!tuple.getT2()) {
+                return Mono.error(new ApiException("Target thread is deleted", ErrorCode.VALIDATION_FAILED));
+            }
+            return Mono.empty();
+        });
+    }
+
+    private Mono<Void> validatePostsExist(List<UUID> postIds) {
+        return postRepository.countPostsInIds(postIds)
+                .flatMap(count -> {
+                    if(count != postIds.size()){
+                        return Mono.error(new ApiException("One or more posts not found", ErrorCode.RESOURCE_NOT_FOUND));
+                    }
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> validatePostsBelongToThread(List<UUID> postIds, UUID threadId){
+        return postRepository.countPostsInIdsAndThread(postIds, threadId)
+                .flatMap(count -> {
+                    if(count != postIds.size()){
+                        return Mono.error(new ApiException("One or more posts do not belong to the source thread", ErrorCode.VALIDATION_FAILED));
+                    }
+                    return Mono.empty();
+                });
+    }
+
+
+
     private <T> Mono<T> performUserAction(
             UUID threadId,
             ViewerContext viewerContext,
@@ -485,32 +842,27 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                 .as(transactionalOperator::transactional);
     }
 
+    private record ValidationRule(Predicate<ForumThreadEntity> condition, String errorMessage, ErrorCode errorCode){
+        public ValidationRule(Predicate<ForumThreadEntity> condition, String errorMessage){
+            this(condition, errorMessage, ErrorCode.VALIDATION_FAILED);
+        }
+    }
+
     private <T> Mono<T> performModeratorAction(
             UUID threadId,
-            ViewerContext viewerContext,
-            String actionDescription,
             Function<ForumThreadEntity, Mono<T>> action,
-            Predicate<ForumThreadEntity> validator,
-            String validationErrorMessage,
+            List<ValidationRule> validators,
             boolean requireActive
     ){
-        if(!viewerContext.isModeratorOrAdmin()){
-            return Mono.error(new ApiException("Only moderators can " + actionDescription, ErrorCode.FORBIDDEN));
-        }
-        return findThread(threadId)
-                .flatMap(thread -> {
-                    if(requireActive && thread.getIsDeleted()){
-                        return Mono.error(new ApiException(
-                                "Cannot modify a deleted thread",
-                                ErrorCode.VALIDATION_FAILED
-                        ));
-                    }
+        // No generic role check here - let each action's checkPermission handle it
+        Mono<ForumThreadEntity> threadMono = requireActive? findActiveThread(threadId) : findThread(threadId);
 
-                    if(validator != null && !validator.test(thread)){
-                        return Mono.error(new ApiException(
-                               validationErrorMessage,
-                                ErrorCode.VALIDATION_FAILED
-                        ));
+        return threadMono
+                .flatMap(thread -> {
+                    for(ValidationRule rule : validators){
+                        if(rule.condition().test(thread)){
+                            return Mono.error(new ApiException(rule.errorMessage, rule.errorCode));
+                        }
                     }
 
                    return action.apply(thread);
@@ -541,6 +893,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                     .threadType(thread.getThreadType())
                     .threadStatus(thread.getThreadStatus())
                     .contentWarningType(thread.getContentWarningType())
+                    .contentWarningCustomText(thread.getContentWarningCustomText())
                     .tags(thread.getTags())
                     .isSticky(thread.getIsSticky())
                     .isFeatured(thread.getIsFeatured())
@@ -548,6 +901,17 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                     .viewCount(thread.getViewCount())
                     .bestAnswerPostId(thread.getBestAnswerPostId())
                     .resolvedAt(thread.getResolvedAt())
+                    .resolvedByUserId(thread.getResolvedByUserId())
+
+                    // lock metadata
+                    .lockReason(thread.getLockReason())
+                    .lockedBy(thread.getLockedBy())
+                    .lockedAt(thread.getLockedAt())
+
+                    // Edit metadata
+                    .lastEditedAt(thread.getUpdatedAt())
+
+                    // Timestamps
                     .createdAt(thread.getCreatedAt())
                     .updatedAt(thread.getUpdatedAt())
                     .lastActivityAt(thread.getLastActivityAt())

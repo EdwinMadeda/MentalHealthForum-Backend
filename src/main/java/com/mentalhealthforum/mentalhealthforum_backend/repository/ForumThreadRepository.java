@@ -128,6 +128,7 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
 
     // ==================== VIEW COUNT ====================
 
+
     @Query("UPDATE forum_threads SET view_count = view_count + 1 WHERE id = :threadId")
     Mono<Void> incrementViewCount(@Param("threadId") UUID threadId);
 
@@ -170,4 +171,43 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
 
     // ==================== EXISTENCE CHECKS ====================
     Mono<Boolean> existsByIdAndIsDeletedFalse(UUID id);
+
+    // ==================== THREAD ACTIONS ====================
+
+    @Query("UPDATE forum_threads SET thread_status = :status::thread_status_enum, updated_at = NOW() WHERE id = :threadId")
+    Mono<Void> updateThreadStatus(@Param("threadId") UUID threadId,@Param("status") String status);
+
+    @Query("UPDATE forum_threads SET lock_reason = NULL, locked_by = NULL, locked_at = NULL WHERE id = :threadId")
+    Mono<Void> clearLockMetadata(@Param("threadId") UUID threadId);
+
+    @Query("UPDATE forum_threads SET lock_reason = :lockReason, locked_by = :moderatorId, locked_at = NOW() WHERE id = :threadId")
+    Mono<Void> updateLockReason(@Param("threadId") UUID threadId,@Param("lockReason") String lockReason, @Param("moderatorId") UUID moderatorId);
+
+    @Query("UPDATE forum_threads SET is_sticky = :sticky, updated_at = NOW() WHERE id = :threadId")
+    Mono<Void> updateStickyStatus(@Param("threadId") UUID threadId,@Param("sticky") boolean sticky);
+
+    @Query("UPDATE forum_threads SET is_featured = :featured, updated_at = NOW() WHERE id = :threadId")
+    Mono<Void> updateFeaturedStatus(@Param("threadId") UUID threadId, @Param("featured") boolean featured);
+
+    @Query("UPDATE forum_threads SET category_id = :categoryId, updated_at = NOW() WHERE id = :threadId")
+    Mono<Void> moveThread(@Param("threadId") UUID threadId,@Param("categoryId") UUID categoryId);
+
+    // ==================== POST COUNT OPERATIONS ====================
+
+    // For batch operations (merge, split)
+    @Query("UPDATE forum_threads SET post_count = post_count + :increment WHERE id = :threadId")
+    Mono<Void> incrementPostCount(@Param("threadId") UUID threadId, @Param("increment") int increment);
+
+
+    @Query("UPDATE forum_threads SET post_count = post_count - :decrement WHERE id = :threadId")
+    Mono<Void> decrementPostCount(@Param("threadId") UUID threadId, @Param("decrement") int decrement);
+
+    // Recalculate from scratch (when counts get out of sync)
+    @Query("UPDATE forum_threads SET post_count = (SELECT COUNT(*) FROM forum_posts WHERE thread_id = :threadId AND is_deleted = false) WHERE id = :threadId")
+    Mono<Void> recalculatePostCount(@Param("threadId") UUID id);
+
+    @Query("UPDATE forum_threads SET last_activity_at = NOW() WHERE id = :threadId")
+    Mono<Void> updateLastActivity(@Param("threadId") UUID threadId);
+
+
 }

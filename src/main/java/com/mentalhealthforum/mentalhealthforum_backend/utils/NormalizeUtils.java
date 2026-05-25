@@ -35,11 +35,13 @@ public class NormalizeUtils {
         if(tags == null || tags.isEmpty()) {
             return List.of();
         }
-        return tags.stream()
+        List<String> normalized = tags.stream()
                 .map(NormalizeUtils::normalizeTag)
                 .filter(tag -> !tag.isEmpty())
                 .distinct()
                 .collect(Collectors.toList());
+
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private static String normalizeTag(String tag){

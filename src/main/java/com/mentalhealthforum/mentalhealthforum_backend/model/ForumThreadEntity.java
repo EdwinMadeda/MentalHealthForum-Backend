@@ -49,6 +49,15 @@ public class ForumThreadEntity {
     @Column("thread_status")
     private ThreadStatus threadStatus;
 
+    @Column("lock_reason")
+    private String lockReason;
+
+    @Column("locked_by")
+    private UUID lockedBy;
+
+    @Column("locked_at")
+    private Instant lockedAt;
+
     @Column("resolved_at")
     private Instant resolvedAt;
 

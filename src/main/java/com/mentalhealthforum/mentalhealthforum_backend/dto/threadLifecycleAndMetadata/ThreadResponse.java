@@ -45,11 +45,17 @@ public class ThreadResponse {
     private Instant resolvedAt;
     private UUID resolvedByUserId;
 
+    // Lock metadata
+    private String lockReason;
+    private UUID lockedBy;
+    private Instant lockedAt;
+
+    // Edit metadata
+    private Instant lastEditedAt;
+
+    // Timestamps
     private Instant createdAt;
     private Instant updatedAt;
     private Instant lastActivityAt;
-
-
-
 
 }
