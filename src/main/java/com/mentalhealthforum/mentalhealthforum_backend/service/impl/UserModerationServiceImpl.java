@@ -11,6 +11,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.model.UserRestrictionEnti
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserWarningEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
+import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -196,6 +197,22 @@ public class UserModerationServiceImpl implements UserModerationService {
                 .flatMap(this::mapToRestrictionResponse);
     }
 
+    @Override
+    public Mono<Void> requireNotMuted(UUID userId, String actionDescription){
+        // Reuse existing repository method directly (skip permission checks)
+        return userRestrictionRepository.findActiveRestrictionByType(userId, RestrictionType.MUTE)
+                .flatMap(restriction -> {
+                    String message = String.format(
+                            "You are muted and cannot %s. Mute expires: %s. Reason: %s",
+                            actionDescription,
+                            DateTimeUtils.toHumanReadable(restriction.getExpiresAt(), "indefinitely"),
+                            restriction.getReason()
+                    );
+                    return Mono.error(new ApiException(message, ErrorCode.FORBIDDEN));
+                })
+                .switchIfEmpty(Mono.empty()).then();
+    }
+
     // ==================== SUSPENSIONS ====================
 
     @Override
@@ -259,6 +276,7 @@ public class UserModerationServiceImpl implements UserModerationService {
         return findActiveRestriction(userId, RestrictionType.SUSPENSION)
                 .flatMap(this::mapToRestrictionResponse);
     }
+
 
     // ==================== BANS ====================
 

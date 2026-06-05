@@ -10,6 +10,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPa
 import com.mentalhealthforum.mentalhealthforum_backend.model.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.ForumThreadService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
     private final PostRepository postRepository;
     private final ThreadTypeDefinitionRepository threadTypeDefinitionRepository;
     private final ThreadStatusDefinitionRepository threadStatusDefinitionRepository;
+    private final UserModerationService userModerationService;
 
     public ForumThreadServiceImpl(
             TransactionalOperator transactionalOperator,
@@ -47,7 +49,8 @@ public class ForumThreadServiceImpl implements ForumThreadService {
             ForumThreadRepository forumThreadRepository, ThreadEditHistoryRepository threadEditHistoryRepository,
             PostRepository postRepository,
             ThreadTypeDefinitionRepository threadTypeDefinitionRepository,
-            ThreadStatusDefinitionRepository threadStatusDefinitionRepository) {
+            ThreadStatusDefinitionRepository threadStatusDefinitionRepository,
+            UserModerationService userModerationService) {
         this.transactionalOperator = transactionalOperator;
         this.appUserRepository = appUserRepository;
         this.forumCategoryRepository = forumCategoryRepository;
@@ -56,6 +59,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
         this.postRepository = postRepository;
         this.threadTypeDefinitionRepository = threadTypeDefinitionRepository;
         this.threadStatusDefinitionRepository = threadStatusDefinitionRepository;
+        this.userModerationService = userModerationService;
     }
 
     // ==================== USER ACTIONS ====================
@@ -65,45 +69,18 @@ public class ForumThreadServiceImpl implements ForumThreadService {
         String userId = viewerContext.getUserId();
         List<String> normalizedTags = NormalizeUtils.normalizeTags(request.getTags());
 
-        // 1. Validate user exists
+
         return appUserRepository.findAppUserByKeycloakId(userId)
-                .switchIfEmpty(Mono.error(new ApiException(
-                        "User not found",
-                        ErrorCode.RESOURCE_NOT_FOUND
-                )))
-                // 2. Validate category exists and is active
-                .flatMap(user -> forumCategoryRepository.findById(request.getCategoryId())
-                        .switchIfEmpty(Mono.error(new ApiException(
-                                "Category not found",
-                                ErrorCode.RESOURCE_NOT_FOUND
-                        )))
-                        .flatMap(category -> {
-                            if(!category.getIsActive()){
-                                return Mono.error(new ApiException(
-                                        "Cannot create thread in inactive category",
-                                        ErrorCode.VALIDATION_FAILED
-                                ));
-                            }
-
-                            // 3. Create thread entity
-                            ForumThreadEntity thread = ForumThreadEntity.builder()
-                                    .title(request.getTitle())
-                                    .creatorId(UUID.fromString(userId))
-                                    .categoryId(request.getCategoryId())
-                                    .threadType(request.getThreadType())
-                                    .threadStatus(ThreadStatus.OPEN)
-                                    .contentWarningType(request.getContentWarningType())
-                                    .contentWarningCustomText(request.getContentWarningCustomText())
-                                    .tags(normalizedTags)
-                                    .viewCount(0)
-                                    .lastActivityAt(Instant.now())
-                                    .build();
-
-                            return forumThreadRepository.save(thread);
-                        }))
+                .switchIfEmpty(Mono.error(new ApiException("User not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(appUser -> userModerationService.requireNotMuted(appUser.getKeycloakId(), "create threads")
+                        .then(validateCategoryActive(request.getCategoryId())))
+                .flatMap(category -> createAndSaveThread(request, userId, normalizedTags))
                 .flatMap(this::mapToResponse)
                 .as(transactionalOperator::transactional);
     }
+
+
+
 
     @Override
     public Mono<ThreadResponse> getThread(UUID threadId, ViewerContext viewerContext){
@@ -714,6 +691,8 @@ public class ForumThreadServiceImpl implements ForumThreadService {
         };
     }
 
+
+
     private Mono<ForumThreadEntity> findThread(UUID threadId){
         return forumThreadRepository.findById(threadId)
                 .switchIfEmpty(Mono.error(new ApiException(
@@ -804,6 +783,42 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                     }
                     return Mono.empty();
                 });
+    }
+
+    private Mono<ForumCategoryEntity> validateCategoryActive(UUID categoryId){
+        return  forumCategoryRepository.findById(categoryId)
+                .switchIfEmpty(Mono.error(new ApiException(
+                        "Category not found",
+                        ErrorCode.RESOURCE_NOT_FOUND
+                )))
+                .flatMap(category -> {
+                    if (!category.getIsActive()) {
+                        return Mono.error(new ApiException(
+                                "Cannot create thread in inactive category",
+                                ErrorCode.VALIDATION_FAILED
+                        ));
+                    }
+                    return Mono.just(category);
+                });
+    }
+
+
+    private Mono<ForumThreadEntity> createAndSaveThread(CreateThreadRequest request, String userId, List<String> normalizedTags) {
+        // 3. Create thread entity
+        ForumThreadEntity thread = ForumThreadEntity.builder()
+                .title(request.getTitle())
+                .creatorId(UUID.fromString(userId))
+                .categoryId(request.getCategoryId())
+                .threadType(request.getThreadType())
+                .threadStatus(ThreadStatus.OPEN)
+                .contentWarningType(request.getContentWarningType())
+                .contentWarningCustomText(request.getContentWarningCustomText())
+                .tags(normalizedTags)
+                .viewCount(0)
+                .lastActivityAt(Instant.now())
+                .build();
+
+        return forumThreadRepository.save(thread);
     }
 
 

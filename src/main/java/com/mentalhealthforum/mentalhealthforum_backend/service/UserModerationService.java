@@ -31,6 +31,8 @@ public interface UserModerationService {
 
     Mono<UserRestrictionResponse> getActiveMuteForUser(UUID userId, ViewerContext viewerContext);
 
+    Mono<Void> requireNotMuted(UUID userId, String actionDescription);
+
     Mono<UserRestrictionResponse> suspendUser(UUID userId, SuspendUserRequest request, ViewerContext viewerContext);
 
     Mono<Void> unsuspendUser(UUID userId, UnSuspendRequest reason, ViewerContext viewerContext);

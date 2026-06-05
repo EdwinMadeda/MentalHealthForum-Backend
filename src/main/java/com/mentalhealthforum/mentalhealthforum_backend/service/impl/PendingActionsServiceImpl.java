@@ -32,4 +32,12 @@ public class PendingActionsServiceImpl implements PendingActionsService {
                         ActionDescriptions.describe(actions)
                 ));
     }
+
+    @Override
+    public Mono<Boolean> hasPendingActions(String identifier){
+        return getPendingActions(identifier)
+                .map(response -> !response.requiredActions().isEmpty())
+                .defaultIfEmpty(false);
+
+    }
 }

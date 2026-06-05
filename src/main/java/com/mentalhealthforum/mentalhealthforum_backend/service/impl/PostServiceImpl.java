@@ -6,6 +6,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAnd
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
+import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ForumThreadEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.PostEditHistoryEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.PostEntity;
@@ -15,6 +16,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.PostEditHistor
 import com.mentalhealthforum.mentalhealthforum_backend.repository.PostRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AnonymousNameGenerator;
 import com.mentalhealthforum.mentalhealthforum_backend.service.PostService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,7 @@ public class PostServiceImpl implements PostService {
     private final AppUserRepository appUserRepository;
     private final PostEditHistoryRepository postEditHistoryRepository;
     private final AnonymousNameGenerator anonymousNameGenerator;
+    private final UserModerationService userModerationService;
 
     public PostServiceImpl(
             TransactionalOperator transactionalOperator,
@@ -47,13 +50,15 @@ public class PostServiceImpl implements PostService {
             ForumThreadRepository forumThreadRepository,
             AppUserRepository appUserRepository,
             PostEditHistoryRepository postEditHistoryRepository,
-            AnonymousNameGenerator anonymousNameGenerator) {
+            AnonymousNameGenerator anonymousNameGenerator,
+            UserModerationService userModerationService) {
         this.transactionalOperator = transactionalOperator;
         this.postRepository = postRepository;
         this.forumThreadRepository = forumThreadRepository;
         this.appUserRepository = appUserRepository;
         this.postEditHistoryRepository = postEditHistoryRepository;
         this.anonymousNameGenerator = anonymousNameGenerator;
+        this.userModerationService = userModerationService;
     }
 
     // ==================== USER ACTIONS ====================
@@ -64,7 +69,8 @@ public class PostServiceImpl implements PostService {
 
         return appUserRepository.findAppUserByKeycloakId(userId)
                 .switchIfEmpty(Mono.error(new ApiException("User not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(user -> findActiveThread(request.getThreadId()))
+                .flatMap(appUser -> userModerationService.requireNotMuted(appUser.getKeycloakId(), "create posts")
+                        .then(findActiveThread(request.getThreadId())))
                 .flatMap(thread -> validateParentPost(thread, request.getParentPostId()))
                 .flatMap(thread -> createAndSavePost(request, userId, thread.getId()))
                 .flatMap(this::mapToResponse)

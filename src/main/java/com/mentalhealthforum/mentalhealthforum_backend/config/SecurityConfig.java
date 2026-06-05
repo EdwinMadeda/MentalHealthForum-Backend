@@ -30,17 +30,17 @@ public class SecurityConfig {
 
     private final String principalClaimName;
     private final SecurityExceptionHandler securityExceptionHandler;  // SecurityExceptionHandler implements ServerAuthenticationEntryPoint/ServerAccessDeniedHandler
-    private final OnboardingAuthorizationManager onboardingAuthorizationManager;
+    private final AccessAuthorizationManager accessAuthorizationManager;
 
     public SecurityConfig(
             JwtProperties jwtProperties,
             SecurityExceptionHandler securityExceptionHandler,
             CookieToJwtConverter cookieToJwtConverter,
-            OnboardingAuthorizationManager onboardingAuthorizationManager
+            AccessAuthorizationManager accessAuthorizationManager
     ){
         this.principalClaimName = jwtProperties.getPrincipalClaimName();
         this.securityExceptionHandler = securityExceptionHandler;
-        this.onboardingAuthorizationManager = onboardingAuthorizationManager;
+        this.accessAuthorizationManager = accessAuthorizationManager;
     }
 
     private static final String[] AUTH_WHITELIST = {
@@ -84,7 +84,7 @@ public class SecurityConfig {
                 .authorizeExchange(auth -> auth
                         .pathMatchers(AUTH_WHITELIST).permitAll() // Allow unauthenticated access to whitelist
 //                        .anyExchange().authenticated() // Require authentication for all other requests
-                                .anyExchange().access(onboardingAuthorizationManager)
+                                .anyExchange().access(accessAuthorizationManager)
                 )
                 // Use the combined handler for both 401 and 403
                 .exceptionHandling(handling -> handling

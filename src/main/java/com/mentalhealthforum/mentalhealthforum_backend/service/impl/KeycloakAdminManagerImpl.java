@@ -430,10 +430,10 @@ public class KeycloakAdminManagerImpl implements KeycloakAdminManager {
     }
 
     @Override
-    public Optional<List<String>> getRequiredActions(String indentifier) {
-        if(indentifier == null || indentifier.isBlank()) return Optional.empty();
+    public Optional<List<String>> getRequiredActions(String identifier) {
+        if(identifier == null || identifier.isBlank()) return Optional.empty();
 
-        Optional<UserRepresentation> user = findUserByIdentifier(indentifier);
+        Optional<UserRepresentation> user = findUserByIdentifier(identifier);
         if(user.isEmpty()) return Optional.empty();
 
         List<String> actions = user.get().getRequiredActions();

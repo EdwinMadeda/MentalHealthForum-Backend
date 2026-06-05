@@ -5,4 +5,6 @@ import reactor.core.publisher.Mono;
 
 public interface PendingActionsService {
     Mono<PendingActionsResponse> getPendingActions(String username);
+
+    Mono<Boolean> hasPendingActions(String identifier);
 }

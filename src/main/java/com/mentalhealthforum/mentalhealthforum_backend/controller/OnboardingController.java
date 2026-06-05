@@ -28,7 +28,6 @@ public class OnboardingController {
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
     public OnboardingController(
-            PendingActionsService pendingActionsService,
             OnboardingService onboardingService,
             UserService userService,
             AppUserService appUserService,

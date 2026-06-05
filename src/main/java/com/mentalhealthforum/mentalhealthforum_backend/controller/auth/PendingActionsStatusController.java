@@ -12,25 +12,17 @@ import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("api/auth/status")
-public class AuthStatusController {
+public class PendingActionsStatusController {
 
     private final PendingActionsService pendingActionsService;
-    private final OnboardingService onboardingService;
-    private final UserService userService;
-    private final AppUserService appUserService;
-    private final JwtClaimsExtractor jwtClaimsExtractor;
 
-    public AuthStatusController(
+    public PendingActionsStatusController(
             PendingActionsService pendingActionsService,
             OnboardingService onboardingService,
             UserService userService,
             AppUserService appUserService,
             JwtClaimsExtractor jwtClaimsExtractor) {
         this.pendingActionsService = pendingActionsService;
-        this.onboardingService = onboardingService;
-        this.userService = userService;
-        this.appUserService = appUserService;
-        this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
 
     @GetMapping("/pending-actions")
