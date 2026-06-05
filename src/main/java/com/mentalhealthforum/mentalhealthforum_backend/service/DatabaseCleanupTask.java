@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
+import com.mentalhealthforum.mentalhealthforum_backend.repository.ForumThreadRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.OtpCredentialRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.PendingUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
@@ -20,16 +21,19 @@ public class DatabaseCleanupTask {
     private final VerificationTokenRepository verificationTokenRepository;
     private final PendingUserRepository pendingUserRepository;
     private final ForumCategoryService forumCategoryService;
+    private final ForumThreadRepository forumThreadRepository;
 
     public DatabaseCleanupTask(
             OtpCredentialRepository otpCredentialRepository,
             VerificationTokenRepository verificationTokenRepository,
             PendingUserRepository pendingUserRepository,
-            ForumCategoryService forumCategoryService) {
+            ForumCategoryService forumCategoryService,
+            ForumThreadRepository forumThreadRepository) {
         this.otpCredentialRepository = otpCredentialRepository;
         this.verificationTokenRepository = verificationTokenRepository;
         this.pendingUserRepository = pendingUserRepository;
         this.forumCategoryService = forumCategoryService;
+        this.forumThreadRepository = forumThreadRepository;
     }
 
     // Runs at 3:00 AM every day
@@ -79,6 +83,15 @@ public class DatabaseCleanupTask {
                 .subscribe(
                         v -> log.info("Scheduled purge completed"),
                         e -> log.error("Scheduled purge failed: {}", e.getMessage())
+                );
+    }
+
+    // Runs Every minute
+    @Scheduled(cron = "0 * * * * *")
+    public void unlockExpiredThreads(){
+        forumThreadRepository.unlockExpiredThreads()
+                .subscribe(
+                        count -> log.info("Unlock {} expired threads", count)
                 );
     }
 }

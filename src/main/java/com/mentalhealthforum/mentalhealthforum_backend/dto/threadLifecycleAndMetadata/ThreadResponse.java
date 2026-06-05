@@ -49,6 +49,7 @@ public class ThreadResponse {
     private String lockReason;
     private UUID lockedBy;
     private Instant lockedAt;
+    private Instant lockExpiresAt;
 
     // Edit metadata
     private Instant lastEditedAt;

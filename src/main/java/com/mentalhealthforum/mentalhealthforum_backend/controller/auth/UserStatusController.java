@@ -29,6 +29,10 @@ public class UserStatusController {
         this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
 
+    /**
+     * @deprecated Use SecurityExceptionHandler for user-friendly 403 messages instead.
+     * Kept for backward compatibility. Will be removed in a future version.
+     */
     @GetMapping
     public Mono<ResponseEntity<StandardSuccessResponse<UserStatusResponse>>> getUserStatus(
             @AuthenticationPrincipal Jwt jwt

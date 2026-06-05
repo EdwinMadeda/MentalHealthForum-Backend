@@ -20,6 +20,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -307,8 +308,13 @@ public class ForumThreadServiceImpl implements ForumThreadService {
         return ModerationAction.THREAD_LOCKED.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
                         thread -> {
+                            Instant lockExpiry = request.durationHours() != null
+                                    ? Instant.now().plus(request.durationHours(), ChronoUnit.HOURS)
+                                    : null;
+
                             return forumThreadRepository.updateThreadStatus(threadId, ThreadStatus.CLOSED.name())
                                     .then(forumThreadRepository.updateLockReason(threadId, request.reason(), moderatorId))
+                                    .then(forumThreadRepository.updateLockExpiry(threadId, lockExpiry))
                                     .then(findThread(threadId))
                                     .flatMap(this::mapToResponse);
 
@@ -922,6 +928,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                     .lockReason(thread.getLockReason())
                     .lockedBy(thread.getLockedBy())
                     .lockedAt(thread.getLockedAt())
+                    .lockExpiresAt(thread.getLockExpiresAt())
 
                     // Edit metadata
                     .lastEditedAt(thread.getUpdatedAt())

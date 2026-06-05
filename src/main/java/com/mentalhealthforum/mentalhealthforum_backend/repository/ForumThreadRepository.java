@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Repository
@@ -180,11 +181,23 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
     @Query("UPDATE forum_threads SET thread_status = :status::thread_status_enum, updated_at = NOW() WHERE id = :threadId")
     Mono<Void> updateThreadStatus(@Param("threadId") UUID threadId,@Param("status") String status);
 
-    @Query("UPDATE forum_threads SET lock_reason = NULL, locked_by = NULL, locked_at = NULL WHERE id = :threadId")
+    @Query("UPDATE forum_threads SET lock_reason = NULL, locked_by = NULL, locked_at = NULL, lock_expires_at = NULL WHERE id = :threadId")
     Mono<Void> clearLockMetadata(@Param("threadId") UUID threadId);
 
     @Query("UPDATE forum_threads SET lock_reason = :lockReason, locked_by = :moderatorId, locked_at = NOW() WHERE id = :threadId")
     Mono<Void> updateLockReason(@Param("threadId") UUID threadId,@Param("lockReason") String lockReason, @Param("moderatorId") UUID moderatorId);
+
+    @Query("UPDATE forum_threads SET lock_expires_at = :lockExpiry WHERE id = :threadId")
+    Mono<Void> updateLockExpiry(@Param("threadId")UUID threadId, @Param("lockExpiry") Instant lockExpiry);
+
+    @Query("""
+            UPDATE forum_threads
+            SET thread_status = 'OPEN', lock_reason = NULL, locked_by = NULL, locked_at = NULL, lock_expires_at = NULL
+            WHERE thread_STATUS = 'CLOSED'
+            AND lock_expires_at IS NOT NULL
+            AND lock_expires_at < NOW()
+            """)
+    Mono<Integer> unlockExpiredThreads();
 
     @Query("UPDATE forum_threads SET is_sticky = :sticky, updated_at = NOW() WHERE id = :threadId")
     Mono<Void> updateStickyStatus(@Param("threadId") UUID threadId,@Param("sticky") boolean sticky);
@@ -211,6 +224,5 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
 
     @Query("UPDATE forum_threads SET last_activity_at = NOW() WHERE id = :threadId")
     Mono<Void> updateLastActivity(@Param("threadId") UUID threadId);
-
 
 }

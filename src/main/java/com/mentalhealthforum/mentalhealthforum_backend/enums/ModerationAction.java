@@ -7,6 +7,20 @@ import reactor.core.publisher.Mono;
 
 @Getter
 public enum ModerationAction {
+        // In ModerationAction.java
+
+        // TODO: Consider adding ROLE_GRANTED, ROLE_REVOKED, GROUP_ADDED, GROUP_REMOVED to enum when implementing moderation logs
+        // Currently these operations work via KeycloakAdminManager but aren't tracked in ModerationAction
+
+        // TODO: USER_REPUTATION_ADJUSTED - defer to reputation system phase
+        // Reputation system needs: point rules, event listeners, recalculation logic
+
+        // TODO: BULK_ACTION - future feature for batch moderation
+        // Would allow moderators to act on multiple reports/posts/threads at once
+
+            // TODO: Consider splitting into multiple enums? (ContentActions, ThreadActions, UserActions, etc.)
+        // Current enum is large but manageable (45+ entries)
+
     // Content actions
     POST_DELETED("Delete post", GroupPath.MODERATORS),
     POST_CONTENT_WARNING_ADDED("Add content warning", GroupPath.MODERATORS),

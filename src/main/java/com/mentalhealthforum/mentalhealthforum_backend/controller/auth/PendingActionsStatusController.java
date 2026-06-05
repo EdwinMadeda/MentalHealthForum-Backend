@@ -17,11 +17,7 @@ public class PendingActionsStatusController {
     private final PendingActionsService pendingActionsService;
 
     public PendingActionsStatusController(
-            PendingActionsService pendingActionsService,
-            OnboardingService onboardingService,
-            UserService userService,
-            AppUserService appUserService,
-            JwtClaimsExtractor jwtClaimsExtractor) {
+            PendingActionsService pendingActionsService) {
         this.pendingActionsService = pendingActionsService;
     }
 

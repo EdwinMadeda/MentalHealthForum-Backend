@@ -58,6 +58,9 @@ public class ForumThreadEntity {
     @Column("locked_at")
     private Instant lockedAt;
 
+    @Column("lock_expires_at")
+    private Instant lockExpiresAt;
+
     @Column("resolved_at")
     private Instant resolvedAt;
 
