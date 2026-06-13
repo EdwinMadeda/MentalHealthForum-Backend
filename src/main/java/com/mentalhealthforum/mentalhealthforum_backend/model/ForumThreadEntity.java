@@ -110,9 +110,6 @@ public class ForumThreadEntity {
     @Column("last_activity_at")
     private Instant lastActivityAt;
 
-    @Transient
-    private Boolean isBookmarked;
-
     // --- JSONB Getter/Setter ---
     public ThreadSettings getThreadSettings(){
         if(threadSettingsJson == null || threadSettingsJson.isEmpty()){

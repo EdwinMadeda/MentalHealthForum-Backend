@@ -19,7 +19,7 @@ import reactor.core.publisher.Mono;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("api/users/me/bookmarks")
+@RequestMapping("api/users/bookmarks")
 public class BookmarkController {
 
     private final BookmarkService bookmarkService;
