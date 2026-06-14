@@ -5,6 +5,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardSuccessRespon
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
 import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -69,6 +71,11 @@ public class BookmarkController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") @Parameter(name = "page", description = "Page number (0-indexed)", example = "0") int page,
             @RequestParam(defaultValue = "20") @Parameter(name = "size", description = "Number of items per page", example = "20") int size,
+            @RequestParam(required = false, name = "category_id") @Parameter(name = "category_id", description = "Filter by category ID") UUID categoryId,
+            @RequestParam(required = false, name = "creator_id") @Parameter(name = "creator_id", description = "Filter by creator user ID") UUID creatorId,
+            @RequestParam(required = false, name = "thread_type") @Parameter(name = "thread_type", description = "Filter by thread type: DISCUSSION, QUESTION, CRISIS_SUPPORT, PEER_REVIEW, POLL") ThreadType threadType,
+            @RequestParam(required = false, name = "thread_status") @Parameter(name = "thread_status", description = "Filter by thread status: OPEN, RESOLVED, CLOSED, ARCHIVED") ThreadStatus threadStatus,
+            @RequestParam(required = false, name = "has_content_warning") @Parameter(name = "has_content_warning", description = "Filter threads with content warnings") Boolean hasContentWarning,
             @RequestParam(defaultValue = "") @Parameter(name = "search", description = "Search in thread title or bookmark notes", example = "anxiety") String search,
             @RequestParam(defaultValue = "bookmarked_at", name = "sort_by")
             @Parameter(name = "sort_by", description = "Sort field: title, bookmarked_at, last_activity_at, post_count", example = "bookmarked_at") String sortBy,
@@ -76,7 +83,7 @@ public class BookmarkController {
             @Parameter(name = "sort_direction", description = "Sort direction: asc (ascending) or desc (descending)", example = "desc") String sortDirection
     ){
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-        return bookmarkService.getMyBookmarks(page, size, search, sortBy, sortDirection, viewerContext)
+        return bookmarkService.getMyBookmarks(page, size, categoryId, creatorId, threadType, threadStatus, hasContentWarning, search, sortBy, sortDirection, viewerContext)
                 .map(bookmarks -> ResponseEntity.ok(
                         new StandardSuccessResponse<>("Bookmarks retrieved successfully", bookmarks)));
     }

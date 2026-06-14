@@ -30,15 +30,18 @@ public class UserConnectServiceImpl implements UserConnectService {
     private final TransactionalOperator transactionalOperator;
     private final UserConnectRepository userConnectRepository;
     private final AppUserRepository appUserRepository;
+    private final AppUserServiceImpl appUserService;
 
 
     public UserConnectServiceImpl(
             TransactionalOperator transactionalOperator,
             UserConnectRepository userConnectRepository,
-            AppUserRepository appUserRepository) {
+            AppUserRepository appUserRepository,
+            AppUserServiceImpl appUserService) {
         this.transactionalOperator = transactionalOperator;
         this.userConnectRepository = userConnectRepository;
         this.appUserRepository = appUserRepository;
+        this.appUserService = appUserService;
     }
 
     @Override
@@ -290,8 +293,8 @@ public class UserConnectServiceImpl implements UserConnectService {
         UUID recipientId = connection.getRecipient();
 
         return Mono.zip(
-            getUserDetails(initiatedById),
-            getUserDetails(recipientId)
+            appUserService.getUserDetails(initiatedById),
+            appUserService.getUserDetails(recipientId)
         ).map(tuple -> {
            UserDetails initiatorDetails = tuple.getT1();
            UserDetails recipientDetails = tuple.getT2();
@@ -320,19 +323,6 @@ public class UserConnectServiceImpl implements UserConnectService {
     }
 
 
-    private Mono<UserDetails> getUserDetails(UUID userId) {
-        return appUserRepository.findAppUserByKeycloakId(userId.toString())
-                .map(appUser -> UserDetails.builder()
-                        .displayName(appUser.getPublicIdentifier())
-                        .avatarUrl(appUser.getAvatarUrl())
-                        .bio(appUser.getBio())
-                        .lastActiveAt(appUser.getLastActiveAt())
-                        .build()
-                )
-                .defaultIfEmpty(UserDetails.builder()
-                        .displayName("Unknown")
-                        .build());
-    }
 
 
     private String validateAndNormalizeSortBy(String sortBy) {

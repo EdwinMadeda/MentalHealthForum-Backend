@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.onboarding.OnboardingPolicy;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
@@ -472,6 +473,15 @@ public class AppUserServiceImpl implements AppUserService {
                 .flatMap(appUserRepository::delete)
                 .then();
     }
+
+    @Override
+    public Mono<UserDetails> getUserDetails(UUID userId) {
+        return appUserRepository.findAppUserByKeycloakId(userId.toString())
+                .map(AppUserEntity::toUserDetails)
+                .defaultIfEmpty(AppUserEntity.unknownUser());
+    }
+
+
     /**
      * Generates a welcoming default bio for new users based on their name.
      * Used when creating initial user profiles during registration.

@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.notification.NotificationPreferences;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.SupportRole;
@@ -227,6 +228,28 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
         return this.timezone;
     }
 
+    // ==================== HELPER METHODS ====================
+
+    public UserDetails toUserDetails(){
+        return UserDetails.builder()
+                .displayName(this.getPublicIdentifier())
+                .avatarUrl(this.getAvatarUrl())
+                .bio(this.getBio())
+                .lastActiveAt(this.getLastActiveAt())
+                .build();
+    }
+
+    // For unknown/default user
+    public static UserDetails unknownUser(){
+        return UserDetails.builder()
+                .displayName("unknown")
+                .avatarUrl(null)
+                .bio(null)
+                .lastActiveAt(null)
+                .build();
+    }
+
+
     // Returns a privacy-respecting display identifier.
     public String getPublicIdentifier() {
         // Prefer user-chosen display name
@@ -237,4 +260,6 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
         // Fallback to initials
         return this.getInitials();
     }
+
+
 }

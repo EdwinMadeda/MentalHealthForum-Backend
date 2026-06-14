@@ -18,16 +18,41 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
 
     Mono<Void> deleteByUserIdAndThreadId(UUID userId, UUID threadId);
 
-    Flux<ThreadBookmarkEntity> findByUserIdOrderByCreatedAtDesc(UUID userId);
+    @Query("""
+        SELECT b.id as bookmark_id,
+               t.id as thread_id,
+               t.title,
+               t.category_id,
+               t.creator_id,
+               t.post_count,
+               t.view_count,
+               t.last_activity_at,
+               t.thread_status,
+               t.thread_type,
+               t.content_warning_type,
+               b.created_at as bookmarked_at,
+               b.notes as bookmark_notes
+        FROM thread_bookmarks b
+        INNER JOIN forum_threads t ON b.thread_id = t.id
+        WHERE b.id = :bookmarkId AND b.user_id = :userId
+        """)
+    Mono<BookmarkedThreadRecord> findBookmarkById(
+        @Param("bookmarkId") UUID bookmarkId,
+        @Param("userId") UUID userId
+    );
 
     @Query("""
         SELECT b.id as bookmark_id,
                t.id as thread_id,
                t.title,
+               t.category_id,
                t.creator_id,
                t.post_count,
                t.view_count,
                t.last_activity_at,
+               t.thread_status,
+               t.thread_type,
+               t.content_warning_type,
                b.created_at as bookmarked_at,
                b.notes as bookmark_notes
         FROM forum_threads t
@@ -38,6 +63,17 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
                LOWER(t.title) LIKE '%' || LOWER(:search) || '%' OR
                LOWER(b.notes) LIKE '%' || LOWER(:search) || '%'
            ))
+        AND (:categoryId IS NULL OR t.category_id = :categoryId)
+        AND (:creatorId IS NULL OR t.creator_id = :creatorId)
+        AND (:threadType IS NULL OR t.thread_type = :threadType::thread_type_enum)
+        AND (:threadStatus IS NULL OR t.thread_status = :threadStatus::thread_status_enum)
+        AND (:hasContentWarning IS NULL OR
+                (CASE WHEN :hasContentWarning = true
+                    THEN t.content_warning_type != 'NONE'
+                    ELSE t.content_warning_type = 'NONE'
+                END)
+            )
+    
         ORDER BY
             CASE :sortDirection
                 WHEN 'DESC' THEN
@@ -66,6 +102,11 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
     """)
     Flux<BookmarkedThreadRecord> findBookmarkedThreadsPaginated(
             @Param("userId") UUID userId,
+            @Param("categoryId") UUID categoryId,
+            @Param("creatorId") UUID creatorId,
+            @Param("threadType") String threadType,
+            @Param("threadStatus") String threadStatus,
+            @Param("hasContentWarning") Boolean hasContentWarning,
             @Param("search") String search,
             @Param("sortBy") String sortBy,
             @Param("sortDirection") String sortDirection,
@@ -82,10 +123,26 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
                     LOWER(t.title) LIKE '%' || LOWER(:search) || '%' OR
                     LOWER(b.notes) LIKE '%' || LOWER(:search) || '%'
                 ))
+        AND (:categoryId IS NULL OR t.category_id = :categoryId)
+        AND (:creatorId IS NULL OR t.creator_id = :creatorId)
+        AND (:threadType IS NULL OR t.thread_type = :threadType::thread_type_enum)
+        AND (:threadStatus IS NULL OR t.thread_status = :threadStatus::thread_status_enum)
+        AND (:hasContentWarning IS NULL OR
+                (CASE WHEN :hasContentWarning = true
+                    THEN t.content_warning_type != 'NONE'
+                    ELSE t.content_warning_type = 'NONE'
+                END)
+            )
     """)
     Mono<Long> countBookmarksWithFilters(
            @Param("userId") UUID userId,
-           @Param("search") String search);
+           @Param("categoryId") UUID categoryId,
+           @Param("creatorId") UUID creatorId,
+           @Param("threadType") String threadType,
+           @Param("threadStatus") String threadStatus,
+           @Param("hasContentWarning") Boolean hasContentWarning,
+           @Param("search") String search
+    );
 
     @Query("SELECT COUNT(*) FROM thread_bookmarks WHERE user_id = :userId")
     Mono<Long> countByUserId(@Param("userId") UUID userId);

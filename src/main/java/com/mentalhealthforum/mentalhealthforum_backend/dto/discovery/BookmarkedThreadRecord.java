@@ -7,10 +7,14 @@ public record BookmarkedThreadRecord(
     UUID bookmark_id,
     UUID thread_id,
     String title,
+    UUID category_id,
     UUID creator_id,
     Integer post_count,
     Integer view_count,
     Instant last_activity_at,
+    String thread_status,
+    String thread_type,
+    String content_warning_type,
     Instant bookmarked_at,
     String bookmark_notes
 ) {}

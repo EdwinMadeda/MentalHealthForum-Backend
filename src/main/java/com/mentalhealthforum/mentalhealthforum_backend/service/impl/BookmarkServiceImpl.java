@@ -5,13 +5,15 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkedThreadRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
-import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadBookmarkEntity;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ForumThreadRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadBookmarkRepository;
+import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
@@ -26,17 +28,17 @@ public class BookmarkServiceImpl implements BookmarkService {
     private final TransactionalOperator transactionalOperator;
     private final ThreadBookmarkRepository bookmarkRepository;
     private final ForumThreadRepository forumThreadRepository;
-    private final AppUserRepository appUserRepository;
+    private final AppUserService appUserService;
 
     public BookmarkServiceImpl(
             TransactionalOperator transactionalOperator,
             ThreadBookmarkRepository bookmarkRepository,
             ForumThreadRepository forumThreadRepository,
-            AppUserRepository appUserRepository) {
+            AppUserService appUserService) {
         this.transactionalOperator = transactionalOperator;
         this.bookmarkRepository = bookmarkRepository;
         this.forumThreadRepository = forumThreadRepository;
-        this.appUserRepository = appUserRepository;
+        this.appUserService = appUserService;
     }
 
     @Override
@@ -65,6 +67,11 @@ public class BookmarkServiceImpl implements BookmarkService {
     public Mono<PaginatedResponse<BookmarkResponse>> getMyBookmarks(
             int page,
             int size,
+            UUID categoryId,
+            UUID creatorId,
+            ThreadType threadType,
+            ThreadStatus threadStatus,
+            Boolean hasContentWarning,
             String search,
             String sortBy,
             String sortDirection,
@@ -79,13 +86,26 @@ public class BookmarkServiceImpl implements BookmarkService {
         int offset = page * size;
 
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
+        String effectiveThreadType =  threadType != null? threadType.name() : null;
+        String effectiveThreadStatus  = threadStatus != null? threadStatus.name() : null;
         String effectiveSortBy = validateAndNormalizeSortBy(sortBy);
         String effectiveSortDirection = determineSortDirection(sortDirection, effectiveSortBy);
 
-        return bookmarkRepository.findBookmarkedThreadsPaginated(userId, effectiveSearch, effectiveSortBy, effectiveSortDirection, size, offset)
+        return bookmarkRepository.findBookmarkedThreadsPaginated(
+                    userId,
+                    categoryId, creatorId,
+                    effectiveThreadType, effectiveThreadStatus, hasContentWarning,
+                    effectiveSearch,
+                    effectiveSortBy, effectiveSortDirection,
+                    size, offset)
                 .flatMap(this::mapToResponse)
                 .collectList()
-                .zipWith(bookmarkRepository.countBookmarksWithFilters(userId,effectiveSearch))
+                .zipWith(bookmarkRepository.countBookmarksWithFilters(
+                        userId,
+                        categoryId, creatorId,
+                        effectiveThreadType, effectiveThreadStatus, hasContentWarning,
+                        effectiveSearch
+                        ))
                 .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
 
     }
@@ -126,59 +146,38 @@ public class BookmarkServiceImpl implements BookmarkService {
                 });
     }
 
-    private Mono<ThreadBookmarkEntity> createBookmark(UUID userId, UUID threadId, String notes){
-        ThreadBookmarkEntity bookmark = ThreadBookmarkEntity.builder()
+    private Mono<BookmarkedThreadRecord> createBookmark(UUID userId, UUID threadId, String notes){
+        ThreadBookmarkEntity bookmarkEntity = ThreadBookmarkEntity.builder()
                 .userId(userId)
                 .threadId(threadId)
                 .notes(notes)
                 .build();
 
-        return bookmarkRepository.save(bookmark);
-    }
-
-    private Mono<BookmarkResponse> mapToResponse(ThreadBookmarkEntity bookmark) {
-        return forumThreadRepository.findById(bookmark.getThreadId())
-                .switchIfEmpty(Mono.empty())
-                .flatMap(thread ->  getCreatorDisplayName(thread.getCreatorId())
-                        .map(displayName -> BookmarkResponse.builder()
-                                .id(bookmark.getId())
-                                .threadId(thread.getId())
-                                .threadTitle(thread.getTitle())
-                                .threadCreatorId(thread.getCreatorId())
-                                .threadCreatorDisplayName(displayName)
-                                .threadPostCount(thread.getPostCount())
-                                .threadViewCount(thread.getViewCount())
-                                .threadLastActivityAt(thread.getLastActivityAt())
-                                .notes(bookmark.getNotes())
-                                .bookmarkedAt(bookmark.getCreatedAt())
-                                .build()));
+        return bookmarkRepository.save(bookmarkEntity)
+                .flatMap(bookmark -> bookmarkRepository.findBookmarkById(bookmark.getId(), bookmark.getUserId()));
     }
 
     private Mono<BookmarkResponse> mapToResponse(BookmarkedThreadRecord record) {
-        return  getCreatorDisplayName(record.creator_id())
-                        .map(displayName -> BookmarkResponse.builder()
+        return appUserService.getUserDetails(record.creator_id())
+                        .map(userDetails -> BookmarkResponse.builder()
                                 .id(record.bookmark_id())
+                                .notes(record.bookmark_notes())
+                                .bookmarkedAt(record.bookmarked_at())
+                                .categoryId(record.category_id())
                                 .threadId(record.thread_id())
                                 .threadTitle(record.title())
                                 .threadCreatorId(record.creator_id())
-                                .threadCreatorDisplayName(displayName)
+                                .threadCreatorDisplayName(userDetails.getDisplayName())
+                                .threadCreatorAvatarUrl(userDetails.getAvatarUrl())
                                 .threadPostCount(record.post_count())
                                 .threadViewCount(record.view_count())
                                 .threadLastActivityAt(record.last_activity_at())
-                                .notes(record.bookmark_notes())
-                                .bookmarkedAt(record.bookmarked_at())
+                                .threadStatus(ThreadStatus.fromString(record.thread_status()))
+                                .threadType(ThreadType.fromString(record.thread_type()))
+                                .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
                                 .build());
     }
 
-    private Mono<String> getCreatorDisplayName(UUID userId) {
-        if(userId == null){
-            return Mono.just("System");
-        }
-
-        return appUserRepository.findAppUserByKeycloakId(userId.toString())
-                .map(AppUserEntity::getPublicIdentifier)
-                .defaultIfEmpty("Unknown");
-    }
 
     private String validateAndNormalizeSortBy(String sortBy) {
         Set<String> allowedFields = Set.of("title", "bookmarked_at", "last_activity_at", "post_count");

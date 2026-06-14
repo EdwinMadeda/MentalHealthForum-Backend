@@ -5,5 +5,16 @@ public enum ThreadType {
     QUESTION,        // Seeking specific answers/advice
     CRISIS_SUPPORT,  // Urgent support needed
     PEER_REVIEW,     // Sharing for feedback from peers
-    POLL             // Community poll/survey
+    POLL;             // Community poll/survey
+
+    public static ThreadType fromString(String value){
+        if(value == null){
+            return null;
+        }
+        try {
+            return ThreadType.valueOf(value.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
 }

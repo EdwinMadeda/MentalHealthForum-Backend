@@ -8,5 +8,16 @@ public enum ContentWarningType {
       ABUSE,
       VIOLENCE,
       SUBSTANCE_USE,
-      EATING_DISORDERS
+      EATING_DISORDERS;
+
+      public static ContentWarningType fromString(String value){
+            if(value == null){
+                  return null;
+            }
+            try {
+                  return ContentWarningType.valueOf(value.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                  return null;
+            }
+      }
 }

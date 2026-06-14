@@ -1,11 +1,14 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InsufficientPermissionException;
 import reactor.core.publisher.Mono;
+
+import java.util.UUID;
 
 
 /**
@@ -106,4 +109,5 @@ public interface AppUserService {
      */
     Mono<Void> deleteLocalProfile(String userId, ViewerContext viewerContext);
 
+    Mono<UserDetails> getUserDetails(UUID userId);
 }

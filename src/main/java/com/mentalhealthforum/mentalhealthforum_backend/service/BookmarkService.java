@@ -4,6 +4,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -16,6 +18,11 @@ public interface BookmarkService {
     Mono<PaginatedResponse<BookmarkResponse>> getMyBookmarks(
             int page,
             int size,
+            UUID categoryId,
+            UUID creatorId,
+            ThreadType threadType,
+            ThreadStatus threadStatus,
+            Boolean hasContentWarning,
             String search,
             String sortBy,
             String sortDirection,
