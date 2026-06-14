@@ -38,6 +38,7 @@ public class ThreadResponse {
     private boolean isSticky;
     private boolean isFeatured;
     private boolean isBookmarked;
+    private boolean isWatched;
 
     private Integer bookmarkCount;
     private Integer postCount;

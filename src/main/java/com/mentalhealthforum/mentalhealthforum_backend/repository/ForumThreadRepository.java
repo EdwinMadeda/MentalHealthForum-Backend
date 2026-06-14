@@ -21,10 +21,7 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
 
     // ==================== REFERENCE TABLES ====================
     @Query("""
-        SELECT t.*,
-                CASE WHEN b.user_id IS NOT NULL THEN true ELSE false END as is_bookmarked
-         FROM forum_threads t
-         LEFT JOIN thread_bookmarks b ON t.id = b.thread_id AND b.user_id = :currentUserId
+        SELECT t.* FROM forum_threads t
         WHERE (:categoryId IS NULL OR category_id = :categoryId::uuid)
             AND (:creatorId IS NULL OR creator_id = :creatorId::uuid)
             AND (:threadType IS NULL OR thread_type = :threadType::thread_type_enum)
@@ -37,9 +34,31 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
                      ELSE content_warning_type = 'NONE' END))
             AND (:search IS NULL OR
                 LOWER(t.title) LIKE '%' || LOWER(:search) || '%')
+        
+            -- Bookmark filter using EXISTS
             AND (:isBookmarked IS NULL OR
-                 (:isBookmarked = true AND b.user_id IS NOT NULL) OR
-                 (:isBookmarked = false AND b.user_id IS NULL))
+                (:isBookmarked = true AND EXISTS (
+                    SELECT 1 FROM thread_bookmarks b
+                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    )) OR
+                (:isBookmarked = false AND NOT EXISTS (
+                    SELECT 1 FROM thread_bookmarks b
+                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    ))
+                )
+        
+            -- Watch filter using EXISTS
+            AND (:isWatched IS NULL OR
+                (:isWatched = true AND EXISTS (
+                    SELECT 1 FROM watch_threads w
+                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    )) OR
+                (:isWatched = false AND NOT EXISTS (
+                    SELECT 1 FROM watch_threads w
+                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    ))
+                )
+        
         ORDER BY
             is_sticky DESC,
             CASE :sortDirection
@@ -79,6 +98,7 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
             @Param("hasContentWarning") Boolean hasContentWarning,
             @Param("currentUserId") UUID currentUserId,
             @Param("isBookmarked") Boolean isBookmarked,
+            @Param("isWatched") Boolean isWatched,
             @Param("search") String search,
             @Param("sortBy") String sortBy,
             @Param("sortDirection") String sortDirection,
@@ -88,7 +108,6 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
 
     @Query("""
         SELECT COUNT(*) FROM forum_threads t
-        LEFT JOIN thread_bookmarks b ON t.id = b.thread_id AND b.user_id = :currentUserId
         WHERE (:categoryId IS NULL OR category_id = :categoryId::uuid)
             AND (:creatorId IS NULL OR creator_id = :creatorId::uuid)
             AND (:threadType IS NULL OR thread_type = :threadType::thread_type_enum)
@@ -101,9 +120,30 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
                      ELSE content_warning_type = 'NONE' END))
             AND (:search IS NULL OR
                 LOWER(t.title) LIKE '%' || LOWER(:search) || '%')
+        
+            -- Bookmark filter using EXISTS
             AND (:isBookmarked IS NULL OR
-                 (:isBookmarked = true AND b.user_id IS NOT NULL) OR
-                 (:isBookmarked = false AND b.user_id IS NULL))
+                (:isBookmarked = true AND EXISTS (
+                    SELECT 1 FROM thread_bookmarks b
+                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    )) OR
+                (:isBookmarked = false AND NOT EXISTS (
+                    SELECT 1 FROM thread_bookmarks b
+                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    ))
+                )
+        
+            -- Watch filter using EXISTS
+            AND (:isWatched IS NULL OR
+                (:isWatched = true AND EXISTS (
+                    SELECT 1 FROM watch_threads w
+                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    )) OR
+                (:isWatched = false AND NOT EXISTS (
+                    SELECT 1 FROM watch_threads w
+                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    ))
+                )
         """)
     Mono<Long> countAllPaginated(
             @Param("categoryId") UUID categoryId,
@@ -115,6 +155,7 @@ public interface ForumThreadRepository extends R2dbcRepository<ForumThreadEntity
             @Param("hasContentWarning") Boolean hasContentWarning,
             @Param("currentUserId") UUID currentUserId,
             @Param("isBookmarked") Boolean isBookmarked,
+            @Param("isWatched") Boolean isWatched,
             @Param("search") String search
     );
 

@@ -31,6 +31,7 @@ public interface ForumThreadService {
             Boolean isFeatured,
             Boolean hasContentWarning,
             Boolean isBookmarked,
+            Boolean isWatched,
             String search,
             String sortBy,
             String sortDirection,

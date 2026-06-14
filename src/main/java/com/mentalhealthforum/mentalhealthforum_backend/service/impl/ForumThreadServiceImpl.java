@@ -12,6 +12,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.ForumThreadService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.WatchThreadService;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +45,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
     private final ThreadStatusDefinitionRepository threadStatusDefinitionRepository;
     private final BookmarkService bookmarkService;
     private final UserModerationService userModerationService;
+    private final WatchThreadService watchThreadService;
 
 
     public ForumThreadServiceImpl(
@@ -56,7 +58,8 @@ public class ForumThreadServiceImpl implements ForumThreadService {
             ThreadTypeDefinitionRepository threadTypeDefinitionRepository,
             ThreadStatusDefinitionRepository threadStatusDefinitionRepository,
             BookmarkService bookmarkService,
-            UserModerationService userModerationService) {
+            UserModerationService userModerationService,
+            WatchThreadService watchThreadService) {
         this.transactionalOperator = transactionalOperator;
         this.appUserRepository = appUserRepository;
         this.forumCategoryRepository = forumCategoryRepository;
@@ -67,6 +70,8 @@ public class ForumThreadServiceImpl implements ForumThreadService {
         this.threadStatusDefinitionRepository = threadStatusDefinitionRepository;
         this.bookmarkService = bookmarkService;
         this.userModerationService = userModerationService;
+
+        this.watchThreadService = watchThreadService;
     }
 
     // ==================== USER ACTIONS ====================
@@ -112,6 +117,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
             Boolean isFeatured,
             Boolean hasContentWarning,
             Boolean isBookmarked,
+            Boolean isWatched,
             String search,
             String sortBy,
             String sortDirection,
@@ -148,7 +154,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                 effectiveThreadType,
                 effectiveThreadStatus,
                 isDeleted, isFeatured, hasContentWarning,
-                currentUserId, isBookmarked,
+                currentUserId, isBookmarked, isWatched,
                 effectiveSearch,
                 normalizedSortBy, normalizedSortDirection, size, offset);
 
@@ -158,7 +164,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                 effectiveThreadType,
                 effectiveThreadStatus,
                 isDeleted, isFeatured, hasContentWarning,
-                currentUserId, isBookmarked,
+                currentUserId, isBookmarked, isWatched,
                 effectiveSearch);
 
         return Mono.zip(
@@ -908,11 +914,13 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                 appUserRepository.findAppUserByKeycloakId(thread.getCreatorId().toString())
                         .switchIfEmpty(Mono.empty()),
                 bookmarkService.isBookmarked(thread.getId(), viewerContext),
-                bookmarkService.getBookmarkCountForThread(thread.getId())
+                bookmarkService.getBookmarkCountForThread(thread.getId()),
+                watchThreadService.isWatchingThread(thread.getId(), viewerContext)
         ).map(tuple -> {
             ForumCategoryEntity category = tuple.getT1();
             AppUserEntity creator = tuple.getT2();
             Boolean isBookmarked = tuple.getT3();
+            Boolean  isWatched = tuple.getT5();
             long bookmarkCount = tuple.getT4();
 
             return ThreadResponse.builder()
@@ -932,6 +940,7 @@ public class ForumThreadServiceImpl implements ForumThreadService {
                     .isSticky(thread.getIsSticky())
                     .isFeatured(thread.getIsFeatured())
                     .isBookmarked(isBookmarked)
+                    .isWatched(isWatched)
                     .bookmarkCount((int)bookmarkCount)
                     .postCount(thread.getPostCount())
                     .viewCount(thread.getViewCount())
