@@ -76,7 +76,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         return validateAndNormalizeTag(request.name())
                 .flatMap(validated -> validateTagNotExists(validated.name, validated.slug)
                         .then(createTagEntity(validated.name, validated.slug, request.description(), userId)))
-                .flatMap(this::mapToResponse)
+                .flatMap(this::enrichSingleTagWithData)
                 .as(transactionalOperator::transactional);
     }
 
@@ -104,7 +104,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
 
                             return updateTagEntity(existingTag, existingTag.getName(), existingTag.getSlug(), request.description());
                         }))
-                .flatMap(this::mapToResponse)
+                .flatMap(this::enrichSingleTagWithData)
                 .as(transactionalOperator::transactional);
     }
 
@@ -127,8 +127,9 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         }
 
         return Flux.fromIterable(tagIds)
-                .flatMap(categoryTagRepository::findById)
-                .switchIfEmpty(Mono.error(new ApiException("Tag not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(tagId -> categoryTagRepository.findById(tagId)
+                        .switchIfEmpty(Mono.error(new ApiException("Tag not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                )
                 .flatMap(categoryTagRepository::delete)
                 .then()
                 .as(transactionalOperator::transactional);
@@ -138,7 +139,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
     public Mono<CategoryTagResponse> getTagById(UUID tagId){
         return categoryTagRepository.findById(tagId)
                 .switchIfEmpty(Mono.error(new ApiException("Tag not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(this::mapToResponse);
+                .flatMap(this::enrichSingleTagWithData);
     }
 
     @Override
@@ -146,14 +147,14 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         String normalizedName = NormalizeUtils.normalizeTag(name);
         return categoryTagRepository.findByName(name)
                 .switchIfEmpty(Mono.error(new ApiException("Tag not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(this::mapToResponse);
+                .flatMap(this::enrichSingleTagWithData);
     }
 
     @Override
     public Mono<CategoryTagResponse> getTagBySlug(String slug){
         return categoryTagRepository.findBySlug(slug)
                 .switchIfEmpty(Mono.error(new ApiException("Tag not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(this::mapToResponse);
+                .flatMap(this::enrichSingleTagWithData);
     }
 
     @Override
@@ -309,7 +310,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
     @Override
     public Flux<CategoryTagResponse> getTagsForCategory(UUID categoryId){
         return categoryTagRepository.findByCategoryId(categoryId)
-                .flatMap(this::mapToResponse);
+                .flatMap(this::enrichSingleTagWithData);
     }
 
     @Override
@@ -441,29 +442,6 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         return sortBy;
     }
 
-    private Mono<CategoryTagResponse> mapToResponse(CategoryTagEntity tag){
-
-        return Mono.zip(
-                appUserService.getUserDetails(tag.getCreatedBy()),
-                categoryTagRepository.countByTagId(tag.getId())
-                ).map(tuple -> {
-                    UserDetails userDetails = tuple.getT1();
-                    Long usage = tuple.getT2();
-
-                    return CategoryTagResponse.builder()
-                            .id(tag.getId())
-                            .name(tag.getName())
-                            .slug(tag.getSlug())
-                            .description(tag.getDescription())
-                            .createdBy(tag.getCreatedBy())
-                            .createdByDisplayName(userDetails.getDisplayName())
-                            .usage(usage.intValue())
-                            .createdAt(tag.getCreatedAt())
-                            .updatedAt(tag.getUpdatedAt())
-                            .build();
-        });
-    }
-
     private Mono<Void> validateCategoryExists(UUID categoryId) {
         return categoryRepository.findById(categoryId)
                 .switchIfEmpty(Mono.error(new ApiException("Category not found", ErrorCode.RESOURCE_NOT_FOUND)))
@@ -556,6 +534,33 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         });
     }
 
+
+    /**
+     * Enriches a single category tag..
+     */
+    private Mono<CategoryTagResponse> enrichSingleTagWithData(CategoryTagEntity tag){
+
+        return Mono.zip(
+                appUserService.getUserDetails(tag.getCreatedBy()),
+                categoryTagRepository.countByTagId(tag.getId())
+        ).map(tuple -> {
+            UserDetails userDetails = tuple.getT1();
+            Long usage = tuple.getT2();
+
+            return CategoryTagResponse.builder()
+                    .id(tag.getId())
+                    .name(tag.getName())
+                    .slug(tag.getSlug())
+                    .description(tag.getDescription())
+                    .createdBy(tag.getCreatedBy())
+                    .createdByDisplayName(userDetails.getDisplayName())
+                    .usage(usage.intValue())
+                    .createdAt(tag.getCreatedAt())
+                    .updatedAt(tag.getUpdatedAt())
+                    .build();
+        });
+    }
+
     /**
      * Enriches a list of tags with usage counts and creator details using batch fetching.
      * Uses batch fetching to avoid N+1 queries.
@@ -617,8 +622,6 @@ public class CategoryTagServiceImpl implements CategoryTagService {
                             })
                             .toList();
                 });
-
     }
-
 
 }

@@ -123,8 +123,6 @@ public class PublicThreadController {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
-        log.info("isWatched={}", isWatched);
-
         return threadService.getAllThreads(page, size, categoryId, creatorId, threadType, threadStatus, isDeleted, isFeatured, hasContentWarning, isBookmarked, isWatched, search, sortBy, sortDirection, viewerContext)
                 .map(paginatedThreads -> {
                     String message = "Paginated thread records retrieved successfully.";

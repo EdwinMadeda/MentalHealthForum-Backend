@@ -306,6 +306,8 @@ public class AppUserServiceImpl implements AppUserService {
      * Applies individual privacy rules per user based on their profile visibility
      * and the viewer's privileges.
      *
+     * @param page             Zero-indexed page number to retrieve
+     * @param size             Number of users to return per page
      * @param currentUserFirst Whether to place the current user first on page 0
      * @param isActive         Optional filter restricting results by active/inactive status
      * @param isConnected      Optional filter restricting results by user connections
@@ -314,14 +316,12 @@ public class AppUserServiceImpl implements AppUserService {
      * @param search           Optional search query; blank values ignored
      * @param sortBy           Field to sort by; falls back to a safe default when invalid
      * @param sortDirection    Sort direction ("asc" or "desc"); defaults by field when null
-     * @param page             Zero-indexed page number to retrieve
-     * @param size             Number of users to return per page
      * @param viewerContext    Authenticated viewer context used to determine field visibility
      * @return Mono of paginated user responses with privacy rules applied
      */
     @Override
     public Mono<PaginatedResponse<UserResponse>> getAllAppUsersWithContext(
-            boolean currentUserFirst,
+            int page, int size, boolean currentUserFirst,
             Boolean isActive,
             Boolean isConnected,
             String role,
@@ -329,8 +329,6 @@ public class AppUserServiceImpl implements AppUserService {
             String search,
             String sortBy,
             String sortDirection,
-            int page,
-            int size,
             ViewerContext viewerContext){
 
         if (page < 0 || size <= 0) {

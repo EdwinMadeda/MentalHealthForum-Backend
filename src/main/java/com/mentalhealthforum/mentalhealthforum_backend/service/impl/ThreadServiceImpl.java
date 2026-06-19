@@ -93,7 +93,7 @@ public class ThreadServiceImpl implements ThreadService {
                 .flatMap(appUser -> userModerationService.requireNotMuted(appUser.getKeycloakId(), "create threads")
                         .then(validateCategoryActive(request.getCategoryId())))
                 .flatMap(category -> createAndSaveThread(request, userId, normalizedTags))
-                .flatMap(thread -> mapToResponse(thread, viewerContext))
+                .flatMap(thread -> enrichSingleThreadWithData(thread, viewerContext))
                 .as(transactionalOperator::transactional);
     }
 
@@ -105,7 +105,7 @@ public class ThreadServiceImpl implements ThreadService {
         return findThread(threadId)
                 .flatMap(thread -> {
                     return threadRepository.incrementViewCount(threadId)
-                            .then(mapToResponse(thread, viewerContext));
+                            .then(enrichSingleThreadWithData(thread, viewerContext));
                 });
     }
 
@@ -238,9 +238,9 @@ public class ThreadServiceImpl implements ThreadService {
                         thread.setUpdatedAt(Instant.now());
                         return threadEditHistoryRepository.save(history)
                                         .then(threadRepository.save(thread))
-                                .flatMap(t -> mapToResponse(thread, viewerContext));
+                                .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
                     }
-                    return Mono.just(thread).flatMap(t -> mapToResponse(thread, viewerContext));
+                    return Mono.just(thread).flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
                 },
                 null,
                 null
@@ -286,7 +286,7 @@ public class ThreadServiceImpl implements ThreadService {
                             return threadRepository.updateThreadStatus(threadId, ThreadStatus.ARCHIVED.name())
                                     .then(threadRepository.clearLockMetadata(threadId))
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -308,7 +308,7 @@ public class ThreadServiceImpl implements ThreadService {
                             return threadRepository.updateThreadStatus(threadId, ThreadStatus.OPEN.name())
                                     .then(threadRepository.clearLockMetadata(threadId))
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -335,7 +335,7 @@ public class ThreadServiceImpl implements ThreadService {
                                     .then(threadRepository.updateLockReason(threadId, request.reason(), moderatorId))
                                     .then(threadRepository.updateLockExpiry(threadId, lockExpiry))
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
 
                         },
                         List.of(
@@ -357,7 +357,7 @@ public class ThreadServiceImpl implements ThreadService {
                             return threadRepository.updateThreadStatus(threadId, ThreadStatus.OPEN.name())
                                     .then(threadRepository.clearLockMetadata(threadId))
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -396,7 +396,7 @@ public class ThreadServiceImpl implements ThreadService {
 
                             thread.setThreadType(newThreadType);
                             thread.setUpdatedAt(Instant.now());
-                            return threadRepository.save(thread).flatMap(t -> mapToResponse(thread, viewerContext));
+                            return threadRepository.save(thread).flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -416,7 +416,7 @@ public class ThreadServiceImpl implements ThreadService {
                         thread -> {
                             return threadRepository.updateStickyStatus(threadId, sticky)
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                             new ValidationRule(
@@ -438,7 +438,7 @@ public class ThreadServiceImpl implements ThreadService {
                         thread -> {
                             return threadRepository.updateFeaturedStatus(threadId, featured)
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -459,7 +459,7 @@ public class ThreadServiceImpl implements ThreadService {
                         thread -> {
                             return threadRepository.moveThread(threadId, newCategoryId)
                                             .then(findThread(threadId))
-                                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -515,7 +515,7 @@ public class ThreadServiceImpl implements ThreadService {
                             // Though I think in future it might be best to get resolved at from somewhere else
                             return threadRepository.setBestAnswer(postId, threadId, moderatorId)
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -541,7 +541,7 @@ public class ThreadServiceImpl implements ThreadService {
                         thread -> {
                             return threadRepository.clearBestAnswer(threadId)
                                     .then(findThread(threadId))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -585,7 +585,7 @@ public class ThreadServiceImpl implements ThreadService {
                             thread.setUpdatedAt(Instant.now());
                             return threadEditHistoryRepository.save(history)
                                     .then(threadRepository.save(thread))
-                                    .flatMap(t -> mapToResponse(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                             new ValidationRule(
@@ -619,7 +619,7 @@ public class ThreadServiceImpl implements ThreadService {
                             .then(threadRepository.incrementPostCount(destinationThreadId, sourcePostCount))
                             .then(threadRepository.updateLastActivity(destinationThreadId))
                             .then(threadRepository.softDeleteThread(sourceThreadId))
-                            .then(mapToResponse(destinationThread, viewerContext));
+                            .then(enrichSingleThreadWithData(destinationThread, viewerContext));
                 })
                 .as(transactionalOperator::transactional);
     }
@@ -649,7 +649,7 @@ public class ThreadServiceImpl implements ThreadService {
                                                     .then(threadRepository.recalculatePostCount(savedThread.getId()))
                                                     .then(threadRepository.decrementPostCount(sourceThreadId, request.postIds().size()))
                                                     .then(findThread(savedThread.getId()))
-                                                    .flatMap(thread -> mapToResponse(thread, viewerContext))
+                                                    .flatMap(thread -> enrichSingleThreadWithData(thread, viewerContext))
                                     );
 
                         },
@@ -909,63 +909,48 @@ public class ThreadServiceImpl implements ThreadService {
                 })
                 .as(transactionalOperator::transactional);
     }
+    
 
+    /**
+     * Enriches a single thread with all related data using batch fetching.
+     * Uses the same batch approach as the listing endpoint.
+     */
+    private Mono<ThreadResponse> enrichSingleThreadWithData(ThreadEntity thread, ViewerContext viewerContext){
+        UUID threadId = thread.getId();
 
-    private Mono<ThreadResponse> mapToResponse(ThreadEntity thread, ViewerContext viewerContext) {
         return Mono.zip(
                 categoryRepository.findById(thread.getCategoryId())
                         .switchIfEmpty(Mono.empty()),
+
                 appUserRepository.findAppUserByKeycloakId(thread.getCreatorId().toString())
                         .switchIfEmpty(Mono.empty()),
-                bookmarkService.isBookmarked(thread.getId(), viewerContext),
-                bookmarkService.getBookmarkCountForThread(thread.getId()),
-                watchThreadService.isWatchingThread(thread.getId(), viewerContext)
+
+                bookmarkService.isBookmarked(thread.getId(), viewerContext)
+                        .defaultIfEmpty(false),
+
+                bookmarkService.getBookmarkCountForThread(thread.getId())
+                        .defaultIfEmpty(0L),
+
+                watchThreadService.isWatchingThread(threadId, viewerContext)
+                        .defaultIfEmpty(false)
+
         ).map(tuple -> {
             CategoryEntity category = tuple.getT1();
             AppUserEntity creator = tuple.getT2();
             Boolean isBookmarked = tuple.getT3();
+            Long bookmarkCount = tuple.getT4();
             Boolean  isWatched = tuple.getT5();
-            long bookmarkCount = tuple.getT4();
 
-            return ThreadResponse.builder()
-                    .id(thread.getId())
-                    .categoryId(thread.getCategoryId())
-                    .categoryName(category.getName())
-                    .categorySlug(category.getSlug())
-                    .title(thread.getTitle())
-                    .creatorId(thread.getCreatorId())
-                    .creatorDisplayName(creator.getPublicIdentifier())
-                    .creatorAvatarUrl(creator.getAvatarUrl())
-                    .threadType(thread.getThreadType())
-                    .threadStatus(thread.getThreadStatus())
-                    .contentWarningType(thread.getContentWarningType())
-                    .contentWarningCustomText(thread.getContentWarningCustomText())
-                    .tags(thread.getTags())
-                    .isSticky(thread.getIsSticky())
-                    .isFeatured(thread.getIsFeatured())
-                    .isBookmarked(isBookmarked)
-                    .isWatched(isWatched)
-                    .bookmarkCount((int)bookmarkCount)
-                    .postCount(thread.getPostCount())
-                    .viewCount(thread.getViewCount())
-                    .bestAnswerPostId(thread.getBestAnswerPostId())
-                    .resolvedAt(thread.getResolvedAt())
-                    .resolvedByUserId(thread.getResolvedByUserId())
 
-                    // lock metadata
-                    .lockReason(thread.getLockReason())
-                    .lockedBy(thread.getLockedBy())
-                    .lockedAt(thread.getLockedAt())
-                    .lockExpiresAt(thread.getLockExpiresAt())
-
-                    // Edit metadata
-                    .lastEditedAt(thread.getUpdatedAt())
-
-                    // Timestamps
-                    .createdAt(thread.getCreatedAt())
-                    .updatedAt(thread.getUpdatedAt())
-                    .lastActivityAt(thread.getLastActivityAt())
-                    .build();
+            return mapResponseWithData(
+                    thread,
+                    category,
+                    creator,
+                    isBookmarked,
+                    bookmarkCount,
+                    isWatched,
+                    viewerContext
+            );
         });
     }
 
@@ -1037,7 +1022,7 @@ public class ThreadServiceImpl implements ThreadService {
             Map<UUID, Boolean> watchStatus = tuple.getT5();
 
             return threads.stream()
-                    .map(thread -> mapResponseWithBatchData(
+                    .map(thread -> mapResponseWithData(
                             thread,
                             categories.get(thread.getCategoryId()),
                             creators.get(thread.getCreatorId()),
@@ -1052,7 +1037,7 @@ public class ThreadServiceImpl implements ThreadService {
 
     }
 
-    private ThreadResponse mapResponseWithBatchData(
+    private ThreadResponse mapResponseWithData(
             ThreadEntity thread,
             CategoryEntity category,
             AppUserEntity creator,

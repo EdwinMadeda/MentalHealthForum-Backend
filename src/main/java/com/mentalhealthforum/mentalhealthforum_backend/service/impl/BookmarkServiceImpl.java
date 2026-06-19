@@ -55,7 +55,7 @@ public class BookmarkServiceImpl implements BookmarkService {
         return validateThreadExists(threadId)
                 .then(checkNotAlreadyBookmarked(userId, threadId))
                 .then(createBookmark(userId, threadId, request.notes()))
-                .flatMap(this::mapToResponse)
+                .flatMap(this::enrichSingleBookmarkWithData)
                 .as(transactionalOperator::transactional);
 
     }
@@ -170,28 +170,6 @@ public class BookmarkServiceImpl implements BookmarkService {
                 .flatMap(bookmark -> bookmarkRepository.findBookmarkById(bookmark.getId(), bookmark.getUserId()));
     }
 
-    private Mono<BookmarkResponse> mapToResponse(BookmarkedThreadRecord record) {
-        return appUserService.getUserDetails(record.creator_id())
-                        .map(userDetails -> BookmarkResponse.builder()
-                                .id(record.bookmark_id())
-                                .notes(record.bookmark_notes())
-                                .bookmarkedAt(record.bookmarked_at())
-                                .categoryId(record.category_id())
-                                .threadId(record.thread_id())
-                                .threadTitle(record.title())
-                                .threadCreatorId(record.creator_id())
-                                .threadCreatorDisplayName(userDetails.getDisplayName())
-                                .threadCreatorAvatarUrl(userDetails.getAvatarUrl())
-                                .threadPostCount(record.post_count())
-                                .threadViewCount(record.view_count())
-                                .threadLastActivityAt(record.last_activity_at())
-                                .threadStatus(ThreadStatus.fromString(record.thread_status()))
-                                .threadType(ThreadType.fromString(record.thread_type()))
-                                .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
-                                .build());
-    }
-
-
     private String validateAndNormalizeSortBy(String sortBy) {
         Set<String> allowedFields = Set.of("title", "bookmarked_at", "last_activity_at", "post_count");
 
@@ -208,6 +186,14 @@ public class BookmarkServiceImpl implements BookmarkService {
         return "DESC";
     }
 
+
+    /**
+     * Enriches a single bookmark..
+     */
+    private Mono<BookmarkResponse> enrichSingleBookmarkWithData(BookmarkedThreadRecord record) {
+        return appUserService.getUserDetails(record.creator_id())
+                .map(creator -> mapResponseWithData(record, creator));
+    }
     /**
      * Enriches a list of bookmarked thread records with creator details using batch fetching.
      * Uses batch fetching to avoid N+1 queries.
@@ -232,32 +218,40 @@ public class BookmarkServiceImpl implements BookmarkService {
                 .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
                 .defaultIfEmpty(new HashMap<>());
 
+
         return creatorsMap
                 .map(creators -> {
                     return records.stream()
                             .map(record -> {
                                 UserDetails creator = creators.get(record.creator_id());
 
-                                return BookmarkResponse.builder()
-                                        .id(record.bookmark_id())
-                                        .notes(record.bookmark_notes())
-                                        .bookmarkedAt(record.bookmarked_at())
-                                        .categoryId(record.category_id())
-                                        .threadId(record.thread_id())
-                                        .threadTitle(record.title())
-                                        .threadCreatorId(record.creator_id())
-                                        .threadCreatorDisplayName(creator.getDisplayName())
-                                        .threadCreatorAvatarUrl(creator.getAvatarUrl())
-                                        .threadPostCount(record.post_count())
-                                        .threadViewCount(record.view_count())
-                                        .threadLastActivityAt(record.last_activity_at())
-                                        .threadStatus(ThreadStatus.fromString(record.thread_status()))
-                                        .threadType(ThreadType.fromString(record.thread_type()))
-                                        .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
-                                        .build();
+                                return mapResponseWithData(record, creator);
                             })
                             .toList();
                 });
+    }
+
+    private BookmarkResponse mapResponseWithData(
+        BookmarkedThreadRecord record,
+        UserDetails creator
+    ){
+        return BookmarkResponse.builder()
+                .id(record.bookmark_id())
+                .notes(record.bookmark_notes())
+                .bookmarkedAt(record.bookmarked_at())
+                .categoryId(record.category_id())
+                .threadId(record.thread_id())
+                .threadTitle(record.title())
+                .threadCreatorId(record.creator_id())
+                .threadCreatorDisplayName(creator.getDisplayName())
+                .threadCreatorAvatarUrl(creator.getAvatarUrl())
+                .threadPostCount(record.post_count())
+                .threadViewCount(record.view_count())
+                .threadLastActivityAt(record.last_activity_at())
+                .threadStatus(ThreadStatus.fromString(record.thread_status()))
+                .threadType(ThreadType.fromString(record.thread_type()))
+                .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
+                .build();
     }
 
 }

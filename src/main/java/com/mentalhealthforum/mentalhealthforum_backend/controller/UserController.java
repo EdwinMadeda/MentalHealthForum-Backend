@@ -96,7 +96,7 @@ public class UserController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
         // userService.getAllUsers returns Mono<PaginatedResponse<UserRepresentation>>
-        return appUserService.getAllAppUsersWithContext(currentUserFirst, isActive, isConnected, role, groups, search, sortBy, sortDirection, page, size, viewerContext)
+        return appUserService.getAllAppUsersWithContext(page, size, currentUserFirst, isActive, isConnected, role, groups, search, sortBy, sortDirection, viewerContext)
                 .map(paginatedUsers -> {
                     String message = "Paginated user records retrieved successfully.";
                     StandardSuccessResponse<PaginatedResponse<UserResponse>> response = new StandardSuccessResponse<>(message, paginatedUsers);

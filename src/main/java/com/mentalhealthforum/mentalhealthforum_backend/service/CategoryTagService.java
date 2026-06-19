@@ -30,7 +30,12 @@ public interface CategoryTagService {
 
     Flux<CategoryTagResponse> getTagsForCategory(UUID categoryId);
 
-    Mono<PaginatedResponse<CategoryTagResponse>> getAllTags(int page, int size, String search, String sortBy, String sortDirection);
+    Mono<PaginatedResponse<CategoryTagResponse>> getAllTags(
+            int page,
+            int size,
+            String search,
+            String sortBy,
+            String sortDirection);
 
     Flux<CategoryTagAssignmentResponse> assignTagToCategories(AssignTagToCategories request,UUID tagId, ViewerContext viewerContext);
 

@@ -63,7 +63,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
         return validateThreadExists(threadId)
                 .then(checkNotAlreadyWatching(userId, threadId))
                 .then(createWatch(userId, threadId))
-                .flatMap(watchThread -> mapToResponse(watchThread, userId))
+                .flatMap(watchThread -> enrichSingleWatchedThreadWithData(watchThread, userId))
                 .as(transactionalOperator::transactional);
     }
 
@@ -177,38 +177,6 @@ public class WatchThreadServiceImpl implements WatchThreadService {
                 .flatMap(watchThread -> watchThreadRepository.findWatchById(watchThread.getId(), userId));
     }
 
-    private Mono<WatchThreadResponse> mapToResponse(WatchThreadRecord record, UUID userId) {
-        return Mono.zip(
-            appUserService.getUserDetails(record.creator_id()),
-            threadBookmarkRepository.existsByUserIdAndThreadId(userId, record.thread_id())
-        ).map(tuple -> {
-            UserDetails userDetails = tuple.getT1();
-            Boolean isBookmarked = tuple.getT2();
-
-            return WatchThreadResponse.builder()
-                    .id(record.watch_id())
-                    .notificationEnabled(record.notification_enabled())
-                    .watchedAt(record.watched_at())
-                    .threadId(record.thread_id())
-                    .threadTitle(record.thread_title())
-                    .threadType(ThreadType.fromString(record.thread_type()))
-                    .threadStatus(ThreadStatus.fromString(record.thread_status()))
-                    .categoryId(record.category_id())
-                    .creatorId(record.creator_id())
-                    .creatorDisplayName(userDetails.getDisplayName())
-                    .creatorAvatarUrl(userDetails.getAvatarUrl())
-                    .postCount(record.post_count())
-                    .viewCount(record.view_count())
-                    .lastActivityAt(record.last_activity_at())
-                    .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
-                    .isOpen(ThreadStatus.fromString(record.thread_status()) == ThreadStatus.OPEN)
-                    .isBookmarked(isBookmarked)
-                    .isSticky(record.is_sticky())
-                    .isFeatured(record.is_featured())
-                    .build();
-        });
-    }
-
     private String validateAndNormalizeSortBy(String sortBy) {
         Set<String> allowedFields = Set.of("created_at", "last_activity_at", "thread_title", "post_count", "view_count");
         if(sortBy == null || !allowedFields.contains(sortBy)){
@@ -222,6 +190,21 @@ public class WatchThreadServiceImpl implements WatchThreadService {
             return "desc".equalsIgnoreCase(sortDirection) ? "DESC" : "ASC";
         }
         return "DESC";
+    }
+
+    /**
+     * Enriches single watch thread.
+     */
+    private Mono<WatchThreadResponse> enrichSingleWatchedThreadWithData(WatchThreadRecord record, UUID userId) {
+        return Mono.zip(
+                appUserService.getUserDetails(record.creator_id()),
+                threadBookmarkRepository.existsByUserIdAndThreadId(userId, record.thread_id())
+        ).map(tuple -> {
+            UserDetails creator = tuple.getT1();
+            Boolean isBookmarked = tuple.getT2();
+
+            return mapResponseWithData(record, creator, isBookmarked);
+        });
     }
 
     /**
@@ -269,29 +252,38 @@ public class WatchThreadServiceImpl implements WatchThreadService {
                                 UserDetails creator = creators.get(record.creator_id());
                                 Boolean isBookmarked = bookmarkStatus.getOrDefault(record.thread_id(), false);
 
-                                return WatchThreadResponse.builder()
-                                        .id(record.watch_id())
-                                        .notificationEnabled(record.notification_enabled())
-                                        .watchedAt(record.watched_at())
-                                        .threadId(record.thread_id())
-                                        .threadTitle(record.thread_title())
-                                        .threadType(ThreadType.fromString(record.thread_type()))
-                                        .threadStatus(ThreadStatus.fromString(record.thread_status()))
-                                        .categoryId(record.category_id())
-                                        .creatorId(record.creator_id())
-                                        .creatorDisplayName(creator.getDisplayName())
-                                        .creatorAvatarUrl(creator.getAvatarUrl())
-                                        .postCount(record.post_count())
-                                        .viewCount(record.view_count())
-                                        .lastActivityAt(record.last_activity_at())
-                                        .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
-                                        .isOpen(ThreadStatus.fromString(record.thread_status()) == ThreadStatus.OPEN)
-                                        .isBookmarked(isBookmarked)
-                                        .isSticky(record.is_sticky())
-                                        .isFeatured(record.is_featured())
-                                        .build();
+                                return mapResponseWithData(record, creator, isBookmarked);
                             })
                             .collect(Collectors.toList());
                 });
+    }
+
+    private WatchThreadResponse mapResponseWithData(
+        WatchThreadRecord record,
+        UserDetails creator,
+        Boolean isBookmarked
+    ){
+
+        return WatchThreadResponse.builder()
+                .id(record.watch_id())
+                .notificationEnabled(record.notification_enabled())
+                .watchedAt(record.watched_at())
+                .threadId(record.thread_id())
+                .threadTitle(record.thread_title())
+                .threadType(ThreadType.fromString(record.thread_type()))
+                .threadStatus(ThreadStatus.fromString(record.thread_status()))
+                .categoryId(record.category_id())
+                .creatorId(record.creator_id())
+                .creatorDisplayName(creator.getDisplayName())
+                .creatorAvatarUrl(creator.getAvatarUrl())
+                .postCount(record.post_count())
+                .viewCount(record.view_count())
+                .lastActivityAt(record.last_activity_at())
+                .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
+                .isOpen(ThreadStatus.fromString(record.thread_status()) == ThreadStatus.OPEN)
+                .isBookmarked(isBookmarked)
+                .isSticky(record.is_sticky())
+                .isFeatured(record.is_featured())
+                .build();
     }
 }

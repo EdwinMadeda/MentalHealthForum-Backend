@@ -88,7 +88,7 @@ public class CategoryServiceImpl implements CategoryService {
     public Mono<CategoryResponse> createCategory(CreateCategoryRequest request, ViewerContext viewerContext) {
         return ModerationAction.CATEGORY_CREATED.checkPermission(viewerContext)
                 .then(doCreateCategory(request, viewerContext))
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     private Mono<CategoryEntity> doCreateCategory(CreateCategoryRequest request, ViewerContext viewerContext) {
@@ -113,7 +113,7 @@ public class CategoryServiceImpl implements CategoryService {
     public Mono<CategoryResponse> updateCategory(UUID id, UpdateCategoryRequest request, ViewerContext viewerContext) {
         return ModerationAction.CATEGORY_UPDATED.checkPermission(viewerContext)
                 .then(doUpdateCategory(id, request, viewerContext))
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     private Mono<CategoryEntity> doUpdateCategory(UUID id, UpdateCategoryRequest request, ViewerContext viewerContext) {
@@ -166,7 +166,7 @@ public class CategoryServiceImpl implements CategoryService {
     public Mono<CategoryResponse> reactivateCategory(UUID id, ViewerContext viewerContext) {
         return ModerationAction.CATEGORY_REACTIVATED.checkPermission(viewerContext)
                 .then(doReactivateCategory(id))
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     private Mono<CategoryEntity> doReactivateCategory(UUID id) {
@@ -286,7 +286,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .switchIfEmpty(Mono.error(new ApiException(
                         "Category with id '" + id + "' not found",
                         ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     @Override
@@ -296,7 +296,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .switchIfEmpty(Mono.error(new ApiException(
                         "Category with slug '" + slug + "' not found",
                         ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     @Override
@@ -346,9 +346,9 @@ public class CategoryServiceImpl implements CategoryService {
         // Public - no permission check needed
         return categoryRepository.findRootCategories()
                 .flatMap(root -> Mono.zip(
-                        mapToResponseWithTags(root, viewerContext),
+                        enrichSingleCategoryWithData(root, viewerContext),
                         categoryRepository.findChildCategories(root.getId())
-                                .flatMap(category -> mapToResponseWithTags(category, viewerContext))
+                                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext))
                                 .collectList(),
                         categoryTagService.getTagsForCategory(root.getId())
                                 .collectList()
@@ -364,14 +364,14 @@ public class CategoryServiceImpl implements CategoryService {
     public Flux<CategoryResponse> getRootCategories(ViewerContext viewerContext) {
         // Public - no permission check needed
         return categoryRepository.findRootCategories()
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     @Override
     public Flux<CategoryResponse> getChildCategories(UUID parentId, ViewerContext viewerContext) {
         // Public - no permission check needed
         return categoryRepository.findChildCategories(parentId)
-                .flatMap(category -> mapToResponseWithTags(category, viewerContext));
+                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     // ==================== PRIVATE HELPERS ====================
@@ -518,28 +518,17 @@ public class CategoryServiceImpl implements CategoryService {
         return "ASC";
     }
 
-    private Mono<CategoryResponse> mapToResponseWithTags(CategoryEntity category, ViewerContext viewerContext){
+    /**
+     * Enriches a single category with focus status and tags.
+     * Uses individual queries since only one category is being fetched.
+     * This is simpler and more readable than the batch approach for single items.
+     */
+    private Mono<CategoryResponse> enrichSingleCategoryWithData(CategoryEntity category, ViewerContext viewerContext){
 
         return focusCategoryService.isCategoryFocused(category.getId(), viewerContext)
                 .flatMap(isFocused -> categoryTagService.getTagsForCategory(category.getId())
                         .collectList()
-                        .map(tags -> CategoryResponse.builder()
-                                .id(category.getId())
-                                .name(category.getName())
-                                .slug(category.getSlug())
-                                .description(category.getDescription())
-                                .colorTheme(category.getColorTheme())
-                                .parentCategoryId(category.getParentCategoryId())
-                                .contentWarningType(category.getContentWarningType())
-                                .contentWarningCustomText(category.getContentWarningCustomText())
-                                .sortOrder(category.getSortOrder())
-                                .isActive(category.getIsActive())
-                                .createdAt(category.getCreatedAt())
-                                .isParent(category.isParent())
-                                .isChild(category.isChild())
-                                .isFocused(isFocused)
-                                .tags(tags)
-                                .build()));
+                        .map(tags ->  mapCategoryResponse(category, tags, isFocused)));
 
     }
 
