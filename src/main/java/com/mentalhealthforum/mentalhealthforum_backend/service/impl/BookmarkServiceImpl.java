@@ -5,12 +5,15 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkedThreadRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
+import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadBookmarkEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadBookmarkRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
@@ -19,8 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class BookmarkServiceImpl implements BookmarkService {
@@ -28,16 +30,19 @@ public class BookmarkServiceImpl implements BookmarkService {
     private final TransactionalOperator transactionalOperator;
     private final ThreadBookmarkRepository bookmarkRepository;
     private final ThreadRepository threadRepository;
+    private final AppUserRepository appUserRepository;
     private final AppUserService appUserService;
 
     public BookmarkServiceImpl(
             TransactionalOperator transactionalOperator,
             ThreadBookmarkRepository bookmarkRepository,
             ThreadRepository threadRepository,
+            AppUserRepository appUserRepository,
             AppUserService appUserService) {
         this.transactionalOperator = transactionalOperator;
         this.bookmarkRepository = bookmarkRepository;
         this.threadRepository = threadRepository;
+        this.appUserRepository = appUserRepository;
         this.appUserService = appUserService;
     }
 
@@ -98,15 +103,23 @@ public class BookmarkServiceImpl implements BookmarkService {
                     effectiveSearch,
                     effectiveSortBy, effectiveSortDirection,
                     size, offset)
-                .flatMap(this::mapToResponse)
                 .collectList()
-                .zipWith(bookmarkRepository.countBookmarksWithFilters(
-                        userId,
-                        categoryId, creatorId,
-                        effectiveThreadType, effectiveThreadStatus, hasContentWarning,
-                        effectiveSearch
-                        ))
-                .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                .flatMap(records -> {
+                    if(records.isEmpty()){
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                    }
+
+                    return enrichBookmarksWithBatchData(records)
+                            .zipWith(bookmarkRepository.countBookmarksWithFilters(
+                                    userId,
+                                    categoryId, creatorId,
+                                    effectiveThreadType, effectiveThreadStatus, hasContentWarning,
+                                    effectiveSearch
+                            ))
+                            .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+
+
+                });
 
     }
 
@@ -195,5 +208,56 @@ public class BookmarkServiceImpl implements BookmarkService {
         return "DESC";
     }
 
+    /**
+     * Enriches a list of bookmarked thread records with creator details using batch fetching.
+     * Uses batch fetching to avoid N+1 queries.
+     */
+    private Mono<List<BookmarkResponse>> enrichBookmarksWithBatchData(
+        List<BookmarkedThreadRecord> records
+    ){
+        if(records.isEmpty()){
+            return Mono.just(List.of());
+        }
+
+        // Extract unique creator IDs
+        List<UUID> creatorIds = records.stream()
+                .map(BookmarkedThreadRecord::creator_id)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch all creators
+        Mono<Map<UUID, UserDetails>> creatorsMap = appUserRepository
+                .findAppUsersByKeycloakIds(creatorIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                .defaultIfEmpty(new HashMap<>());
+
+        return creatorsMap
+                .map(creators -> {
+                    return records.stream()
+                            .map(record -> {
+                                UserDetails creator = creators.get(record.creator_id());
+
+                                return BookmarkResponse.builder()
+                                        .id(record.bookmark_id())
+                                        .notes(record.bookmark_notes())
+                                        .bookmarkedAt(record.bookmarked_at())
+                                        .categoryId(record.category_id())
+                                        .threadId(record.thread_id())
+                                        .threadTitle(record.title())
+                                        .threadCreatorId(record.creator_id())
+                                        .threadCreatorDisplayName(creator.getDisplayName())
+                                        .threadCreatorAvatarUrl(creator.getAvatarUrl())
+                                        .threadPostCount(record.post_count())
+                                        .threadViewCount(record.view_count())
+                                        .threadLastActivityAt(record.last_activity_at())
+                                        .threadStatus(ThreadStatus.fromString(record.thread_status()))
+                                        .threadType(ThreadType.fromString(record.thread_type()))
+                                        .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
+                                        .build();
+                            })
+                            .toList();
+                });
+    }
 
 }
