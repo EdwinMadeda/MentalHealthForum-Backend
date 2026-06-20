@@ -4,6 +4,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ReportSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.*;
@@ -618,13 +619,13 @@ public class ReportServiceImpl implements ReportService {
         String severityStr = severity != null ? severity.name() : null;
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
 
-        String effectiveSortBy = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection, effectiveSortBy);
+        ReportSortField sortByField = validateAndNormalizeSortBy(sortBy);
+        String effectiveSortDirection = determineSortDirection(sortDirection, sortByField);
 
         return contentReportRepository.findAllReportsPaginated(
                         reporterId, reportedUserId, threadId, postId, targetTypeStr,
                         statusStr, categoryStr, severityStr, assignedTo, effectiveSearch,
-                        effectiveSortBy, effectiveSortDirection, size, offset
+                        sortByField.getValue(), effectiveSortDirection, size, offset
                 ).flatMap(this::mapToResponse)
                 .collectList()
                 .zipWith(contentReportRepository.countAllReportsWithFilters(
@@ -635,23 +636,18 @@ public class ReportServiceImpl implements ReportService {
 
     }
 
-    private String validateAndNormalizeSortBy(String sortBy) {
-        Set<String> allowedFields = Set.of("severity", "reported_at");
-        if(sortBy == null || !allowedFields.contains(sortBy)){
-            return "reported_at"; // Default to most recent
-        }
-        return sortBy;
+    private ReportSortField validateAndNormalizeSortBy(String sortBy) {
+        return ReportSortField.fromString(sortBy);
     }
 
-    private String determineSortDirection(String sortDirection, String sortBy) {
+    private String determineSortDirection(String sortDirection, ReportSortField sortBy) {
         if(sortDirection != null){
             return "desc".equalsIgnoreCase(sortDirection) ? "DESC" : "ASC";
         }
         // Natural defaults
         return switch (sortBy) {
-            case "reported_at", "last_modified_at" -> "DESC";  // Newest first
-            case "severity" -> "ASC";  // Critical first
-            default -> "ASC";
+            case REPORTED_AT, LAST_MODIFIED_AT -> "DESC";  // Newest first
+            case SEVERITY -> "ASC";  // Critical first
         };
     }
 
