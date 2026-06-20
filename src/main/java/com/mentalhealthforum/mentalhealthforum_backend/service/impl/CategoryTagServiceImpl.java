@@ -546,20 +546,10 @@ public class CategoryTagServiceImpl implements CategoryTagService {
                 appUserService.getUserDetails(tag.getCreatedBy()),
                 categoryTagRepository.countByTagId(tag.getId())
         ).map(tuple -> {
-            UserDetails userDetails = tuple.getT1();
+            UserDetails creator = tuple.getT1();
             Long usage = tuple.getT2();
 
-            return CategoryTagResponse.builder()
-                    .id(tag.getId())
-                    .name(tag.getName())
-                    .slug(tag.getSlug())
-                    .description(tag.getDescription())
-                    .createdBy(tag.getCreatedBy())
-                    .createdByDisplayName(userDetails.getDisplayName())
-                    .usage(usage.intValue())
-                    .createdAt(tag.getCreatedAt())
-                    .updatedAt(tag.getUpdatedAt())
-                    .build();
+            return mapToResponseWithData(tag, creator, usage);
         });
     }
 
@@ -610,20 +600,29 @@ public class CategoryTagServiceImpl implements CategoryTagService {
                                 Long usage = usageCounts.getOrDefault(tag.getId(), 0L);
                                 UserDetails creator = creatorDetails.get(tag.getCreatedBy());
 
-                                return CategoryTagResponse.builder()
-                                        .id(tag.getId())
-                                        .name(tag.getName())
-                                        .slug(tag.getSlug())
-                                        .description(tag.getDescription())
-                                        .createdBy(tag.getCreatedBy())
-                                        .createdByDisplayName(creator.getDisplayName())
-                                        .usage(usage.intValue())
-                                        .createdAt(tag.getCreatedAt())
-                                        .updatedAt(tag.getUpdatedAt())
-                                        .build();
+                                return mapToResponseWithData(tag, creator, usage);
                             })
                             .toList();
                 });
+    }
+
+
+    private CategoryTagResponse mapToResponseWithData(
+        CategoryTagEntity tag,
+        UserDetails creator,
+        Long usage
+    ){
+        return CategoryTagResponse.builder()
+                .id(tag.getId())
+                .name(tag.getName())
+                .slug(tag.getSlug())
+                .description(tag.getDescription())
+                .createdBy(tag.getCreatedBy())
+                .createdByDisplayName(creator.getDisplayName())
+                .usage(usage.intValue())
+                .createdAt(tag.getCreatedAt())
+                .updatedAt(tag.getUpdatedAt())
+                .build();
     }
 
 }

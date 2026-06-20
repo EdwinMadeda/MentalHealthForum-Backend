@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
@@ -21,6 +22,7 @@ public class ThreadResponse {
     private UUID categoryId;
     private String categoryName;
     private String categorySlug;
+    private List<ThreadCategoryTag> categoryTags;
 
     private String title;
 
@@ -34,7 +36,6 @@ public class ThreadResponse {
     private ContentWarningType contentWarningType;
     private String contentWarningCustomText;
 
-    private List<String> tags;
     private boolean isSticky;
     private boolean isFeatured;
     private boolean isBookmarked;

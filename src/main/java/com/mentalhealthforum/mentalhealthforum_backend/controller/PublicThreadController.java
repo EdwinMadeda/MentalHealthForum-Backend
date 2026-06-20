@@ -116,6 +116,7 @@ public class PublicThreadController {
             @RequestParam(required = false, name = "has_content_warning") @Parameter(name = "has_content_warning", description = "Filter threads with content warnings") Boolean hasContentWarning,
             @RequestParam(required = false, name = "is_bookmarked") @Parameter(name = "is_bookmarked", description = "Filter by featured status") Boolean isBookmarked,
             @RequestParam(required = false, name = "is_watched") @Parameter(name = "is_watched", description = "Filter by watch status: true (watching), false (not watching)") Boolean isWatched,
+            @RequestParam(required = false, name = "category_tag_id") @Parameter(name = "category_tag_id", description = "Filter by category tag ID") UUID categoryTagId,
             @RequestParam(defaultValue = "", name = "search") @Parameter(name = "search", description = "Search by title (case-insensitive contains)") String search,
             @RequestParam(defaultValue = "last_activity_at", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: created_at, last_activity_at, post_count, view_count, title") String sortBy,
             @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
@@ -123,7 +124,7 @@ public class PublicThreadController {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
-        return threadService.getAllThreads(page, size, categoryId, creatorId, threadType, threadStatus, isDeleted, isFeatured, hasContentWarning, isBookmarked, isWatched, search, sortBy, sortDirection, viewerContext)
+        return threadService.getAllThreads(page, size, categoryId, creatorId, threadType, threadStatus, isDeleted, isFeatured, hasContentWarning, isBookmarked, isWatched, categoryTagId , search, sortBy, sortDirection, viewerContext)
                 .map(paginatedThreads -> {
                     String message = "Paginated thread records retrieved successfully.";
                     StandardSuccessResponse<PaginatedResponse<ThreadResponse>> response = new StandardSuccessResponse<>(message, paginatedThreads);

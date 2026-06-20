@@ -4,7 +4,11 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkCountRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkStatusRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchStatusRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagWithCategoryId;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.AddContentWarningRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
@@ -13,10 +17,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiExcept
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
-import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
-import com.mentalhealthforum.mentalhealthforum_backend.service.ThreadService;
-import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
-import com.mentalhealthforum.mentalhealthforum_backend.service.WatchThreadService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 @Service
 public class ThreadServiceImpl implements ThreadService {
@@ -39,6 +41,7 @@ public class ThreadServiceImpl implements ThreadService {
     private final TransactionalOperator transactionalOperator;
     private final AppUserRepository appUserRepository;
     private final CategoryRepository categoryRepository;
+    private final CategoryTagRepository categoryTagRepository;
     private final ThreadRepository threadRepository;
     private final ThreadEditHistoryRepository threadEditHistoryRepository;
     private final PostRepository postRepository;
@@ -46,6 +49,7 @@ public class ThreadServiceImpl implements ThreadService {
     private final ThreadStatusDefinitionRepository threadStatusDefinitionRepository;
     private final ThreadBookmarkRepository threadBookmarkRepository;
     private final WatchThreadRepository watchThreadRepository;
+    private final CategoryTagService categoryTagService;
     private final BookmarkService bookmarkService;
     private final UserModerationService userModerationService;
     private final WatchThreadService watchThreadService;
@@ -55,6 +59,7 @@ public class ThreadServiceImpl implements ThreadService {
             TransactionalOperator transactionalOperator,
             AppUserRepository appUserRepository,
             CategoryRepository categoryRepository,
+            CategoryTagRepository categoryTagRepository,
             ThreadRepository threadRepository,
             ThreadEditHistoryRepository threadEditHistoryRepository,
             PostRepository postRepository,
@@ -62,12 +67,14 @@ public class ThreadServiceImpl implements ThreadService {
             ThreadStatusDefinitionRepository threadStatusDefinitionRepository,
             ThreadBookmarkRepository threadBookmarkRepository,
             WatchThreadRepository watchThreadRepository,
+            CategoryTagService categoryTagService,
             BookmarkService bookmarkService,
             UserModerationService userModerationService,
             WatchThreadService watchThreadService) {
         this.transactionalOperator = transactionalOperator;
         this.appUserRepository = appUserRepository;
         this.categoryRepository = categoryRepository;
+        this.categoryTagRepository = categoryTagRepository;
         this.threadRepository = threadRepository;
         this.threadEditHistoryRepository = threadEditHistoryRepository;
         this.postRepository = postRepository;
@@ -75,6 +82,7 @@ public class ThreadServiceImpl implements ThreadService {
         this.threadStatusDefinitionRepository = threadStatusDefinitionRepository;
         this.threadBookmarkRepository = threadBookmarkRepository;
         this.watchThreadRepository = watchThreadRepository;
+        this.categoryTagService = categoryTagService;
         this.bookmarkService = bookmarkService;
         this.userModerationService = userModerationService;
 
@@ -125,6 +133,7 @@ public class ThreadServiceImpl implements ThreadService {
             Boolean hasContentWarning,
             Boolean isBookmarked,
             Boolean isWatched,
+            UUID categoryTagId,
             String search,
             String sortBy,
             String sortDirection,
@@ -162,6 +171,7 @@ public class ThreadServiceImpl implements ThreadService {
                 effectiveThreadStatus,
                 isDeleted, isFeatured, hasContentWarning,
                 currentUserId, isBookmarked, isWatched,
+                categoryTagId,
                 effectiveSearch,
                 sortByField.getValue(), normalizedSortDirection, size, offset);
 
@@ -172,6 +182,7 @@ public class ThreadServiceImpl implements ThreadService {
                 effectiveThreadStatus,
                 isDeleted, isFeatured, hasContentWarning,
                 currentUserId, isBookmarked, isWatched,
+                categoryTagId,
                 effectiveSearch);
 
         return Mono.zip(
@@ -927,7 +938,12 @@ public class ThreadServiceImpl implements ThreadService {
                         .defaultIfEmpty(0L),
 
                 watchThreadService.isWatchingThread(threadId, viewerContext)
-                        .defaultIfEmpty(false)
+                        .defaultIfEmpty(false),
+
+                categoryTagService.getTagsForCategory(thread.getCategoryId())
+                        .map(this::mapToThreadCategoryTag)
+                        .collectList()
+                        .defaultIfEmpty(List.of())
 
         ).map(tuple -> {
             CategoryEntity category = tuple.getT1();
@@ -935,6 +951,7 @@ public class ThreadServiceImpl implements ThreadService {
             Boolean isBookmarked = tuple.getT3();
             Long bookmarkCount = tuple.getT4();
             Boolean  isWatched = tuple.getT5();
+            List<ThreadCategoryTag> categoryTags = tuple.getT6();
 
 
             return mapResponseWithData(
@@ -944,6 +961,7 @@ public class ThreadServiceImpl implements ThreadService {
                     isBookmarked,
                     bookmarkCount,
                     isWatched,
+                    categoryTags,
                     viewerContext
             );
         });
@@ -1003,18 +1021,33 @@ public class ThreadServiceImpl implements ThreadService {
                         .collectMap(WatchStatusRecord::thread_id, WatchStatusRecord::is_watched)
                         .defaultIfEmpty(new HashMap<>());
 
+        // Batch fetch category tags for all categories
+        Mono<Map<UUID, List<ThreadCategoryTag>>> categoryTagsMap = categoryTagRepository
+                .findTagsByCategoryId(categoryIds)
+                .collectList()
+                .map(records -> records.stream()
+                        .collect(Collectors.groupingBy(
+                                CategoryTagWithCategoryId::category_id,
+                                Collectors.mapping(this::mapToThreadCategoryTag,
+                                        Collectors.toList())
+
+                        )));
+
+
         return Mono.zip(
                 categoriesMap,
                 creatorsMap,
                 bookmarkStatusMap,
                 bookmarkCountMap,
-                watchStatusMap
+                watchStatusMap,
+                categoryTagsMap
         ).map(tuple -> {
             Map<UUID, CategoryEntity> categories = tuple.getT1();
             Map<UUID, AppUserEntity> creators = tuple.getT2();
             Map<UUID, Boolean> bookmarkStatus = tuple.getT3();
             Map<UUID, Long> bookmarkCount = tuple.getT4();
             Map<UUID, Boolean> watchStatus = tuple.getT5();
+            Map<UUID, List<ThreadCategoryTag>> categoryTags = tuple.getT6();
 
             return threads.stream()
                     .map(thread -> mapResponseWithData(
@@ -1024,6 +1057,7 @@ public class ThreadServiceImpl implements ThreadService {
                             bookmarkStatus.getOrDefault(thread.getId(), false),
                             bookmarkCount.getOrDefault(thread.getId(), 0L),
                             watchStatus.getOrDefault(thread.getId(), false),
+                            categoryTags.get(thread.getCategoryId()),
                             viewerContext
                     ))
                     .toList();
@@ -1039,6 +1073,7 @@ public class ThreadServiceImpl implements ThreadService {
             Boolean isBookmarked,
             Long bookmarkCount,
             Boolean isWatched,
+            List<ThreadCategoryTag> categoryTags,
             ViewerContext viewerContext) {
 
         return ThreadResponse.builder()
@@ -1054,7 +1089,7 @@ public class ThreadServiceImpl implements ThreadService {
                 .threadStatus(thread.getThreadStatus())
                 .contentWarningType(thread.getContentWarningType())
                 .contentWarningCustomText(thread.getContentWarningCustomText())
-                .tags(thread.getTags())
+                .categoryTags(categoryTags)
                 .isSticky(thread.getIsSticky())
                 .isFeatured(thread.getIsFeatured())
                 .isBookmarked(isBookmarked)
@@ -1082,5 +1117,20 @@ public class ThreadServiceImpl implements ThreadService {
                 .build();
     }
 
+    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagWithCategoryId record){
+        return ThreadCategoryTag.builder()
+                .id(record.id())
+                .name(record.name())
+                .slug(record.slug())
+                .build();
+    }
+
+    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagResponse tag){
+        return ThreadCategoryTag.builder()
+                .id(tag.getId())
+                .name(tag.getName())
+                .slug(tag.getSlug())
+                .build();
+    }
 
 }

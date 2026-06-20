@@ -62,6 +62,13 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
                     ))
                 )
         
+            -- Category Tag filter
+            AND (:categoryTagId IS NULL OR t.category_id IN (
+                SELECT a.category_id
+                FROM category_tag_assignments a
+                WHERE a.tag_id = :categoryTagId
+            ))
+        
         ORDER BY
             is_sticky DESC,
             CASE :sortDirection
@@ -102,6 +109,7 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             @Param("currentUserId") UUID currentUserId,
             @Param("isBookmarked") Boolean isBookmarked,
             @Param("isWatched") Boolean isWatched,
+            @Param("categoryTagId") UUID categoryTagId,
             @Param("search") String search,
             @Param("sortBy") String sortBy,
             @Param("sortDirection") String sortDirection,
@@ -147,6 +155,13 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
                     WHERE w.thread_id = t.id AND w.user_id = :currentUserId
                     ))
                 )
+        
+            -- Category Tag filter
+            AND (:categoryTagId IS NULL OR t.category_id IN (
+                SELECT a.category_id
+                FROM category_tag_assignments a
+                WHERE a.tag_id = :categoryTagId
+            ))
         """)
     Mono<Long> countAllPaginated(
             @Param("categoryId") UUID categoryId,
@@ -159,6 +174,7 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             @Param("currentUserId") UUID currentUserId,
             @Param("isBookmarked") Boolean isBookmarked,
             @Param("isWatched") Boolean isWatched,
+            @Param("categoryTagId") UUID categoryTagId,
             @Param("search") String search
     );
 

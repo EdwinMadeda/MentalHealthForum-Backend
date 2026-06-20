@@ -32,6 +32,7 @@ public interface ThreadService {
             Boolean hasContentWarning,
             Boolean isBookmarked,
             Boolean isWatched,
+            UUID categoryTagId,
             String search,
             String sortBy,
             String sortDirection,
