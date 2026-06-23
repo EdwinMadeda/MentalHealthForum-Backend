@@ -1,6 +1,5 @@
 package com.mentalhealthforum.mentalhealthforum_backend.repository;
 
-import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.FocusCategoryEntity;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
@@ -10,7 +9,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Repository
