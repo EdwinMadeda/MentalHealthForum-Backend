@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.enums.listings;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import lombok.Getter;
 
 @Getter
@@ -37,5 +38,12 @@ public enum CategorySortField {
         return this.defaultDirection;
     }
 
+    public SortOption toSortOption(){
+        return SortOption.builder()
+                .value(this.value)
+                .label(this.label)
+                .defaultDirection(this.defaultDirection)
+                .build();
+    }
 
 }

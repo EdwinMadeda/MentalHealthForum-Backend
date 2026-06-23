@@ -193,7 +193,7 @@ public class ThreadServiceImpl implements ThreadService {
             long total = tuple.getT2();
 
             if (threads.isEmpty()) {
-                return Mono.just(new PaginatedResponse<>(List.of(), page, size, total));
+                return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
             }
 
             return enrichThreadWithBatchData(threads, currentUserId, viewerContext)
@@ -1127,8 +1127,7 @@ public class ThreadServiceImpl implements ThreadService {
             Map<UUID, AppUserEntity> creators,
             Map<UUID, CategoryEntity> categories,
             List<CategoryTagWithCategoryId> flatTags
-    ) {
-    }
+    ) {}
 
     private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagWithCategoryId record) {
         return ThreadCategoryTag.builder()
