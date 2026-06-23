@@ -4,14 +4,18 @@ import lombok.Getter;
 
 @Getter
 public enum CategorySortField {
-    SORT_ORDER("sort_order"),
-    NAME("name"),
-    CREATED_AT("created_at");
+    SORT_ORDER("sort_order", "sort order", "ASC"),
+    NAME("name", "name", "ASC"),
+    CREATED_AT("created_at", "created at", "DESC");
 
     private final String value;
+    private final String label;
+    private final String defaultDirection;
 
-    CategorySortField(String value) {
+    CategorySortField(String value, String label, String defaultDirection) {
         this.value = value;
+        this.label = label;
+        this.defaultDirection = defaultDirection;
     }
 
     public static CategorySortField fromString(String value) {
@@ -25,4 +29,13 @@ public enum CategorySortField {
         }
         return  SORT_ORDER;
     }
+
+    public String determineSortDirection(String sortDirection) {
+        if(sortDirection != null){
+            return "desc".equalsIgnoreCase(sortDirection) ? "DESC" : "ASC";
+        }
+        return this.defaultDirection;
+    }
+
+
 }

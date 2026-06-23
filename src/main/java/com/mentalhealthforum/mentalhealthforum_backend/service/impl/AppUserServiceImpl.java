@@ -49,7 +49,7 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.
  *   <li>Synchronize user data from Keycloak to local database</li>
  *   <li>Apply privacy rules for user profile visibility</li>
  *   <li>Enforce authorization for profile updates and deletions</li>
- *   <li>Provide paginated user listings with context-aware data</li>
+ *   <li>Provide paginated user filters with context-aware data</li>
  * </ul>
  *
  * @see AppUserService

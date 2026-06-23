@@ -1,4 +1,4 @@
-package com.mentalhealthforum.mentalhealthforum_backend.dto.listings;
+package com.mentalhealthforum.mentalhealthforum_backend.dto.filters;
 
 import lombok.Builder;
 import lombok.Data;

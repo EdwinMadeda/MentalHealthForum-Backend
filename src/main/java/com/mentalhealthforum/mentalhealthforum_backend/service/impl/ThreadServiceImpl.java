@@ -4,15 +4,13 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkCountRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkStatusRecord;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchStatusRecord;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagWithCategoryId;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.listings.FilterMetadata;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.listings.FilterOption;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.listings.SortOption;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.listings.ThreadFilterDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.ThreadFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.AddContentWarningRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
@@ -35,7 +33,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 @Service
@@ -1211,7 +1208,7 @@ public class ThreadServiceImpl implements ThreadService {
                 .collect(Collectors.toMap(
                         CategoryTagWithCategoryId::id,
                         Function.identity(),
-                        (exiting, replacement) -> exiting
+                        (existing, replacement) -> existing
                 ))
                 .values()
                 .stream()

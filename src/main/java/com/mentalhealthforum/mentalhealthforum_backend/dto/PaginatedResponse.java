@@ -1,6 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto;
 
-import com.mentalhealthforum.mentalhealthforum_backend.dto.listings.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import lombok.Getter;
 import lombok.Setter;
 

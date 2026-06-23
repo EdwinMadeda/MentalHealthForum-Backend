@@ -3,6 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.SlugGenerationResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.ThreadCountRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ModerationAction;
@@ -473,7 +474,7 @@ public class CategoryServiceImpl implements CategoryService {
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
 
         CategorySortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection);
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
         Boolean effectiveIsParent = (parentCategoryId != null && isParent != null) ? null : isParent;
 
         // User-friendly override: parent_category_id takes precedence
@@ -509,12 +510,6 @@ public class CategoryServiceImpl implements CategoryService {
        return CategorySortField.fromString(sortBy);
     }
 
-    private String determineSortDirection(String sortDirection) {
-        if(sortDirection != null){
-            return "desc".equalsIgnoreCase(sortDirection) ? "DESC" : "ASC";
-        }
-        return "ASC";
-    }
 
     /**
      * Enriches a single category with focus status and tags.
@@ -523,11 +518,17 @@ public class CategoryServiceImpl implements CategoryService {
      */
     private Mono<CategoryResponse> enrichSingleCategoryWithData(CategoryEntity category, ViewerContext viewerContext){
 
-        return focusCategoryService.isCategoryFocused(category.getId(), viewerContext)
-                .flatMap(isFocused -> categoryTagService.getTagsForCategory(category.getId())
-                        .collectList()
-                        .map(tags ->  mapCategoryResponse(category, tags, isFocused)));
+        return Mono.zip(
+                focusCategoryService.isCategoryFocused(category.getId(), viewerContext),
+                categoryTagService.getTagsForCategory(category.getId()).collectList(),
+                threadRepository.countActiveThreadsByCategory(category.getId())
+        ).map(tuple -> {
+            Boolean isFocused = tuple.getT1();
+            List<CategoryTagResponse> tags = tuple.getT2();
+            Long threadCount = tuple.getT3();
 
+            return mapCategoryResponse(category, tags, isFocused, threadCount);
+        });
     }
 
     /**
@@ -548,24 +549,24 @@ public class CategoryServiceImpl implements CategoryService {
                 .map(CategoryEntity::getId)
                 .toList();
 
+
+
         // Batch fetch all tags for all categories
         Mono<Map<UUID, List<CategoryTagResponse>>> tagsMap = categoryTagRepository
                 .findTagsByCategoryId(categoryIds)
-                .collectList()
-                .map(tagRecords -> tagRecords.stream()
-                        .collect(Collectors.groupingBy(
-                                CategoryTagWithCategoryId::category_id,
-                                Collectors.mapping(record -> CategoryTagResponse.builder()
-                                                .id(record.id())
-                                                .name(record.name())
-                                                .slug(record.slug())
-                                                .description(record.description())
-                                                .createdBy(record.created_by())
-                                                .createdAt(record.created_at())
-                                                .updatedAt(record.updated_at())
-                                                .build(),
-                                        Collectors.toList())
-                        )))
+                .collect(Collectors.groupingBy(
+                        CategoryTagWithCategoryId::category_id,
+                        Collectors.mapping(record -> CategoryTagResponse.builder()
+                                        .id(record.id())
+                                        .name(record.name())
+                                        .slug(record.slug())
+                                        .description(record.description())
+                                        .createdBy(record.created_by())
+                                        .createdAt(record.created_at())
+                                        .updatedAt(record.updated_at())
+                                        .build(),
+                                Collectors.toList())
+                ))
                 .defaultIfEmpty(new HashMap<>());
 
         // Batch fetch focus status for all categories (if user authenticated)
@@ -576,10 +577,16 @@ public class CategoryServiceImpl implements CategoryService {
                     .defaultIfEmpty(Set.of());
         }
 
-        return Mono.zip(tagsMap, focusedSet)
+        // Batch fetch thread counts for categories
+        Mono<Map<UUID, Long>> threadCountsMap = threadRepository.findThreadCountsByCategoryIds(categoryIds)
+                .collectMap(ThreadCountRecord::category_id, ThreadCountRecord::count)
+                .defaultIfEmpty(new HashMap<>());
+
+        return Mono.zip(tagsMap, focusedSet, threadCountsMap)
                 .map(tuple -> {
                     Map<UUID, List<CategoryTagResponse>> tagsByCategory = tuple.getT1();
                     Set<UUID> focusIds = tuple.getT2();
+                    Map<UUID, Long> threadCounts = tuple.getT3();
 
                     return categories.stream()
                         .map(category -> {
@@ -587,7 +594,8 @@ public class CategoryServiceImpl implements CategoryService {
                                     category.getId(), List.of()
                             );
                             boolean isFocused = focusIds.contains(category.getId());
-                            return mapCategoryResponse(category, tags, isFocused);
+                            Long threadCount = threadCounts.getOrDefault(category.getId(), 0L);
+                            return mapCategoryResponse(category, tags, isFocused, threadCount);
                         })
                         .collect(Collectors.toList());
 
@@ -597,8 +605,8 @@ public class CategoryServiceImpl implements CategoryService {
     private CategoryResponse mapCategoryResponse(
             CategoryEntity category,
             List<CategoryTagResponse> tags,
-            Boolean isFocused
-    ) {
+            Boolean isFocused,
+            Long threadCount) {
         return CategoryResponse.builder()
                 .id(category.getId())
                 .name(category.getName())
@@ -615,6 +623,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .isChild(category.isChild())
                 .isFocused(isFocused)
                 .tags(tags)
+                .threadCount(threadCount)
                 .build();
     }
 
