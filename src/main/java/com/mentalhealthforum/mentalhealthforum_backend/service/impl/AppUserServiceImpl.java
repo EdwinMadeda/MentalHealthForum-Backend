@@ -2,7 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.onboarding.OnboardingPolicy;
@@ -478,7 +478,7 @@ public class AppUserServiceImpl implements AppUserService {
     public Mono<UserDetails> getUserDetails(UUID userId) {
         return appUserRepository.findAppUserByKeycloakId(userId.toString())
                 .map(AppUserEntity::toUserDetails)
-                .defaultIfEmpty(AppUserEntity.unknownUser());
+                    .defaultIfEmpty(AppUserEntity.defaultUser());
     }
 
 

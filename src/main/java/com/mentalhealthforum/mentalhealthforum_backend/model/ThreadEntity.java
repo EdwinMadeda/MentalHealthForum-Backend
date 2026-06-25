@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadSettings;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
@@ -124,7 +125,21 @@ public class ThreadEntity {
         );
     }
 
-    // Helper methods
+    // ==================== HELPER METHODS ====================
+
+    public ThreadDetails toThreadDetails(){
+        return ThreadDetails.builder()
+                .title(this.title)
+                .build();
+    }
+
+
+    public static ThreadDetails defaultThread() {
+        return ThreadDetails.builder()
+                .title(null)
+                .build();
+    }
+
     public boolean isOpen(){
         return threadStatus == ThreadStatus.OPEN && !isDeleted;
     }

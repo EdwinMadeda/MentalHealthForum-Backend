@@ -1,4 +1,4 @@
-package com.mentalhealthforum.mentalhealthforum_backend.dto.discovery;
+package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user;
 
 import lombok.Builder;
 import lombok.Data;

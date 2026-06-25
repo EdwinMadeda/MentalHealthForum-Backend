@@ -41,6 +41,9 @@ public class ContentReportEntity {
     @Column("post_id")
     private UUID postId;
 
+    @Column("post_content")
+    private String postContent;
+
     @Column("reported_user_id")
     private UUID reportedUserId;
 

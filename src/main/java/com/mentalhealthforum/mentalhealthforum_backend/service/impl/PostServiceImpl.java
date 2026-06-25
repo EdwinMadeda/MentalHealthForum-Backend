@@ -2,7 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.PostFilterDto;

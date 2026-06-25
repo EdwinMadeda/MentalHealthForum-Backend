@@ -14,9 +14,17 @@ import java.util.UUID;
 
 public interface ReportService {
 
+    // TODO: Future - Check if user is report-banned
+    // if (userIsReportBanned(reporterId)) {
+    //     return Mono.error(new ApiException("You are temporarily banned from submitting reports", ErrorCode.FORBIDDEN));
+    // }
 
-    Mono<ReportResponse> createReport(CreateReportRequest request, ViewerContext viewerContext);
 
+    Mono<ReportResponse> createThreadReport(CreateThreadReportRequest request, ViewerContext viewerContext);
+
+    Mono<ReportResponse> createPostReport(CreatePostReportRequest request, ViewerContext viewerContext);
+
+    Mono<ReportResponse> createUserReport(CreateUserReportRequest request, ViewerContext viewerContext);
 
     Mono<PaginatedResponse<ReportResponse>> getOwnReports(
             int page,

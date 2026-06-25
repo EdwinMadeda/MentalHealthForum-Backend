@@ -28,4 +28,10 @@ public class FilterOption {
         this.avatarUrl = avatarUrl;
         this.count = count;
     }
+
+    public FilterOption(String label, String value, Long count){
+        this.label = label;
+        this.value = value;
+        this.count = count;
+    }
 }

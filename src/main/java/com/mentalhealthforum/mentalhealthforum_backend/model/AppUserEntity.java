@@ -1,7 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.notification.NotificationPreferences;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.SupportRole;
@@ -240,9 +240,9 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     }
 
     // For unknown/default user
-    public static UserDetails unknownUser(){
+    public static UserDetails defaultUser(){
         return UserDetails.builder()
-                .displayName("unknown")
+                .displayName(null)
                 .avatarUrl(null)
                 .bio(null)
                 .lastActiveAt(null)

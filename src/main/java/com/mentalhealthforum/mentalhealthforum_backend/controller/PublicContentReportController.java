@@ -37,16 +37,40 @@ public class PublicContentReportController {
 
     // ==================== REPORT ACTIONS ====================
 
-    @PostMapping
-    public Mono<ResponseEntity<StandardSuccessResponse<ReportResponse>>> createReport(
+    @PostMapping("/threads")
+    public Mono<ResponseEntity<StandardSuccessResponse<ReportResponse>>> createThreadReport(
             @AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody CreateReportRequest request
+            @Valid @RequestBody CreateThreadReportRequest request
             ){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-        return reportService.createReport(request, viewerContext)
+        return reportService.createThreadReport(request, viewerContext)
                 .map(report-> ResponseEntity.status(HttpStatus.CREATED)
-                        .body(new StandardSuccessResponse<>("Report submitted successfully", report)));
+                        .body(new StandardSuccessResponse<>("Thread report submitted successfully", report)));
+    }
+
+    @PostMapping("/posts")
+    public Mono<ResponseEntity<StandardSuccessResponse<ReportResponse>>> createPostReport(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody CreatePostReportRequest request
+    ){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+        return reportService.createPostReport(request, viewerContext)
+                .map(report-> ResponseEntity.status(HttpStatus.CREATED)
+                        .body(new StandardSuccessResponse<>("Post report submitted successfully", report)));
+    }
+
+    @PostMapping("/users")
+    public Mono<ResponseEntity<StandardSuccessResponse<ReportResponse>>> createUserReport(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody CreateUserReportRequest request
+    ){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+        return reportService.createUserReport(request, viewerContext)
+                .map(report-> ResponseEntity.status(HttpStatus.CREATED)
+                        .body(new StandardSuccessResponse<>("User report submitted successfully", report)));
     }
 
     @GetMapping

@@ -5,7 +5,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkedThreadRecord;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.BookmarkFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;

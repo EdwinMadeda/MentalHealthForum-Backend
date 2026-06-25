@@ -16,16 +16,10 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreateReportRequest {
+public class CreatePostReportRequest {
 
-    @NotNull(message = "Target type is required")
-    private ReportTargetType targetType;
-
-    private UUID threadId;
-
+    @NotNull(message = "Post Id is required")
     private UUID postId;
-
-    private UUID reportedUserId;
 
     @NotNull(message = "Report category is required")
     private ReportCategory reportCategory;

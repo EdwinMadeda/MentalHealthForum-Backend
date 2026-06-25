@@ -3,6 +3,12 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.ReportFilterDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ReportSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
@@ -18,11 +24,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 
 @Service
@@ -64,23 +70,43 @@ public class ReportServiceImpl implements ReportService {
     // ==================== USER ACTIONS ====================
 
     @Override
-    public Mono<ReportResponse> createReport(CreateReportRequest request, ViewerContext viewerContext) {
+    public Mono<ReportResponse> createThreadReport(CreateThreadReportRequest request, ViewerContext viewerContext) {
 
         UUID reporterId = UUID.fromString(viewerContext.getUserId());
-
-        // TODO: Future - Check if user is report-banned
-        // if (userIsReportBanned(reporterId)) {
-        //     return Mono.error(new ApiException("You are temporarily banned from submitting reports", ErrorCode.FORBIDDEN));
-        // }
-
-
         // Validate target exists
-        return validateReportTarget(request)
-                .then(validateNotDuplicateReport(reporterId, request))
-                .then(createReportEntity(reporterId, request))
-                .flatMap(this::mapToResponse)
+        return validateThreadExists(request.getThreadId())
+                .flatMap(thread -> resolveReportedUser(request, thread))
+                .flatMap(targetUserId ->
+                    validateNotDuplicateReport(reporterId, request.getThreadId(), null, targetUserId)
+                            .thenReturn(targetUserId)
+                )
+                .flatMap(targetUserId -> createThreadReportEntity(reporterId, request, targetUserId))
+                .flatMap(this::enrichSingleReportWithData)
                 .as(transactionalOperator::transactional);
     }
+
+    @Override
+    public Mono<ReportResponse> createPostReport(CreatePostReportRequest request, ViewerContext viewerContext) {
+
+        UUID reporterId = UUID.fromString(viewerContext.getUserId());
+        // Validate target exists
+        return validateAndCreatePostReport(reporterId, request)
+                .flatMap(this::enrichSingleReportWithData)
+                .as(transactionalOperator::transactional);
+    }
+
+    @Override
+    public Mono<ReportResponse> createUserReport(CreateUserReportRequest request, ViewerContext viewerContext) {
+
+        UUID reporterId = UUID.fromString(viewerContext.getUserId());
+        // Validate target exists
+        return validateUserExists(request.getReportedUserId())
+                .then(validateNotDuplicateReport(reporterId, null, null, request.getReportedUserId()))
+                .then(createUserReportEntity(reporterId, request))
+                .flatMap(this::enrichSingleReportWithData)
+                .as(transactionalOperator::transactional);
+    }
+
 
     @Override
     public Mono<PaginatedResponse<ReportResponse>> getOwnReports(
@@ -140,7 +166,7 @@ public class ReportServiceImpl implements ReportService {
                   if(!report.getReporterId().equals(userId) && !viewerContext.isModeratorOrAdmin()){
                         return Mono.error(new ApiException("You can only view your own reports", ErrorCode.FORBIDDEN));
                     }
-                    return mapToResponse(report);
+                    return enrichSingleReportWithData(report);
                 });
     }
 
@@ -173,7 +199,7 @@ public class ReportServiceImpl implements ReportService {
                                 report.setLastModifiedAt(Instant.now());
 
                                 return contentReportRepository.save(report).
-                                        flatMap(this::mapToResponse);
+                                        flatMap(this::enrichSingleReportWithData);
                             },
                             List.of(
                                     new ValidationRule(
@@ -206,7 +232,7 @@ public class ReportServiceImpl implements ReportService {
                                 report.setLastModifiedAt(Instant.now());
                                 // dismissalReason remains null for resolve actions
                                 return contentReportRepository.save(report)
-                                        .flatMap(this::mapToResponse);
+                                        .flatMap(this::enrichSingleReportWithData);
 
                             },
                             List.of(
@@ -249,7 +275,7 @@ public class ReportServiceImpl implements ReportService {
                     report.setLastModifiedAt(Instant.now());
 
                     return contentReportRepository.save(report)
-                            .flatMap(this::mapToResponse);
+                            .flatMap(this::enrichSingleReportWithData);
                 },
                 List.of(
                         new ValidationRule(
@@ -289,7 +315,7 @@ public class ReportServiceImpl implements ReportService {
                     // Keep existing assignedModeratorId for audit trail
 
                     return contentReportRepository.save(report)
-                            .flatMap(this::mapToResponse);
+                            .flatMap(this::enrichSingleReportWithData);
                 },
                 List.of(
                         new ValidationRule(
@@ -347,9 +373,9 @@ public class ReportServiceImpl implements ReportService {
                     if(updated){
                         report.setLastModifiedAt(Instant.now());
                         return contentReportRepository.save(report)
-                                .flatMap(this::mapToResponse);
+                                .flatMap(this::enrichSingleReportWithData);
                     }
-                    return Mono.just(report).flatMap(this::mapToResponse);
+                    return Mono.just(report).flatMap(this::enrichSingleReportWithData);
                 },
                 List.of(
                         new ValidationRule(
@@ -471,42 +497,57 @@ public class ReportServiceImpl implements ReportService {
                 .as(transactionalOperator::transactional);
     }
 
-    private Mono<Void> validateReportTarget(CreateReportRequest request) {
-        return switch (request.getTargetType()) {
-            case POST -> {
-                if (request.getPostId() == null) {
-                    yield Mono.error(new ApiException("Post Id is required for post reports", ErrorCode.VALIDATION_FAILED));
-                }
-                yield postRepository.findByIdAndIsDeletedFalse(request.getPostId())
-                        .switchIfEmpty(Mono.error(new ApiException("Post not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                        .then();
-            }
-            case THREAD -> {
-                if (request.getThreadId() == null) {
-                    yield Mono.error(new ApiException("Thread Id is required for thread reports", ErrorCode.VALIDATION_FAILED));
-                }
-                yield threadRepository.findByIdAndIsDeletedFalse(request.getThreadId())
-                        .switchIfEmpty(Mono.error(new ApiException("Thread not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                        .then();
-            }
-            case USER -> {
-                if (request.getReportedUserId() == null) {
-                    yield Mono.error(new ApiException("User Id is required for user reports", ErrorCode.VALIDATION_FAILED));
-                }
-                yield appUserRepository.findAppUserByKeycloakId(request.getReportedUserId().toString())
-                        .switchIfEmpty(Mono.error(new ApiException("User not found", ErrorCode.RESOURCE_NOT_FOUND)))
-                        .then();
-            }
-            default -> Mono.error(new ApiException("Invalid target type", ErrorCode.VALIDATION_FAILED));
-        };
+    private Mono<ThreadEntity> validateThreadExists(UUID threadId){
+        return threadRepository.findByIdAndIsDeletedFalse(threadId)
+                .switchIfEmpty(Mono.error(new ApiException("Thread not found", ErrorCode.RESOURCE_NOT_FOUND)));
     }
 
-    private Mono<ReportResponse> validateNotDuplicateReport(UUID reporterId, CreateReportRequest request) {
+    private Mono<UUID> resolveReportedUser(CreateThreadReportRequest request, ThreadEntity thread){
+        UUID targetUserId = request.getReportedUserId();
+
+        if(targetUserId == null){
+            return Mono.just(thread.getCreatorId());
+        }
+
+        return validateUserInThread(targetUserId, thread.getId())
+                .thenReturn(targetUserId);
+    }
+
+    private Mono<Void> validateUserInThread(UUID userId, UUID threadId){
+        // check if the user is the creator
+        return postRepository.isUserInThread(threadId, userId)
+                .flatMap(isInThread -> {
+                    if(isInThread){
+                        return Mono.empty();
+                    }
+                    return Mono.error(new ApiException(
+                            "User is not part of this thread discussion",
+                            ErrorCode.VALIDATION_FAILED
+                    ));
+                });
+    }
+
+    private Mono<ContentReportEntity> validateAndCreatePostReport(UUID reporterId, CreatePostReportRequest request){
+        return postRepository.findByIdAndIsDeletedFalse(request.getPostId())
+                .switchIfEmpty(Mono.error(new ApiException("Post not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(post ->
+                        validateNotDuplicateReport(reporterId, null, request.getPostId(), null)
+                                .then(createPostReportEntity(reporterId, request, post))
+                );
+    }
+
+    public Mono<Void> validateUserExists(UUID userId){
+        return appUserRepository.findAppUserByKeycloakId(userId.toString())
+                .switchIfEmpty(Mono.error(new ApiException("User not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .then();
+    }
+
+    private Mono<Void> validateNotDuplicateReport(UUID reporterId, UUID threadId, UUID postId, UUID reportedUserId) {
         return contentReportRepository.hasUserReportedTarget(
                 reporterId,
-                request.getPostId(),
-                request.getThreadId(),
-                request.getReportedUserId())
+                postId,
+                threadId,
+                reportedUserId)
                 .flatMap(exists -> {
                     if(exists){
                         return Mono.error(new ApiException("You have already reported this content", ErrorCode.VALIDATION_FAILED));
@@ -515,18 +556,22 @@ public class ReportServiceImpl implements ReportService {
                 });
     }
 
-    private Mono<ContentReportEntity> createReportEntity(UUID reporterId, CreateReportRequest request) {
+    private Mono<ContentReportEntity> createThreadReportEntity(UUID reporterId, CreateThreadReportRequest request, UUID targetUserId) {
         ContentReportEntity report = ContentReportEntity.builder()
+                // Static data (provided at report time)
                 .reporterId(reporterId)
                 .isAnonymous(request.getIsAnonymous())
-                .targetType(request.getTargetType())
+                .targetType(ReportTargetType.THREAD)
                 .threadId(request.getThreadId())
-                .postId(request.getPostId())
-                .reportedUserId(request.getReportedUserId())
+                .reportedUserId(targetUserId)
+
+                // Report metadata (provided by reporter)
                 .reportCategory(request.getReportCategory())
                 .severity(request.getSeverity())
                 .reason(request.getReason())
                 .details(request.getDetails())
+
+                // System metadata
                 .status(ReportStatus.PENDING)
                 .reportedAt(Instant.now())
                 .lastModifiedAt(Instant.now())
@@ -535,32 +580,59 @@ public class ReportServiceImpl implements ReportService {
         return contentReportRepository.save(report);
     }
 
-    private Mono<ReportResponse> mapToResponse(ContentReportEntity report) {
-        return Mono.just(ReportResponse.builder()
-                        .id(report.getId())
-                        .reporterId(report.getIsAnonymous()? null : report.getReporterId())
-                        .targetType(report.getTargetType())
-                        .threadId(report.getThreadId())
-                        .postId(report.getPostId())
-                        .reportedUserId(report.getReportedUserId())
-                        .reportCategory(report.getReportCategory())
-                        .severity(report.getSeverity())
-                        .reason(report.getReason())
-                        .details(report.getDetails())
-                        .status(report.getStatus())
-                        .assignedModeratorId(report.getAssignedModeratorId())
-                        .assignedAt(report.getAssignedAt())
-                        .actionTaken(report.getActionTaken())
-                        .actionTakenDetails(report.getActionTakenDetails())
-                        .dismissalReason(report.getDismissalReason())
-                        .resolutionNotes(report.getResolutionNotes())
-                        .reviewedAt(report.getReviewedAt())
-                        .reviewedBy(report.getReviewedBy())
-                        .reportedAt(report.getReportedAt())
-                        .lastModifiedAt(report.getLastModifiedAt())
-                        .isAnonymous(report.getIsAnonymous())
-                .build());
+    private Mono<ContentReportEntity> createPostReportEntity(UUID reporterId, CreatePostReportRequest request, PostEntity post) {
+        ContentReportEntity report = ContentReportEntity.builder()
+                // Static data (provided at report time)
+                .reporterId(reporterId)
+                .isAnonymous(request.getIsAnonymous())
+                .targetType(ReportTargetType.POST)
+                .postId(request.getPostId())
+
+                //  SNAPSHOTS - Capture the state at reporting time
+                .postContent(post.getContent()) // What was said
+                .threadId(post.getThreadId()) // Where it was said
+                .reportedUserId(post.getAuthorId()) // Who said it
+
+                // Report metadata (provided by reporter)
+                .reportCategory(request.getReportCategory())
+                .severity(request.getSeverity())
+                .reason(request.getReason())
+                .details(request.getDetails())
+
+                // System metadata
+                .status(ReportStatus.PENDING)
+                .reportedAt(Instant.now())
+                .lastModifiedAt(Instant.now())
+                .build();
+
+        return contentReportRepository.save(report);
     }
+
+
+    private Mono<ContentReportEntity> createUserReportEntity(UUID reporterId, CreateUserReportRequest request) {
+        // For non-POST reports
+        ContentReportEntity report = ContentReportEntity.builder()
+                // Static data (provided at report time)
+                .reporterId(reporterId)
+                .isAnonymous(request.getIsAnonymous())
+                .targetType(ReportTargetType.USER)
+                .reportedUserId(request.getReportedUserId())
+
+                // Report metadata (provided by reporter)
+                .reportCategory(request.getReportCategory())
+                .severity(request.getSeverity())
+                .reason(request.getReason())
+                .details(request.getDetails())
+
+                // System metadata
+                .status(ReportStatus.PENDING)
+                .reportedAt(Instant.now())
+                .lastModifiedAt(Instant.now())
+                .build();
+
+        return contentReportRepository.save(report);
+    }
+
 
     private Mono<ReportTemplateResponse> mapToReportTemplateResponse(ReportTemplateEntity template) {
         return Mono.just(ReportTemplateResponse.builder()
@@ -620,19 +692,34 @@ public class ReportServiceImpl implements ReportService {
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
 
         ReportSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection, sortByField);
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return contentReportRepository.findAllReportsPaginated(
                         reporterId, reportedUserId, threadId, postId, targetTypeStr,
                         statusStr, categoryStr, severityStr, assignedTo, effectiveSearch,
                         sortByField.getValue(), effectiveSortDirection, size, offset
-                ).flatMap(this::mapToResponse)
+                )
                 .collectList()
                 .zipWith(contentReportRepository.countAllReportsWithFilters(
                         reporterId, reportedUserId, threadId, postId, targetTypeStr,
                         statusStr, categoryStr, severityStr, assignedTo, effectiveSearch
                 ))
-                .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                .flatMap(tuple -> {
+                   List<ContentReportEntity> reports = tuple.getT1();
+                   long total = tuple.getT2();
+
+                   if(reports.isEmpty()){
+                       return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                   }
+
+                   return enrichReportsWithBatchData(reports)
+                           .map(enrichedReports -> {
+
+                               FilterMetadata<ReportFilterDto> filters = buildReportFilters(enrichedReports);
+                               return  new PaginatedResponse<>(enrichedReports.responses, page, size, total, filters);
+
+                           });
+                });
 
     }
 
@@ -640,16 +727,6 @@ public class ReportServiceImpl implements ReportService {
         return ReportSortField.fromString(sortBy);
     }
 
-    private String determineSortDirection(String sortDirection, ReportSortField sortBy) {
-        if(sortDirection != null){
-            return "desc".equalsIgnoreCase(sortDirection) ? "DESC" : "ASC";
-        }
-        // Natural defaults
-        return switch (sortBy) {
-            case REPORTED_AT, LAST_MODIFIED_AT -> "DESC";  // Newest first
-            case SEVERITY -> "ASC";  // Critical first
-        };
-    }
 
     private Mono<UserReportHistoryResponse> getUserReportHistoryInternal(UUID userId){
         return userReportHistoryRepository.findByUserId(userId)
@@ -692,5 +769,487 @@ public class ReportServiceImpl implements ReportService {
                 .build();
     }
 
+    /**
+     * Helper method to wrap optional Mono values in Optional.
+     * Avoids null warnings and handles optional data gracefully.
+     */
+    private<T> Mono<Optional<T>> optionalMono(Supplier<Mono<T>> supplier, boolean shouldFetch){
+        if(!shouldFetch){
+            return Mono.just(Optional.empty());
+        }
+        return supplier.get()
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
+    }
+
+    /**
+     * Enriches a single report with reporter, reported user, thread, assigned moderator, reviewed by details.
+     * Uses individual fetches since only one report is being enriched.
+     */
+    private Mono<ReportResponse> enrichSingleReportWithData(ContentReportEntity report){
+
+        // Fetch reporter (if not anonymous)
+        Mono<UserDetails> reporterMono = report.getIsAnonymous()
+                ? Mono.just(AppUserEntity.defaultUser())
+                : appUserRepository.findAppUserByKeycloakId(report.getReporterId().toString())
+                  .map(AppUserEntity::toUserDetails)
+                  .defaultIfEmpty(AppUserEntity.defaultUser());
+
+
+        // Fetch reported user (if exists)
+        Mono<UserDetails> reportedUserMono = report.getReportedUserId() != null
+                ? appUserRepository.findAppUserByKeycloakId(report.getReportedUserId().toString())
+                .map(AppUserEntity::toUserDetails)
+                  .defaultIfEmpty(AppUserEntity.defaultUser())
+                : Mono.just(AppUserEntity.defaultUser());
+
+
+        // Fetch thread (if exists)
+        Mono<ThreadDetails> threadMono = report.getThreadId() != null
+                ? threadRepository.findById(report.getThreadId())
+                  .map(ThreadEntity::toThreadDetails)
+                : Mono.just(ThreadEntity.defaultThread());
+
+        // Fetch assigned moderator (if exists)
+        Mono<UserDetails> assignedModeratorMono = report.getAssignedModeratorId() != null
+                ? appUserRepository.findAppUserByKeycloakId(report.getAssignedModeratorId().toString())
+                .map(AppUserEntity::toUserDetails)
+                .defaultIfEmpty(AppUserEntity.defaultUser())
+                : Mono.just(AppUserEntity.defaultUser());
+
+
+        // Fetch reviewed by (if exists)
+        Mono<UserDetails> reviewedByMono = report.getReviewedBy() != null
+                ? appUserRepository.findAppUserByKeycloakId(report.getReviewedBy().toString())
+                .map(AppUserEntity::toUserDetails)
+                .defaultIfEmpty(AppUserEntity.defaultUser())
+                : Mono.just(AppUserEntity.defaultUser());
+
+        return Mono.zip(
+                reporterMono,
+                reportedUserMono,
+                threadMono,
+                assignedModeratorMono,
+                reviewedByMono
+        ).map(tuple -> mapToTypedResponseWithData(
+                report,
+                tuple.getT1(), // reporter
+                tuple.getT2(), // reportedUser
+                tuple.getT3(), // thread
+                tuple.getT4(), // assignedModerator
+                tuple.getT5()  // reviewedBy
+        ));
+    }
+
+
+    private Mono<EnrichedReportData> enrichReportsWithBatchData(List<ContentReportEntity> reports) {
+        if(reports.isEmpty()){
+            return Mono.just(new EnrichedReportData(
+                   List.of(),
+                   List.of(),
+                   Map.of(),
+                   Map.of(),
+                   Map.of(),
+                   Map.of()
+            ));
+        }
+
+        // Extract IDs
+        List<UUID> reporterIds = reports.stream()
+                .map(ContentReportEntity::getReporterId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<UUID> reportedUserIds = reports.stream()
+                .map(ContentReportEntity::getReportedUserId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<UUID> threadIds = reports.stream()
+                .map(ContentReportEntity::getThreadId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<UUID> assignedModeratorIds = reports.stream()
+                .map(ContentReportEntity::getAssignedModeratorId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<UUID> reviewerIds = reports.stream()
+                .map(ContentReportEntity::getReviewedBy)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch reporters
+        Mono<Map<UUID, UserDetails>> reportersMap = appUserRepository
+                .findAppUsersByKeycloakIds(reporterIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
+
+        // Batch fetch reported users
+        Mono<Map<UUID, UserDetails>> reportedUserMap = appUserRepository
+                .findAppUsersByKeycloakIds(reportedUserIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
+
+        // Batch fetch threads
+        Mono<Map<UUID, ThreadDetails>> threadsMap = threadRepository
+                .findThreadsByIds(threadIds)
+                .collectMap(ThreadEntity::getId, ThreadEntity::toThreadDetails);
+
+        // Batch fetch assigned moderators
+        Mono<Map<UUID, UserDetails>> assignedModeratorsMap = appUserRepository
+                .findAppUsersByKeycloakIds(assignedModeratorIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
+
+        // Batch fetch reviewers
+        Mono<Map<UUID, UserDetails>> reviewersMap = appUserRepository
+                .findAppUsersByKeycloakIds(reviewerIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
+
+        return Mono.zip(
+                reportersMap,
+                reportedUserMap,
+                threadsMap,
+                assignedModeratorsMap,
+                reviewersMap
+        ).map(tuple -> {
+            Map<UUID, UserDetails> reporters = tuple.getT1();
+            Map<UUID, UserDetails> reportedUsers = tuple.getT2();
+            Map<UUID, ThreadDetails> threads = tuple.getT3();
+            Map<UUID, UserDetails> assignedModerators = tuple.getT4();
+            Map<UUID, UserDetails> reviewers = tuple.getT5();
+
+            List<ReportResponse> responses = reports.stream()
+                    .map(report -> mapToTypedResponseWithData(
+                            report,
+                            reporters.getOrDefault(report.getReporterId(), AppUserEntity.defaultUser()),
+                            reportedUsers.getOrDefault(report.getReportedUserId(), AppUserEntity.defaultUser()),
+                            threads.getOrDefault(report.getThreadId(), ThreadEntity.defaultThread()),
+                            assignedModerators.getOrDefault(report.getAssignedModeratorId(), AppUserEntity.defaultUser()),
+                            reviewers.getOrDefault(report.getReviewedBy(), AppUserEntity.defaultUser())
+                    ))
+                    .toList();
+
+            return new EnrichedReportData(
+                    responses,
+                    reports,
+                    reporters,
+                    reportedUsers,
+                    threads,
+                    assignedModerators
+            );
+
+        });
+    }
+
+    /**
+     * Maps a report to a response WITH enrichment data.
+     */
+
+    private ReportResponse mapToTypedResponseWithData(
+            ContentReportEntity report,
+            UserDetails reporter,
+            UserDetails reportedUser,
+            ThreadDetails thread,
+            UserDetails assignedModerator,
+            UserDetails reviewer
+    ) {
+        UUID reporterId = report.getReporterId();
+        String reporterDisplayName = reporter.getDisplayName();
+        String reporterAvatarUrl = reporter.getAvatarUrl();
+
+        if(report.getIsAnonymous()){
+            reporterId = null;
+            reporterDisplayName = null;
+            reporterAvatarUrl = null;
+        }
+
+        return switch (report.getTargetType()){
+            case THREAD -> ThreadReportResponse.builder()
+                    .id(report.getId())
+
+                    // Reporter info
+                    .reporterId(reporterId)
+                    .reporterDisplayName(reporterDisplayName)
+                    .reporterAvatarUrl(reporterAvatarUrl)
+
+                    // Target info
+                    .targetType(report.getTargetType())
+                    .threadId(report.getThreadId())
+                    .threadTitle(thread.getTitle())
+
+
+                    // Report details
+                    .reportCategory(report.getReportCategory())
+                    .severity(report.getSeverity())
+                    .reason(report.getReason())
+                    .details(report.getDetails())
+                    .status(report.getStatus())
+
+                    // Moderation info
+                    .assignedModeratorId(report.getAssignedModeratorId())
+                    .assignedModeratorDisplayName(assignedModerator.getDisplayName())
+                    .assignedModeratorAvatarUrl(assignedModerator.getAvatarUrl())
+                    .assignedAt(report.getAssignedAt())
+                    .actionTaken(report.getActionTaken())
+                    .actionTakenDetails(report.getActionTakenDetails())
+                    .dismissalReason(report.getDismissalReason())
+                    .resolutionNotes(report.getResolutionNotes())
+                    .reviewedAt(report.getReviewedAt())
+                    .reviewedBy(report.getReviewedBy())
+                    .reviewedByDisplayName(reviewer.getDisplayName())
+                    .reviewedByAvatarUrl(reviewer.getAvatarUrl())
+
+                    // Timestamps
+                    .reportedAt(report.getReportedAt())
+                    .lastModifiedAt(report.getLastModifiedAt())
+                    .isAnonymous(report.getIsAnonymous())
+                    .build();
+
+            case POST -> PostReportResponse.builder()
+                    .id(report.getId())
+
+                    // Reporter info
+                    .reporterId(reporterId)
+                    .reporterDisplayName(reporterDisplayName)
+                    .reporterAvatarUrl(reporterAvatarUrl)
+
+                    // Target info
+                    .targetType(report.getTargetType())
+                    .postId(report.getPostId())
+                    .postContent(report.getPostContent())
+                    // Thread context - optional, but if threadId exists, thread should exist
+                    .threadId(report.getThreadId())
+                    .threadTitle(thread != null? thread.getTitle() : null)
+
+
+                    // Reported user - OPTIONAL for POST reports
+                    .reportedUserId(report.getReportedUserId())
+                    .reportedUserDisplayName(reportedUser.getDisplayName())
+                    .reportedUserAvatarUrl(reportedUser.getAvatarUrl())
+
+                    // Report details
+                    .reportCategory(report.getReportCategory())
+                    .severity(report.getSeverity())
+                    .reason(report.getReason())
+                    .details(report.getDetails())
+                    .status(report.getStatus())
+
+                    // Moderation info
+                    .assignedModeratorId(report.getAssignedModeratorId())
+                    .assignedModeratorDisplayName(assignedModerator.getDisplayName())
+                    .assignedModeratorAvatarUrl(assignedModerator.getAvatarUrl())
+                    .assignedAt(report.getAssignedAt())
+                    .actionTaken(report.getActionTaken())
+                    .actionTakenDetails(report.getActionTakenDetails())
+                    .dismissalReason(report.getDismissalReason())
+                    .resolutionNotes(report.getResolutionNotes())
+                    .reviewedAt(report.getReviewedAt())
+                    .reviewedBy(report.getReviewedBy())
+                    .reviewedByDisplayName(reviewer.getDisplayName())
+                    .reviewedByAvatarUrl(reviewer.getAvatarUrl())
+
+                    // Timestamps
+                    .reportedAt(report.getReportedAt())
+                    .lastModifiedAt(report.getLastModifiedAt())
+                    .isAnonymous(report.getIsAnonymous())
+                    .build();
+
+            case USER -> UserReportResponse.builder()
+                    .id(report.getId())
+
+                    // Reporter info
+                    .reporterId(reporterId)
+                    .reporterDisplayName(reporterDisplayName)
+                    .reporterAvatarUrl(reporterAvatarUrl)
+
+                    // Target info
+                    .targetType(report.getTargetType())
+
+                    // User fields - REQUIRED
+                    .reportedUserId(report.getReportedUserId())
+                    .reportedUserDisplayName(reportedUser.getDisplayName())
+                    .reportedUserAvatarUrl(reportedUser.getAvatarUrl())
+
+                    // Report details
+                    .reportCategory(report.getReportCategory())
+                    .severity(report.getSeverity())
+                    .reason(report.getReason())
+                    .details(report.getDetails())
+                    .status(report.getStatus())
+
+                    // Moderation info
+                    .assignedModeratorId(report.getAssignedModeratorId())
+                    .assignedModeratorDisplayName(assignedModerator.getDisplayName())
+                    .assignedModeratorAvatarUrl(assignedModerator.getAvatarUrl())
+                    .assignedAt(report.getAssignedAt())
+                    .actionTaken(report.getActionTaken())
+                    .actionTakenDetails(report.getActionTakenDetails())
+                    .dismissalReason(report.getDismissalReason())
+                    .resolutionNotes(report.getResolutionNotes())
+                    .reviewedAt(report.getReviewedAt())
+                    .reviewedBy(report.getReviewedBy())
+                    .reviewedByDisplayName(reviewer.getDisplayName())
+                    .reviewedByAvatarUrl(reviewer.getAvatarUrl())
+
+                    // Timestamps
+                    .reportedAt(report.getReportedAt())
+                    .lastModifiedAt(report.getLastModifiedAt())
+                    .isAnonymous(report.getIsAnonymous())
+                    .build();
+
+        };
+
+    }
+
+    private record EnrichedReportData(
+            List<ReportResponse> responses,
+            List<ContentReportEntity> reports,
+            Map<UUID, UserDetails> reporters,
+            Map<UUID, UserDetails> reportedUsers,
+            Map<UUID, ThreadDetails> threads,
+            Map<UUID, UserDetails> assignedModerators
+    ){}
+
+    private FilterMetadata<ReportFilterDto> buildReportFilters(EnrichedReportData data){
+        // Build reporter options
+        Map<UUID, Long> reporterCounts = data.reports().stream()
+                .collect(Collectors.groupingBy(
+                        ContentReportEntity::getReporterId,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> reporterOptions = data.reporters().entrySet().stream()
+                .map(entry -> {
+                    UUID reporterId = entry.getKey();
+                    UserDetails reporter = entry.getValue();
+                    long count = reporterCounts.getOrDefault(reporterId, 0L);
+                    return new FilterOption(
+                            reporterId,
+                            reporter.getDisplayName(),
+                            reporterId.toString(),
+                            reporter.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build reported user options
+        Map<UUID, Long> reportedUserCounts = data.reports.stream()
+                .filter(report -> report.getReportedUserId() != null)
+                .collect(Collectors.groupingBy(
+                        ContentReportEntity::getReportedUserId,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> reportedUserOptions = data.reportedUsers().entrySet().stream()
+                .map(entry -> {
+                    UUID reportedUserId = entry.getKey();
+                    UserDetails reportedUser = entry.getValue();
+                    long count = reportedUserCounts.getOrDefault(reportedUserId, 0L);
+                    return FilterOption.builder()
+                            .id(reportedUserId)
+                            .label(reportedUser.getDisplayName())
+                            .value(reportedUserId.toString())
+                            .avatarUrl(reportedUser.getAvatarUrl())
+                            .count(count)
+                            .build();
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+
+        // Build thread options
+        Map<UUID, Long> threadCounts = data.reports().stream()
+                .filter(report -> report.getThreadId() != null)
+                .collect(Collectors.groupingBy(
+                        ContentReportEntity::getThreadId,
+                        Collectors.counting()
+                ));
+
+
+        List<FilterOption> threadOptions = data.threads().entrySet().stream()
+                .map(entry -> {
+                    UUID threadId = entry.getKey();
+                    ThreadDetails thread = entry.getValue();
+                    long count = threadCounts.getOrDefault(threadId, 0L);
+                    return new FilterOption(
+                            threadId,
+                            thread.getTitle(),
+                            threadId.toString(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build assigned moderator options
+        Map<UUID, Long> assignedModeratorCounts = data.reports().stream()
+                .filter(report -> report.getAssignedModeratorId() != null)
+                .collect(Collectors.groupingBy(
+                        ContentReportEntity::getAssignedModeratorId,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> assignedModeratorOptions = data.assignedModerators().entrySet().stream()
+                .map(entry -> {
+                    UUID moderatorId = entry.getKey();
+                    UserDetails moderator = entry.getValue();
+                    long count = assignedModeratorCounts.getOrDefault(moderatorId, 0L);
+                    return new FilterOption(
+                            moderatorId,
+                            moderator.getDisplayName(),
+                            moderatorId.toString(),
+                            moderator.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+
+        // Build status options
+        Map<ReportStatus, Long> statusCounts = data.reports().stream()
+                .collect(Collectors.groupingBy(
+                        ContentReportEntity::getStatus,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> statusOptions = Arrays.stream(ReportStatus.values())
+                .map(status -> new FilterOption(
+                    status.getDisplayName(),
+                    status.name(),
+                    statusCounts.getOrDefault(status, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+
+        ReportFilterDto reportFilters = ReportFilterDto.builder()
+                .reporters(reporterOptions)
+                .reportedUsers(reportedUserOptions)
+                .threads(threadOptions)
+                .assignedTo(assignedModeratorOptions)
+                .reportStatus(statusOptions)
+                .build();
+
+        return FilterMetadata.<ReportFilterDto>builder()
+                .filters(reportFilters)
+                .sortOptions(getReportSortOptions())
+                .build();
+
+    }
+
+    private List<SortOption> getReportSortOptions() {
+        return Arrays.stream(ReportSortField.values())
+                .map(ReportSortField::toSortOption)
+                .toList();
+    }
 
 }

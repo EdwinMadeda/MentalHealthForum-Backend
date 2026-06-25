@@ -107,8 +107,6 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
     );
 
 
-
-
     // ==================== SOFT DELETE ====================
 
     @Query("UPDATE forum_posts SET is_deleted = true, updated_at = NOW() WHERE id = :postId")
@@ -133,6 +131,22 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
         SELECT EXISTS(SELECT 1 FROM forum_posts WHERE thread_id = :threadId AND id = :postId)
     """)
     Mono<Boolean> existsByThreadIdAndId(@Param("threadId") UUID threadId, @Param("postId") UUID postId);
+
+    /**
+     * Checks if a user is part of a thread discussion.
+     * Returns TRUE if the user is either:
+     * 1. The thread creator, OR
+     * 2. Has posted in the thread
+     */
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM forum_threads WHERE id = :threadId AND creator_id = :userId
+            UNION
+            SELECT 1 FROM forum_posts WHERE thread_id = :threadId AND author_id = :userId
+        )
+    """)
+    Mono<Boolean> isUserInThread(@Param("threadId") UUID threadId, @Param("userId") UUID userId);
+
 
     // ==================== FIRST POST IN THREAD ====================
 
