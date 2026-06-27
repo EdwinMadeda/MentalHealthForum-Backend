@@ -4,6 +4,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.FocusCategoryResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.ThreadCountRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.FocusCategorySortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
@@ -23,6 +25,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class FocusCategoryServiceImpl implements FocusCategoryService {
@@ -91,7 +94,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
         UUID userId = UUID.fromString(viewerContext.getUserId());
         String effectiveSearch = (search == null || search.isBlank())? null : search.trim();
         FocusCategorySortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection);
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return focusCategoryRepository.findPaginatedByUserId(
                         userId, notificationEnabled,
@@ -108,7 +111,15 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
                             .zipWith(focusCategoryRepository.countByUserIdWithFilters(
                                     userId, notificationEnabled,
                                     effectiveSearch))
-                            .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                            .map(tuple -> {
+                                List<FocusCategoryResponse> content = tuple.getT1();
+                                long total = tuple.getT2();
+                                FilterMetadata<Object> filters = FilterMetadata.builder()
+                                        .sortOptions(getFocusCategorySortOptions())
+                                        .build();
+
+                                return new PaginatedResponse<>(content, page, size, total, filters);
+                            });
                 });
 
     }
@@ -151,13 +162,6 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
 
     private FocusCategorySortField validateAndNormalizeSortBy(String sortBy) {
        return FocusCategorySortField.fromString(sortBy);
-    }
-
-    private String determineSortDirection(String sortDirection) {
-        if(sortDirection != null){
-            return "desc".equalsIgnoreCase(sortDirection)? "DESC" : "ASC";
-        }
-        return "DESC";
     }
 
     /**
@@ -239,6 +243,12 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
                 .isParent(category.isParent())
                 .isChild(category.isChild())
                 .build();
+    }
+
+    private List<SortOption> getFocusCategorySortOptions(){
+        return Arrays.stream(FocusCategorySortField.values())
+                .map(FocusCategorySortField::toSortOption)
+                .collect(Collectors.toList());
     }
 
 }

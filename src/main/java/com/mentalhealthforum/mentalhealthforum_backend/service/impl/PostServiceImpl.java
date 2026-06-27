@@ -2,7 +2,11 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.PostFilterDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PostSortField;
@@ -29,6 +33,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 @Service
 public class PostServiceImpl implements PostService {
@@ -350,7 +355,7 @@ public class PostServiceImpl implements PostService {
         String effectivePostType = (postType == null) ? null : postType.name();
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
         PostSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection, sortByField);
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         // Note: flaggedForReview is not currently used as a filter in the service
 
@@ -371,23 +376,19 @@ public class PostServiceImpl implements PostService {
                                     threadId, authorId, parentPostId,
                                     effectivePostType, hasContentWarning, isDeleted, false,
                                     effectiveSearch))
-                            .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                            .map(tuple -> {
+                                EnrichedPostData enrichedPostData = tuple.getT1();
+                                long total = tuple.getT2();
+
+                                FilterMetadata<PostFilterDto> filters = buildPostFilters(enrichedPostData);
+                                return new PaginatedResponse<>(enrichedPostData.responses, page, size, total, filters);
+                            });
                 });
 
     }
 
     private PostSortField validateAndNormalizeSortBy(String sortBy) {
       return PostSortField.fromString(sortBy);
-    }
-
-    private String determineSortDirection(String sortDirection, PostSortField sortBy) {
-        if (sortDirection != null) {
-            return "desc".equalsIgnoreCase(sortDirection) ? "DESC" : "ASC";
-        }
-        return switch (sortBy) {
-            case UPDATED_AT -> "DESC";
-            default -> "ASC";
-        };
     }
 
     private record ValidationRule(Predicate<PostEntity> condition, String errorMessage, ErrorCode errorCode) {
@@ -451,9 +452,13 @@ public class PostServiceImpl implements PostService {
      * Enriches a list of posts with author details using batch fetching.
      * Uses batch fetching to avoid N+1 queries.
      */
-    private Mono<List<PostResponse>> enrichPostsWithBatchData(List<PostEntity> posts){
+    private Mono<EnrichedPostData> enrichPostsWithBatchData(List<PostEntity> posts){
         if(posts.isEmpty()){
-            return Mono.just(List.of());
+            return Mono.just(new EnrichedPostData(
+                    List.of(),
+                    List.of(),
+                    Map.of()
+            ));
         }
 
         List<UUID> authorIds = posts.stream()
@@ -469,12 +474,20 @@ public class PostServiceImpl implements PostService {
                 .defaultIfEmpty(new HashMap<>());
 
         return authorsMap
-                .map(authors -> posts.stream()
+                .map(authors -> {
+                    List<PostResponse> responses = posts.stream()
                             .map(post -> {
                                 UserDetails author = authors.get(post.getAuthorId());
                                 return mapResponseWithData(post, author);
                             })
-                        .toList());
+                            .toList();
+
+                    return new EnrichedPostData(
+                            responses,
+                            posts,
+                            authors
+                    );
+                });
 
     }
 
@@ -510,4 +523,57 @@ public class PostServiceImpl implements PostService {
                 .updatedAt(post.getUpdatedAt())
                 .build();
     }
+
+
+    private record EnrichedPostData(
+            List<PostResponse> responses,
+            List<PostEntity> posts,
+            Map<UUID, UserDetails> authors
+    ){}
+
+    /**
+     * Builds filter metadata from enriched post data.
+     */
+
+    public FilterMetadata<PostFilterDto> buildPostFilters(EnrichedPostData data){
+        // Build author options
+        Map<UUID, Long> authorCounts = data.posts.stream()
+                .collect(Collectors.groupingBy(
+                        PostEntity::getAuthorId,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> authorOptions = data.authors.entrySet().stream()
+                .map(entry -> {
+                    UUID authorId = entry.getKey();
+                    UserDetails author = entry.getValue();
+                    long count = authorCounts.getOrDefault(authorId, 0L);
+                    return new FilterOption(
+                            authorId,
+                            author.getDisplayName(),
+                            authorId.toString(),
+                            author.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .collect(Collectors.toList());
+
+        PostFilterDto postFilters = PostFilterDto.builder()
+                .authors(authorOptions)
+                .build();
+
+        return FilterMetadata.<PostFilterDto>builder()
+                .filters(postFilters)
+                .sortOptions(getPostSortOptions())
+                .build();
+
+    }
+
+    private List<SortOption> getPostSortOptions() {
+        return Arrays.stream(PostSortField.values())
+                .map(PostSortField::toSortOption)
+                .toList();
+    }
+
 }

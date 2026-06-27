@@ -311,4 +311,13 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
         GROUP BY category_id
     """)
     Flux<ThreadCountRecord> findThreadCountsByCategoryIds(List<UUID> categoryIds);
+
+    /**
+     * Batch fetch threads by IDs.
+     * Used for building filter options in reports.
+     */
+    @Query("SELECT * FROM forum_threads WHERE id IN (:ids)")
+    Flux<ThreadEntity> findThreadsByIds(@Param("ids") List<UUID> ids);
+
+
 }

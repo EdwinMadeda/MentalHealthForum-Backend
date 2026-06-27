@@ -3,7 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserConnectResponse;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ConnectionSortField;
@@ -16,7 +16,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.UserConnectRep
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserConnectService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;

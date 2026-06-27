@@ -2,7 +2,9 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.onboarding.OnboardingPolicy;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
@@ -49,7 +51,7 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.
  *   <li>Synchronize user data from Keycloak to local database</li>
  *   <li>Apply privacy rules for user profile visibility</li>
  *   <li>Enforce authorization for profile updates and deletions</li>
- *   <li>Provide paginated user listings with context-aware data</li>
+ *   <li>Provide paginated user filters with context-aware data</li>
  * </ul>
  *
  * @see AppUserService
@@ -342,7 +344,7 @@ public class AppUserServiceImpl implements AppUserService {
         String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
         AppUserSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String normalizedDirection = determineSortDirection(sortDirection, sortByField);
+        String normalizedDirection = sortByField.determineSortDirection(sortDirection);
 
         // Only apply current user first on page 0
         boolean applyCurrentUserFirst = currentUserFirst && page == 0;
@@ -372,24 +374,18 @@ public class AppUserServiceImpl implements AppUserService {
                     }
 
                     return enrichAppUsersWithConnectionStatus(appUsers, currentUserId, viewerContext)
-                            .map(content -> new PaginatedResponse<>(content, page, size, total));
+                            .map(content -> {
+                                FilterMetadata<Object> filters = FilterMetadata.builder()
+                                        .sortOptions(getUserSortOptions())
+                                        .build();
+                                return new PaginatedResponse<>(content, page, size, total, filters);
+                            });
 
                 });
     }
 
     private AppUserSortField validateAndNormalizeSortBy(String sortBy){
         return AppUserSortField.fromString(sortBy);
-    }
-
-    private String determineSortDirection(String sortDirection, AppUserSortField sortBy){
-        if(sortDirection != null){
-            return "desc".equalsIgnoreCase(sortDirection)? "DESC": "ASC";
-        }
-        // Natural defaults based on field
-        return switch (sortBy) {
-            case DATE_JOINED, POST_COUNT, REPUTATION_SCORE, LAST_POSTED_AT, LAST_ACTIVITY_AT -> "DESC";
-            default -> "ASC"; // display_name
-        };
     }
 
     @Override
@@ -482,7 +478,7 @@ public class AppUserServiceImpl implements AppUserService {
     public Mono<UserDetails> getUserDetails(UUID userId) {
         return appUserRepository.findAppUserByKeycloakId(userId.toString())
                 .map(AppUserEntity::toUserDetails)
-                .defaultIfEmpty(AppUserEntity.unknownUser());
+                    .defaultIfEmpty(AppUserEntity.defaultUser());
     }
 
 
@@ -611,5 +607,11 @@ public class AppUserServiceImpl implements AppUserService {
                             .collect(Collectors.toList());
 
                 });
+    }
+
+    private List<SortOption> getUserSortOptions(){
+        return Arrays.stream(AppUserSortField.values())
+                .map(AppUserSortField::toSortOption)
+                .toList();
     }
 }

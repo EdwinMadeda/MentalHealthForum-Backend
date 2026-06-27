@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -14,6 +15,7 @@ public class PaginatedResponse<T>{
     private long totalElements;
     private int totalPages;
     private boolean  isLastPage;
+    private FilterMetadata<?> filters;
 
     public PaginatedResponse(List<T> content, int page, int size, long totalElements) {
         this.content = content;
@@ -23,4 +25,10 @@ public class PaginatedResponse<T>{
         this.totalPages = (totalElements == 0) ? 0 : (int) Math.ceil((double) totalElements / size);
         this.isLastPage = page >= totalPages - 1;
     }
+
+    public PaginatedResponse(List<T> content, int page, int size, long totalElements, FilterMetadata<?> filters) {
+       this(content, page, size, totalElements);
+       this.filters = filters;
+    }
+
 }

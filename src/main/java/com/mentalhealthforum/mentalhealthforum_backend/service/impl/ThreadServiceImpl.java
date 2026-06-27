@@ -4,11 +4,13 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkCountRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkStatusRecord;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchStatusRecord;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagWithCategoryId;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.ThreadFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.AddContentWarningRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
@@ -107,10 +109,8 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
 
-
-
     @Override
-    public Mono<ThreadResponse> getThread(UUID threadId, ViewerContext viewerContext){
+    public Mono<ThreadResponse> getThread(UUID threadId, ViewerContext viewerContext) {
         return findThread(threadId)
                 .flatMap(thread -> {
                     return threadRepository.incrementViewCount(threadId)
@@ -142,27 +142,27 @@ public class ThreadServiceImpl implements ThreadService {
 
         UUID currentUserId = UUID.fromString(viewerContext.getUserId());
 
-        if((isDeleted != null && isDeleted)){
+        if ((isDeleted != null && isDeleted)) {
             boolean canViewAllDeleted = ModerationAction.VIEW_DELETED_THREADS.isAllowedFor(viewerContext);
             // Silent: force filter to current user without error
-            if(!canViewAllDeleted) {
+            if (!canViewAllDeleted) {
                 creatorId = currentUserId;
             }
         }
 
-        if(page < 0 || size <= 0){
+        if (page < 0 || size <= 0) {
             log.error("Invalid pagination parameters: page={}, size={}", page, size);
             throw new InvalidPaginationException();
         }
 
         int offset = page * size;
 
-        String effectiveThreadType =  threadType != null? threadType.name() : null;
-        String effectiveThreadStatus  = threadStatus != null? threadStatus.name() : null;
-        String effectiveSearch = (search == null || search.trim().isEmpty())  ? null: search.trim();
+        String effectiveThreadType = threadType != null ? threadType.name() : null;
+        String effectiveThreadStatus = threadStatus != null ? threadStatus.name() : null;
+        String effectiveSearch = (search == null || search.trim().isEmpty()) ? null : search.trim();
 
         ThreadSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String normalizedSortDirection = determineSortDirection(sortDirection, sortByField);
+        String normalizedSortDirection = sortByField.determineSortDirection(sortDirection);
 
         Flux<ThreadEntity> theadsFlux = threadRepository.findAllPaginated(
                 categoryId,
@@ -192,17 +192,21 @@ public class ThreadServiceImpl implements ThreadService {
             List<ThreadEntity> threads = tuple.getT1();
             long total = tuple.getT2();
 
-            if(threads.isEmpty()){
-                return Mono.just(new PaginatedResponse<>(List.of(), page, size, total));
+            if (threads.isEmpty()) {
+                return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
             }
 
             return enrichThreadWithBatchData(threads, currentUserId, viewerContext)
-                    .map(content -> new PaginatedResponse<>(content, page, size, total));
+                    .map( enrichedThreadData-> {
+
+                        FilterMetadata<ThreadFilterDto> filters = buildThreadFilters(enrichedThreadData);
+                        return new PaginatedResponse<>(enrichedThreadData.responses, page, size, total, filters);
+                    });
         });
     }
 
     @Override
-    public Mono<ThreadResponse> updateOwnThread(UUID threadId, UpdateOwnThreadRequest request, ViewerContext viewerContext){
+    public Mono<ThreadResponse> updateOwnThread(UUID threadId, UpdateOwnThreadRequest request, ViewerContext viewerContext) {
         UUID creatorId = UUID.fromString(viewerContext.getUserId());
         return performUserAction(
                 threadId,
@@ -225,34 +229,34 @@ public class ThreadServiceImpl implements ThreadService {
                             .build();
 
                     // Apply updates
-                    if(request.getTitle() != null && !request.getTitle().equals(thread.getTitle())){
+                    if (request.getTitle() != null && !request.getTitle().equals(thread.getTitle())) {
                         thread.setTitle(request.getTitle());
                         updated = true;
                     }
 
-                    if(request.getContentWarningType() != null && !request.getContentWarningType().equals(thread.getContentWarningType())){
+                    if (request.getContentWarningType() != null && !request.getContentWarningType().equals(thread.getContentWarningType())) {
                         thread.setContentWarningType(request.getContentWarningType());
                         updated = true;
                     }
 
-                    if(request.getContentWarningCustomText() != null && !request.getContentWarningCustomText().equals(thread.getContentWarningCustomText())){
+                    if (request.getContentWarningCustomText() != null && !request.getContentWarningCustomText().equals(thread.getContentWarningCustomText())) {
                         thread.setContentWarningCustomText(request.getContentWarningCustomText());
                         updated = true;
                     }
 
-                    if(request.getTags() != null && !request.getTags().equals(thread.getTags())){
+                    if (request.getTags() != null && !request.getTags().equals(thread.getTags())) {
                         List<String> normalizedTags = NormalizeUtils.normalizeTags(request.getTags());
                         thread.setTags(normalizedTags);
                         updated = true;
                     }
 
-                    if(updated){
+                    if (updated) {
                         thread.setUpdatedAt(Instant.now());
                         return threadEditHistoryRepository.save(history)
-                                        .then(threadRepository.save(thread))
-                                .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
+                                .then(threadRepository.save(thread))
+                                .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                     }
-                    return Mono.just(thread).flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
+                    return Mono.just(thread).flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                 },
                 null,
                 null
@@ -266,7 +270,7 @@ public class ThreadServiceImpl implements ThreadService {
                 viewerContext,
                 "soft delete thread",
                 thread -> {
-                    return  threadRepository.softDeleteThread(threadId);
+                    return threadRepository.softDeleteThread(threadId);
                 },
                 null,
                 null
@@ -274,7 +278,7 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<Void> setBestAnswerAsOriginalPoster(UUID threadId, UUID postId, ViewerContext viewerContext){
+    public Mono<Void> setBestAnswerAsOriginalPoster(UUID threadId, UUID postId, ViewerContext viewerContext) {
         return performUserAction(
                 threadId,
                 viewerContext,
@@ -290,7 +294,7 @@ public class ThreadServiceImpl implements ThreadService {
     // ==================== MODERATOR ACTIONS ====================
 
     @Override
-    public Mono<ThreadResponse> archiveThread(UUID threadId, ViewerContext viewerContext){
+    public Mono<ThreadResponse> archiveThread(UUID threadId, ViewerContext viewerContext) {
 
         return ModerationAction.THREAD_ARCHIVED.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
@@ -298,7 +302,7 @@ public class ThreadServiceImpl implements ThreadService {
                             return threadRepository.updateThreadStatus(threadId, ThreadStatus.ARCHIVED.name())
                                     .then(threadRepository.clearLockMetadata(threadId))
                                     .then(findThread(threadId))
-                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -312,7 +316,7 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<ThreadResponse> unArchiveThread(UUID threadId, ViewerContext viewerContext){
+    public Mono<ThreadResponse> unArchiveThread(UUID threadId, ViewerContext viewerContext) {
 
         return ModerationAction.THREAD_UNARCHIVED.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
@@ -320,7 +324,7 @@ public class ThreadServiceImpl implements ThreadService {
                             return threadRepository.updateThreadStatus(threadId, ThreadStatus.OPEN.name())
                                     .then(threadRepository.clearLockMetadata(threadId))
                                     .then(findThread(threadId))
-                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -334,7 +338,7 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<ThreadResponse> lockThread(UUID threadId, LockThreadRequest request, ViewerContext viewerContext){
+    public Mono<ThreadResponse> lockThread(UUID threadId, LockThreadRequest request, ViewerContext viewerContext) {
         UUID moderatorId = UUID.fromString(viewerContext.getUserId());
         return ModerationAction.THREAD_LOCKED.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
@@ -362,14 +366,14 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<ThreadResponse> unlockThread(UUID threadId, ViewerContext viewerContext){
+    public Mono<ThreadResponse> unlockThread(UUID threadId, ViewerContext viewerContext) {
         return ModerationAction.THREAD_UNLOCKED.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
                         thread -> {
                             return threadRepository.updateThreadStatus(threadId, ThreadStatus.OPEN.name())
                                     .then(threadRepository.clearLockMetadata(threadId))
                                     .then(findThread(threadId))
-                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -392,13 +396,13 @@ public class ThreadServiceImpl implements ThreadService {
                             ThreadType oldThreadType = thread.getThreadType();
 
                             // If changing from QUESTION to something else, clear resolution data
-                            if(oldThreadType == ThreadType.QUESTION && newThreadType != ThreadType.QUESTION){
+                            if (oldThreadType == ThreadType.QUESTION && newThreadType != ThreadType.QUESTION) {
                                 thread.setBestAnswerPostId(null);
                                 thread.setResolvedAt(null);
                                 thread.setResolvedByUserId(null);
 
                                 // Also change status from RESOLVED to OPEN if needed
-                                if(thread.getThreadStatus() == ThreadStatus.RESOLVED){
+                                if (thread.getThreadStatus() == ThreadStatus.RESOLVED) {
                                     thread.setThreadStatus(ThreadStatus.OPEN);
                                 }
                             }
@@ -428,14 +432,14 @@ public class ThreadServiceImpl implements ThreadService {
                         thread -> {
                             return threadRepository.updateStickyStatus(threadId, sticky)
                                     .then(findThread(threadId))
-                                    .flatMap(t ->  enrichSingleThreadWithData(thread, viewerContext));
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
-                            new ValidationRule(
-                                thread -> thread.getIsSticky() == sticky,
-                                    sticky? "Thread is already sticky" : "Thread is not sticky",
-                                    ErrorCode.VALIDATION_FAILED
-                            )
+                                new ValidationRule(
+                                        thread -> thread.getIsSticky() == sticky,
+                                        sticky ? "Thread is already sticky" : "Thread is not sticky",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
                         ),
                         true
                 ));
@@ -443,7 +447,7 @@ public class ThreadServiceImpl implements ThreadService {
 
     @Override
     public Mono<ThreadResponse> toggleFeatured(UUID threadId, boolean featured, ViewerContext viewerContext) {
-        ModerationAction moderationAction = featured? ModerationAction.THREAD_FEATURED : ModerationAction.THREAD_UNFEATURED;
+        ModerationAction moderationAction = featured ? ModerationAction.THREAD_FEATURED : ModerationAction.THREAD_UNFEATURED;
 
         return moderationAction.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
@@ -455,7 +459,7 @@ public class ThreadServiceImpl implements ThreadService {
                         List.of(
                                 new ValidationRule(
                                         thread -> thread.getIsFeatured() == featured,
-                                        featured? "Thread is already featured" : "Thread is not featured",
+                                        featured ? "Thread is already featured" : "Thread is not featured",
                                         ErrorCode.VALIDATION_FAILED
                                 )
                         ),
@@ -464,14 +468,14 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<ThreadResponse> moveThread(UUID threadId, UUID newCategoryId, ViewerContext viewerContext){
+    public Mono<ThreadResponse> moveThread(UUID threadId, UUID newCategoryId, ViewerContext viewerContext) {
         return ModerationAction.THREAD_MOVED.checkPermission(viewerContext)
                 .then(validateCategoryExists(newCategoryId))
                 .then(performModeratorAction(threadId,
                         thread -> {
                             return threadRepository.moveThread(threadId, newCategoryId)
-                                            .then(findThread(threadId))
-                                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
+                                    .then(findThread(threadId))
+                                    .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
                                 new ValidationRule(
@@ -489,14 +493,14 @@ public class ThreadServiceImpl implements ThreadService {
         return ModerationAction.THREAD_SOFT_DELETED.checkPermission(viewerContext)
                 .then(performModeratorAction(threadId,
                         thread -> {
-                            return  threadRepository.softDeleteThread(threadId);
+                            return threadRepository.softDeleteThread(threadId);
                         },
                         List.of(
-                            new ValidationRule(
-                                    ThreadEntity::getIsDeleted,
-                                    "Thread is already deleted",
-                                    ErrorCode.VALIDATION_FAILED
-                            )
+                                new ValidationRule(
+                                        ThreadEntity::getIsDeleted,
+                                        "Thread is already deleted",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
                         ),
                         true
                 ));
@@ -508,11 +512,11 @@ public class ThreadServiceImpl implements ThreadService {
                 .then(performModeratorAction(threadId,
                         thread -> threadRepository.restoreThread(threadId),
                         List.of(
-                            new ValidationRule(
-                                thread -> !thread.getIsDeleted(),
-                                "Thread is not soft deleted",
-                                ErrorCode.VALIDATION_FAILED
-                            )
+                                new ValidationRule(
+                                        thread -> !thread.getIsDeleted(),
+                                        "Thread is not soft deleted",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
                         ),
                         false
                 ));
@@ -572,7 +576,7 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<ThreadResponse> addThreadContentWarning(UUID threadId, AddContentWarningRequest request, ViewerContext viewerContext){
+    public Mono<ThreadResponse> addThreadContentWarning(UUID threadId, AddContentWarningRequest request, ViewerContext viewerContext) {
         UUID moderatorId = UUID.fromString(viewerContext.getUserId());
 
         return ModerationAction.THREAD_CONTENT_WARNING_ADDED.checkPermission(viewerContext)
@@ -600,19 +604,19 @@ public class ThreadServiceImpl implements ThreadService {
                                     .flatMap(t -> enrichSingleThreadWithData(thread, viewerContext));
                         },
                         List.of(
-                            new ValidationRule(
-                                thread -> thread.getContentWarningType() == request.contentWarningType() &&
-                                        Objects.equals(thread.getContentWarningCustomText(), request.contentWarningCustomText()),
-                                "Thread already has this content warning",
-                                ErrorCode.VALIDATION_FAILED
-                            )
+                                new ValidationRule(
+                                        thread -> thread.getContentWarningType() == request.contentWarningType() &&
+                                                Objects.equals(thread.getContentWarningCustomText(), request.contentWarningCustomText()),
+                                        "Thread already has this content warning",
+                                        ErrorCode.VALIDATION_FAILED
+                                )
                         ),
                         true
                 ));
     }
 
     @Override
-    public Mono<ThreadResponse> mergeThreads(MergeThreadRequest request, ViewerContext viewerContext){
+    public Mono<ThreadResponse> mergeThreads(MergeThreadRequest request, ViewerContext viewerContext) {
         UUID sourceThreadId = request.sourceThreadId();
         UUID destinationThreadId = request.destinationThreadId();
         return ModerationAction.THREAD_MERGED.checkPermission(viewerContext)
@@ -637,7 +641,7 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     @Override
-    public Mono<ThreadResponse> splitThread(UUID sourceThreadId, SplitThreadRequest request, ViewerContext viewerContext){
+    public Mono<ThreadResponse> splitThread(UUID sourceThreadId, SplitThreadRequest request, ViewerContext viewerContext) {
         return ModerationAction.THREAD_SPLIT.checkPermission(viewerContext)
                 .then(validatePostsExist(request.postIds()))
                 .then(validatePostsBelongToThread(request.postIds(), sourceThreadId))
@@ -697,34 +701,22 @@ public class ThreadServiceImpl implements ThreadService {
     // ==================== REFERENCE DATA ====================
 
     @Override
-    public Flux<ThreadTypeDefinitionEntity> getThreadTypes(){
+    public Flux<ThreadTypeDefinitionEntity> getThreadTypes() {
         return threadTypeDefinitionRepository.findAllByOrderByDisplayNameASC();
     }
 
     @Override
-    public Flux<ThreadStatusDefinitionEntity> getThreadStatuses(){
+    public Flux<ThreadStatusDefinitionEntity> getThreadStatuses() {
         return threadStatusDefinitionRepository.findAllByOrderByDisplayNameASC();
     }
 
     // ==================== PRIVATE HELPERS ====================
 
-    private ThreadSortField validateAndNormalizeSortBy(String sortBy){
+    private ThreadSortField validateAndNormalizeSortBy(String sortBy) {
         return ThreadSortField.fromString(sortBy);
     }
 
-    private String determineSortDirection(String sortDirection, ThreadSortField sortBy){
-        if (sortDirection != null){
-            return "desc".equalsIgnoreCase(sortDirection)? "DESC" : "ASC";
-        }
-        return switch (sortBy){
-            case CREATED_AT, LAST_ACTIVITY_AT, POST_COUNT, VIEW_COUNT -> "DESC";
-            default -> "ASC"; // title
-        };
-    }
-
-
-
-    private Mono<ThreadEntity> findThread(UUID threadId){
+    private Mono<ThreadEntity> findThread(UUID threadId) {
         return threadRepository.findById(threadId)
                 .switchIfEmpty(Mono.error(new ApiException(
                         "Thread not found",
@@ -748,7 +740,7 @@ public class ThreadServiceImpl implements ThreadService {
                         "Category with id '" + categoryId + "' not found",
                         ErrorCode.RESOURCE_NOT_FOUND)))
                 .flatMap(category -> {
-                    if(!category.getIsActive()){
+                    if (!category.getIsActive()) {
                         return Mono.error(new ApiException(
                                 "Cannot move thread to inactive category",
                                 ErrorCode.VALIDATION_FAILED
@@ -774,7 +766,7 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
     private Mono<Object> validateThreadsNotIdentical(UUID sourceThreadId, UUID destinationThreadId) {
-        if(sourceThreadId.equals(destinationThreadId)){
+        if (sourceThreadId.equals(destinationThreadId)) {
             return Mono.error(new ApiException("Cannot merge a thread with itself", ErrorCode.VALIDATION_FAILED));
         }
         return Mono.empty();
@@ -799,25 +791,25 @@ public class ThreadServiceImpl implements ThreadService {
     private Mono<Void> validatePostsExist(List<UUID> postIds) {
         return postRepository.countPostsInIds(postIds)
                 .flatMap(count -> {
-                    if(count != postIds.size()){
+                    if (count != postIds.size()) {
                         return Mono.error(new ApiException("One or more posts not found", ErrorCode.RESOURCE_NOT_FOUND));
                     }
                     return Mono.empty();
                 });
     }
 
-    private Mono<Void> validatePostsBelongToThread(List<UUID> postIds, UUID threadId){
+    private Mono<Void> validatePostsBelongToThread(List<UUID> postIds, UUID threadId) {
         return postRepository.countPostsInIdsAndThread(postIds, threadId)
                 .flatMap(count -> {
-                    if(count != postIds.size()){
+                    if (count != postIds.size()) {
                         return Mono.error(new ApiException("One or more posts do not belong to the source thread", ErrorCode.VALIDATION_FAILED));
                     }
                     return Mono.empty();
                 });
     }
 
-    private Mono<CategoryEntity> validateCategoryActive(UUID categoryId){
-        return  categoryRepository.findById(categoryId)
+    private Mono<CategoryEntity> validateCategoryActive(UUID categoryId) {
+        return categoryRepository.findById(categoryId)
                 .switchIfEmpty(Mono.error(new ApiException(
                         "Category not found",
                         ErrorCode.RESOURCE_NOT_FOUND
@@ -853,7 +845,6 @@ public class ThreadServiceImpl implements ThreadService {
     }
 
 
-
     private <T> Mono<T> performUserAction(
             UUID threadId,
             ViewerContext viewerContext,
@@ -861,22 +852,22 @@ public class ThreadServiceImpl implements ThreadService {
             Function<ThreadEntity, Mono<T>> action,
             Predicate<ThreadEntity> validator,
             String validationErrorMessage
-    ){
+    ) {
         return findThread(threadId)
                 .flatMap(thread -> {
 
-                    if(!thread.getCreatorId().toString().equals(viewerContext.getUserId())){
+                    if (!thread.getCreatorId().toString().equals(viewerContext.getUserId())) {
                         return Mono.error(new ApiException("Only thread creator can " + actionDescription, ErrorCode.FORBIDDEN));
                     }
 
-                    if(thread.getIsDeleted()){
+                    if (thread.getIsDeleted()) {
                         return Mono.error(new ApiException(
                                 "Cannot modify a deleted thread",
                                 ErrorCode.VALIDATION_FAILED
                         ));
                     }
 
-                    if(validator != null && !validator.test(thread)){
+                    if (validator != null && !validator.test(thread)) {
                         return Mono.error(new ApiException(
                                 validationErrorMessage,
                                 ErrorCode.VALIDATION_FAILED
@@ -888,8 +879,8 @@ public class ThreadServiceImpl implements ThreadService {
                 .as(transactionalOperator::transactional);
     }
 
-    private record ValidationRule(Predicate<ThreadEntity> condition, String errorMessage, ErrorCode errorCode){
-        public ValidationRule(Predicate<ThreadEntity> condition, String errorMessage){
+    private record ValidationRule(Predicate<ThreadEntity> condition, String errorMessage, ErrorCode errorCode) {
+        public ValidationRule(Predicate<ThreadEntity> condition, String errorMessage) {
             this(condition, errorMessage, ErrorCode.VALIDATION_FAILED);
         }
     }
@@ -899,29 +890,29 @@ public class ThreadServiceImpl implements ThreadService {
             Function<ThreadEntity, Mono<T>> action,
             List<ValidationRule> validators,
             boolean requireActive
-    ){
+    ) {
         // No generic role check here - let each action's checkPermission handle it
-        Mono<ThreadEntity> threadMono = requireActive? findActiveThread(threadId) : findThread(threadId);
+        Mono<ThreadEntity> threadMono = requireActive ? findActiveThread(threadId) : findThread(threadId);
 
         return threadMono
                 .flatMap(thread -> {
-                    for(ValidationRule rule : validators){
-                        if(rule.condition().test(thread)){
+                    for (ValidationRule rule : validators) {
+                        if (rule.condition().test(thread)) {
                             return Mono.error(new ApiException(rule.errorMessage, rule.errorCode));
                         }
                     }
 
-                   return action.apply(thread);
+                    return action.apply(thread);
                 })
                 .as(transactionalOperator::transactional);
     }
-    
+
 
     /**
      * Enriches a single thread with all related data using batch fetching.
      * Uses the same batch approach as the listing endpoint.
      */
-    private Mono<ThreadResponse> enrichSingleThreadWithData(ThreadEntity thread, ViewerContext viewerContext){
+    private Mono<ThreadResponse> enrichSingleThreadWithData(ThreadEntity thread, ViewerContext viewerContext) {
         UUID threadId = thread.getId();
 
         return Mono.zip(
@@ -950,7 +941,7 @@ public class ThreadServiceImpl implements ThreadService {
             AppUserEntity creator = tuple.getT2();
             Boolean isBookmarked = tuple.getT3();
             Long bookmarkCount = tuple.getT4();
-            Boolean  isWatched = tuple.getT5();
+            Boolean isWatched = tuple.getT5();
             List<ThreadCategoryTag> categoryTags = tuple.getT6();
 
 
@@ -970,17 +961,22 @@ public class ThreadServiceImpl implements ThreadService {
     /**
      * Enriches a list of threads with batch-fetched data (categories, creators, bookmarks, watches).
      * Uses batch fetching to avoid N+1 queries.
-     *
-     * @param threads The list of threads to enrich
-     * @param currentUserId The authenticated viewer's user ID
-     * @param viewerContext The viewer context for privacy-aware mapping
-     * @return A Mono containing the list of enriched ThreadResponse objects
      */
-    private Mono<List<ThreadResponse>> enrichThreadWithBatchData(
-        List<ThreadEntity> threads,
-        UUID currentUserId,
-        ViewerContext viewerContext
-    ){
+    private Mono<EnrichedThreadData> enrichThreadWithBatchData(
+            List<ThreadEntity> threads,
+            UUID currentUserId,
+            ViewerContext viewerContext
+    ) {
+        if (threads.isEmpty()) {
+            return Mono.just(new EnrichedThreadData(
+                    List.of(),
+                    List.of(),
+                    Map.of(),
+                    Map.of(),
+                    List.of()
+            ));
+        }
+
         // Extract IDs for batch fetching
         List<UUID> categoryIds = threads.stream()
                 .map(ThreadEntity::getCategoryId)
@@ -1022,17 +1018,9 @@ public class ThreadServiceImpl implements ThreadService {
                         .defaultIfEmpty(new HashMap<>());
 
         // Batch fetch category tags for all categories
-        Mono<Map<UUID, List<ThreadCategoryTag>>> categoryTagsMap = categoryTagRepository
+        Mono<List<CategoryTagWithCategoryId>> flatTagsListMono = categoryTagRepository
                 .findTagsByCategoryId(categoryIds)
-                .collectList()
-                .map(records -> records.stream()
-                        .collect(Collectors.groupingBy(
-                                CategoryTagWithCategoryId::category_id,
-                                Collectors.mapping(this::mapToThreadCategoryTag,
-                                        Collectors.toList())
-
-                        )));
-
+                .collectList();
 
         return Mono.zip(
                 categoriesMap,
@@ -1040,16 +1028,24 @@ public class ThreadServiceImpl implements ThreadService {
                 bookmarkStatusMap,
                 bookmarkCountMap,
                 watchStatusMap,
-                categoryTagsMap
+                flatTagsListMono
         ).map(tuple -> {
             Map<UUID, CategoryEntity> categories = tuple.getT1();
             Map<UUID, AppUserEntity> creators = tuple.getT2();
             Map<UUID, Boolean> bookmarkStatus = tuple.getT3();
             Map<UUID, Long> bookmarkCount = tuple.getT4();
             Map<UUID, Boolean> watchStatus = tuple.getT5();
-            Map<UUID, List<ThreadCategoryTag>> categoryTags = tuple.getT6();
+            List<CategoryTagWithCategoryId> flatTagsList = tuple.getT6();
 
-            return threads.stream()
+            Map<UUID, List<ThreadCategoryTag>> categoryTags = flatTagsList.stream()
+                    .collect(Collectors.groupingBy(
+                            CategoryTagWithCategoryId::category_id,
+                            Collectors.mapping(this::mapToThreadCategoryTag,
+                                    Collectors.toList())
+                    ));
+
+
+            List<ThreadResponse> responses = threads.stream()
                     .map(thread -> mapResponseWithData(
                             thread,
                             categories.get(thread.getCategoryId()),
@@ -1061,6 +1057,14 @@ public class ThreadServiceImpl implements ThreadService {
                             viewerContext
                     ))
                     .toList();
+
+            return new EnrichedThreadData(
+                    responses,
+                    threads,
+                    creators,
+                    categories,
+                    flatTagsList
+            );
 
         });
 
@@ -1117,7 +1121,15 @@ public class ThreadServiceImpl implements ThreadService {
                 .build();
     }
 
-    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagWithCategoryId record){
+    private record EnrichedThreadData(
+            List<ThreadResponse> responses,
+            List<ThreadEntity> threads,
+            Map<UUID, AppUserEntity> creators,
+            Map<UUID, CategoryEntity> categories,
+            List<CategoryTagWithCategoryId> flatTags
+    ) {}
+
+    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagWithCategoryId record) {
         return ThreadCategoryTag.builder()
                 .id(record.id())
                 .name(record.name())
@@ -1125,7 +1137,7 @@ public class ThreadServiceImpl implements ThreadService {
                 .build();
     }
 
-    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagResponse tag){
+    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagResponse tag) {
         return ThreadCategoryTag.builder()
                 .id(tag.getId())
                 .name(tag.getName())
@@ -1133,4 +1145,101 @@ public class ThreadServiceImpl implements ThreadService {
                 .build();
     }
 
+    private FilterMetadata<ThreadFilterDto> buildThreadFilters(EnrichedThreadData data) {
+        // Build creator options
+        List<FilterOption> creatorOptions = data.creators().values().stream()
+                .map(creator -> {
+                    long count = data.threads.stream()
+                            .filter(thread -> thread.getCreatorId().equals(creator.getKeycloakId()))
+                            .count();
+
+                    return new FilterOption(
+                            creator.getKeycloakId(),
+                            creator.getPublicIdentifier(),
+                            creator.getKeycloakId().toString(),
+                            creator.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build category options
+        List<FilterOption> categoryOptions = data.categories().values().stream()
+                .map(category -> {
+                    long count = data.threads.stream()
+                            .filter(thread -> thread.getCategoryId().equals(category.getId()))
+                            .count();
+
+                    return new FilterOption(
+                            category.getId(),
+                            category.getName(),
+                            category.getSlug(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+
+        // Build tag options - counting UNIQUE threads per tag
+        Map<UUID, List<CategoryTagWithCategoryId>> categoryTagsMap = data.flatTags.stream() // map of category -> list of tags
+                .collect(Collectors.groupingBy(CategoryTagWithCategoryId::category_id));
+
+        // Count unique threads per tag using Sets
+        Map<UUID, Set<UUID>> tagToThreads = new HashMap<>();
+        for (ThreadEntity thread : data.threads()) {
+            UUID categoryId = thread.getCategoryId();
+            UUID threadId = thread.getId();
+
+            // Get tags for this category
+            List<CategoryTagWithCategoryId> categoryTags = categoryTagsMap.getOrDefault(categoryId, List.of());
+
+            // Increment count for each tag in this category
+            for (CategoryTagWithCategoryId tag : categoryTags) {
+                tagToThreads.computeIfAbsent(tag.id(), k -> new HashSet<>()).add(threadId);
+            }
+
+        }
+
+        // Build FilterOption from unique tags
+        List<FilterOption> tagOptions = data.flatTags().stream()
+                .collect(Collectors.toMap(
+                        CategoryTagWithCategoryId::id,
+                        Function.identity(),
+                        (existing, replacement) -> existing
+                ))
+                .values()
+                .stream()
+                .map(tag -> new FilterOption(
+                        tag.id(),
+                        tag.name(),
+                        tag.slug(),
+                        (long) tagToThreads.getOrDefault(tag.id(), Set.of()).size()
+                ))
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        ThreadFilterDto threadFilters = ThreadFilterDto.builder()
+                .creators(creatorOptions)
+                .categories(categoryOptions)
+                .tags(tagOptions)
+                .build();
+
+
+        return FilterMetadata.<ThreadFilterDto>builder()
+                .filters(threadFilters)
+                .sortOptions(getThreadSortOptions())
+                .build();
+    }
+
+    private List<SortOption> getThreadSortOptions(){
+        return Arrays.stream(
+                ThreadSortField.values())
+                .map(ThreadSortField::toSortOption)
+                .toList();
+    }
+
 }
+
+

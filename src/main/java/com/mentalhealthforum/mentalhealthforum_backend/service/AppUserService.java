@@ -1,7 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;

@@ -31,4 +31,7 @@ public class CategoryResponse {
 
     // Tags (flattened)
     private List<CategoryTagResponse> tags;
+
+    // Thread metadata
+    private Long threadCount;  // How many threads in this category
 }
