@@ -37,9 +37,21 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
               AND (:targetType IS NULL OR target_type = :targetType::report_target_type_enum)
               AND (:status IS NULL OR status = :status::report_status_enum)
               AND (:category IS NULL OR report_category = :category::report_category_enum)
-              AND (:search IS NULL OR
-                    LOWER(reason) LIKE '%' || LOWER(:search) || '%' OR
-                    LOWER(details) LIKE '%' || LOWER(:search) || '%')
+    
+              AND (:search IS NULL
+    
+                    -- FTS on Reason + Details (stemming for content)
+                    OR to_tsvector('public.english_unaccent', coalesce(reason, '') || ' ' || coalesce(details, ''))
+                        @@ websearch_to_tsquery('public.english_unaccent', :search)
+   
+                    -- Trigram fallback on Reason (typos/partials)
+                    OR public.unaccent_immutable(reason) % public.unaccent_immutable(:search)
+    
+                    -- Trigram fallback on Details
+                    OR public.unaccent_immutable(details) % public.unaccent_immutable(:search)
+    
+            )
+    
         ORDER BY
             -- Sort DESC
             CASE :sortDirection
@@ -97,9 +109,17 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
               AND (:targetType IS NULL OR target_type = :targetType::report_target_type_enum)
               AND (:status IS NULL OR status = :status::report_status_enum)
               AND (:category IS NULL OR report_category = :category::report_category_enum)
-              AND (:search IS NULL OR
-                    LOWER(reason) LIKE '%' || LOWER(:search) || '%' OR
-                    LOWER(details) LIKE '%' || LOWER(:search) || '%')
+
+              AND (:search IS NULL
+    
+                OR to_tsvector('public.english_unaccent', coalesce(reason, '') || ' ' || coalesce(details, ''))
+                    @@ websearch_to_tsquery('public.english_unaccent', :search)
+
+                OR public.unaccent_immutable(reason) % public.unaccent_immutable(:search)
+
+                OR public.unaccent_immutable(details) % public.unaccent_immutable(:search)
+              )
+     
      """)
     Mono<Long> countOwnReportsWithFilters(
             @Param("reporterId") UUID reporterId,
@@ -123,9 +143,17 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
           AND (:severity IS NULL OR severity = :severity::severity_enum)
           AND (:assignedTo IS NULL OR assigned_moderator_id = :assignedTo::uuid)
           AND (:reviewedBy IS NULL OR reviewed_by = :reviewedBy::uuid)
-          AND (:search IS NULL OR
-                LOWER(reason) LIKE '%' || LOWER(:search) || '%' OR
-                LOWER(details) LIKE '%' || LOWER(:search) || '%')
+    
+          AND (:search IS NULL
+    
+                OR to_tsvector('public.english_unaccent', coalesce(reason, '') || ' ' || coalesce(details, ''))
+                    @@ websearch_to_tsquery('public.english_unaccent', :search)
+
+                OR public.unaccent_immutable(reason) % public.unaccent_immutable(:search)
+
+                OR public.unaccent_immutable(details) % public.unaccent_immutable(:search)
+          )
+   
         ORDER BY
             -- Sort DESC
             CASE :sortDirection
@@ -195,9 +223,17 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
           AND (:severity IS NULL OR severity = :severity::severity_enum)
           AND (:assignedTo IS NULL OR assigned_moderator_id = :assignedTo::uuid)
           AND (:reviewedBy IS NULL OR reviewed_by = :reviewedBy::uuid)
-          AND (:search IS NULL OR
-                LOWER(reason) LIKE '%' || LOWER(:search) || '%' OR
-                LOWER(details) LIKE '%' || LOWER(:search) || '%')
+     
+          AND (:search IS NULL
+    
+                OR to_tsvector('public.english_unaccent', coalesce(reason, '') || ' ' || coalesce(details, ''))
+                    @@ websearch_to_tsquery('public.english_unaccent', :search)
+
+                OR public.unaccent_immutable(reason) % public.unaccent_immutable(:search)
+
+                OR public.unaccent_immutable(details) % public.unaccent_immutable(:search)
+          )
+     
      """)
     Mono<Long> countAllReportsWithFilters(
             @Param("reporterId") UUID reporterId,
