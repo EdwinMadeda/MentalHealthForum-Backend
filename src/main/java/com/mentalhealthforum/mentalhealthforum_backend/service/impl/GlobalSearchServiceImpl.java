@@ -9,8 +9,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+
+import java.util.Collections;
 
 @Service
 public class GlobalSearchServiceImpl implements GlobalSearchService {
@@ -26,7 +29,7 @@ public class GlobalSearchServiceImpl implements GlobalSearchService {
     @Override
     public Mono<Slice<GlobalSearchResult>> searchRegistry(String query, String sortBy, int page, int size, ViewerContext viewerContext){
         if(query == null || query.isBlank()){
-            return Mono.empty();
+            return Mono.just(new SliceImpl<>(Collections.emptyList(), PageRequest.of(0, 20), false));
         }
 
         if (page < 0 || size <= 0) {
