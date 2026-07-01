@@ -87,12 +87,38 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
                b.notes as bookmark_notes
         FROM forum_threads t
         INNER JOIN thread_bookmarks b ON t.id = b.thread_id
-        WHERE b.user_id = :userId
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE b.user_id = :viewerId
         AND t.is_deleted = false
-        AND (:search IS NULL OR (
-               LOWER(t.title) LIKE '%' || LOWER(:search) || '%' OR
-               LOWER(b.notes) LIKE '%' || LOWER(:search) || '%'
-           ))
+    
+        AND (:search IS NULL
+                -- FTS on Title (stemming for content)
+                OR to_tsvector('public.english_unaccent', coalesce(t.title, ''))
+                    @@ websearch_to_tsquery('public.english_unaccent', :search)
+    
+                -- FTS on Notes (stemming for notes too)
+                OR to_tsvector('public.english_unaccent', coalesce(b.notes, ''))
+                    @@ websearch_to_tsquery('public.english_unaccent', :search)
+    
+                -- Trigram fallback on Title (typos/partials)
+                OR public.unaccent_immutable(t.title) % public.unaccent_immutable(:search)
+    
+                -- Triagram fallback on Notes
+                OR public.unaccent_immutable(b.notes) % public.unaccent_immutable(:search)
+        )
+    
+        -- Category visibility
+        AND c.is_active = TRUE
+        AND (
+    
+             (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
+    
+        )
+   
         AND (:categoryId IS NULL OR t.category_id = :categoryId)
         AND (:creatorId IS NULL OR t.creator_id = :creatorId)
         AND (:threadType IS NULL OR t.thread_type = :threadType::thread_type_enum)
@@ -131,7 +157,10 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
         LIMIT :limit OFFSET :offset
     """)
     Flux<BookmarkedThreadRecord> findBookmarkedThreadsPaginated(
-            @Param("userId") UUID userId,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified,
             @Param("categoryId") UUID categoryId,
             @Param("creatorId") UUID creatorId,
             @Param("threadType") String threadType,
@@ -147,12 +176,35 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
     @Query("""
         SELECT COUNT(*) FROM thread_bookmarks b
         INNER JOIN forum_threads t ON b.thread_id = t.id
-        WHERE b.user_id = :userId
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE b.user_id = :viewerId
         AND t.is_deleted = false
-        AND (:search IS NULL OR (
-                    LOWER(t.title) LIKE '%' || LOWER(:search) || '%' OR
-                    LOWER(b.notes) LIKE '%' || LOWER(:search) || '%'
-                ))
+
+        AND (:search IS NULL
+    
+            OR to_tsvector('public.english_unaccent', coalesce(t.title, ''))
+                @@ websearch_to_tsquery('public.english_unaccent', :search)
+
+            OR to_tsvector('public.english_unaccent', coalesce(b.notes, ''))
+                @@ websearch_to_tsquery('public.english_unaccent', :search)
+    
+            OR public.unaccent_immutable(t.title) % public.unaccent_immutable(:search)
+    
+            OR public.unaccent_immutable(b.notes) % public.unaccent_immutable(:search)
+        )
+    
+        -- Category visibility
+        AND c.is_active = TRUE
+        AND (
+    
+             (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
+             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
+    
+        )
+    
         AND (:categoryId IS NULL OR t.category_id = :categoryId)
         AND (:creatorId IS NULL OR t.creator_id = :creatorId)
         AND (:threadType IS NULL OR t.thread_type = :threadType::thread_type_enum)
@@ -165,7 +217,10 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
             )
     """)
     Mono<Long> countBookmarksWithFilters(
-           @Param("userId") UUID userId,
+           @Param("viewerId") UUID viewerId,
+           @Param("isAdmin") boolean isAdmin,
+           @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+           @Param("isVerified") boolean isVerified,
            @Param("categoryId") UUID categoryId,
            @Param("creatorId") UUID creatorId,
            @Param("threadType") String threadType,

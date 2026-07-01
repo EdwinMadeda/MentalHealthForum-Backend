@@ -100,8 +100,13 @@ public class BookmarkServiceImpl implements BookmarkService {
             throw new IllegalArgumentException("Invalid pagination parameters");
         }
 
-        UUID userId = UUID.fromString(viewerContext.getUserId());
         int offset = page * size;
+
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
 
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
         String effectiveThreadType =  threadType != null? threadType.name() : null;
@@ -111,12 +116,12 @@ public class BookmarkServiceImpl implements BookmarkService {
 
 
         return bookmarkRepository.findBookmarkedThreadsPaginated(
-                    userId,
-                    categoryId, creatorId,
-                    effectiveThreadType, effectiveThreadStatus, hasContentWarning,
-                    effectiveSearch,
-                    sortByField.getValue(), effectiveSortDirection,
-                    size, offset)
+                        viewerId,
+                        isAdmin, isModeratorOrAdmin, isVerified,
+                        categoryId, creatorId,
+                        effectiveThreadType,
+                        effectiveThreadStatus, hasContentWarning,
+                        effectiveSearch, sortByField.getValue(), effectiveSortDirection, size, offset)
                 .collectList()
                 .flatMap(records -> {
                     if(records.isEmpty()){
@@ -125,11 +130,11 @@ public class BookmarkServiceImpl implements BookmarkService {
 
                     return enrichBookmarksWithBatchData(records)
                             .zipWith(bookmarkRepository.countBookmarksWithFilters(
-                                    userId,
+                                    viewerId,
+                                    isAdmin, isModeratorOrAdmin, isVerified,
                                     categoryId, creatorId,
-                                    effectiveThreadType, effectiveThreadStatus, hasContentWarning,
-                                    effectiveSearch
-                            ))
+                                    effectiveThreadType,
+                                    effectiveThreadStatus, hasContentWarning, effectiveSearch))
                             .map(tuple -> {
                                 EnrichedBookmarkData enrichedBookmarkData = tuple.getT1();
                                 long totalCount = tuple.getT2();
