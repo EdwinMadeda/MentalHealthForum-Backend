@@ -195,11 +195,11 @@ public class GlobalSearchRepository {
                     u.id AS entity_id,
                     'PROFILE'::TEXT AS entity_type,
                     u.display_name AS header,
-                    ts_headline('public.simple_unaccent', coalesce(u.bio, ''), (SELECT tsquery_simple FROM query_token), 'MaxWords=25, StartSel=<b>, StopSel=</b>')::TEXT AS body_preview,
+                    ts_headline('public.english_unaccent', coalesce(u.bio, ''), (SELECT tsquery FROM query_token), 'MaxWords=25, StartSel=<b>, StopSel=</b>')::TEXT AS body_preview,
                     ts_rank(
                         setweight(to_tsvector('public.simple_unaccent', coalesce(u.display_name, '')), 'A') ||
-                        setweight(to_tsvector('public.simple_unaccent', coalesce(u.bio, '')), 'B'),
-                        (SELECT tsquery_simple FROM query_token)
+                        setweight(to_tsvector('public.english_unaccent', coalesce(u.bio, '')), 'B'),
+                        (SELECT tsquery FROM query_token)
                     ) AS search_score,
                     u.last_active_at AS last_activity_at
                 FROM app_users u
@@ -207,7 +207,7 @@ public class GlobalSearchRepository {
                     AND u.account_deletion_requested_at IS NULL
                     AND (
                           to_tsvector('public.simple_unaccent', coalesce(u.display_name, '')) @@ (SELECT tsquery_simple FROM query_token) OR
-                          to_tsvector('public.simple_unaccent', coalesce(u.bio, '')) @@ (SELECT tsquery_simple FROM query_token)
+                          to_tsvector('public.english_unaccent', coalesce(u.bio, '')) @@ (SELECT tsquery FROM query_token)
                     )
                 
                     -- Privacy filter
