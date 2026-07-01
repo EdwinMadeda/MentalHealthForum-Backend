@@ -140,13 +140,13 @@ public class ThreadServiceImpl implements ThreadService {
             ViewerContext viewerContext
     ) {
 
-        UUID currentUserId = UUID.fromString(viewerContext.getUserId());
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
 
         if ((isDeleted != null && isDeleted)) {
             boolean canViewAllDeleted = ModerationAction.VIEW_DELETED_THREADS.isAllowedFor(viewerContext);
             // Silent: force filter to current user without error
             if (!canViewAllDeleted) {
-                creatorId = currentUserId;
+                creatorId = viewerId;
             }
         }
 
@@ -157,6 +157,10 @@ public class ThreadServiceImpl implements ThreadService {
 
         int offset = page * size;
 
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
         String effectiveThreadType = threadType != null ? threadType.name() : null;
         String effectiveThreadStatus = threadStatus != null ? threadStatus.name() : null;
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null : search.trim();
@@ -165,23 +169,23 @@ public class ThreadServiceImpl implements ThreadService {
         String normalizedSortDirection = sortByField.determineSortDirection(sortDirection);
 
         Flux<ThreadEntity> theadsFlux = threadRepository.findAllPaginated(
-                categoryId,
-                creatorId,
-                effectiveThreadType,
-                effectiveThreadStatus,
+                viewerId,
+                isAdmin, isModeratorOrAdmin, isVerified,
+                categoryId, creatorId,
+                effectiveThreadType, effectiveThreadStatus,
                 isDeleted, isFeatured, hasContentWarning,
-                currentUserId, isBookmarked, isWatched,
+                isBookmarked, isWatched,
                 categoryTagId,
                 effectiveSearch,
                 sortByField.getValue(), normalizedSortDirection, size, offset);
 
         Mono<Long> totalCount = threadRepository.countAllPaginated(
-                categoryId,
-                creatorId,
-                effectiveThreadType,
-                effectiveThreadStatus,
+                viewerId,
+                isAdmin, isModeratorOrAdmin, isVerified,
+                categoryId, creatorId,
+                effectiveThreadType, effectiveThreadStatus,
                 isDeleted, isFeatured, hasContentWarning,
-                currentUserId, isBookmarked, isWatched,
+                isBookmarked, isWatched,
                 categoryTagId,
                 effectiveSearch);
 
@@ -196,7 +200,7 @@ public class ThreadServiceImpl implements ThreadService {
                 return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
             }
 
-            return enrichThreadWithBatchData(threads, currentUserId, viewerContext)
+            return enrichThreadWithBatchData(threads, viewerId, viewerContext)
                     .map( enrichedThreadData-> {
 
                         FilterMetadata<ThreadFilterDto> filters = buildThreadFilters(enrichedThreadData);

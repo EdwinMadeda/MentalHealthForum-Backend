@@ -11,7 +11,6 @@ import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Repository
@@ -25,6 +24,7 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
     // ==================== REFERENCE TABLES ====================
     @Query("""
         SELECT t.* FROM forum_threads t
+        INNER JOIN forum_categories c ON t.category_id = c.id
         WHERE (:categoryId IS NULL OR category_id = :categoryId::uuid)
             AND (:creatorId IS NULL OR creator_id = :creatorId::uuid)
             AND (:threadType IS NULL OR thread_type = :threadType::thread_type_enum)
@@ -33,20 +33,37 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             AND (:isFeatured IS NULL OR is_featured = :isFeatured)
             AND (:hasContentWarning IS NULL OR
                     (CASE WHEN :hasContentWarning = true
-                     THEN content_warning_type != 'NONE'
-                     ELSE content_warning_type = 'NONE' END))
-            AND (:search IS NULL OR
-                LOWER(t.title) LIKE '%' || LOWER(:search) || '%')
+                     THEN t.content_warning_type != 'NONE'
+                     ELSE t.content_warning_type = 'NONE' END))
+        
+            --Search: Hybrid: FTS + Trigram
+            AND (:search IS NULL
+                    OR to_tsvector('public.english_unaccent', coalesce(t.title, ''))
+                        @@ websearch_to_tsquery('public.english_unaccent', :search)
+                    OR public.unaccent_immutable(t.title) % public.unaccent_immutable(:search)
+            )
+        
+            -- Category visibility
+            AND c.is_active = TRUE
+            AND (
+        
+                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
+        
+            )
         
             -- Bookmark filter using EXISTS
             AND (:isBookmarked IS NULL OR
                 (:isBookmarked = true AND EXISTS (
                     SELECT 1 FROM thread_bookmarks b
-                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    WHERE b.thread_id = t.id AND b.user_id = :viewerId
                     )) OR
                 (:isBookmarked = false AND NOT EXISTS (
                     SELECT 1 FROM thread_bookmarks b
-                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    WHERE b.thread_id = t.id AND b.user_id = :viewerId
                     ))
                 )
         
@@ -54,11 +71,11 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             AND (:isWatched IS NULL OR
                 (:isWatched = true AND EXISTS (
                     SELECT 1 FROM watch_threads w
-                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    WHERE w.thread_id = t.id AND w.user_id = :viewerId
                     )) OR
                 (:isWatched = false AND NOT EXISTS (
                     SELECT 1 FROM watch_threads w
-                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    WHERE w.thread_id = t.id AND w.user_id = :viewerId
                     ))
                 )
         
@@ -99,6 +116,10 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
         LIMIT :limit OFFSET :offset
         """)
     Flux<ThreadEntity> findAllPaginated(
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified,
             @Param("categoryId") UUID categoryId,
             @Param("creatorId") UUID creatorId,
             @Param("threadType") String threadType,
@@ -106,7 +127,6 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             @Param("isDeleted") Boolean isDeleted,
             @Param("isFeatured") Boolean isFeatured,
             @Param("hasContentWarning") Boolean hasContentWarning,
-            @Param("currentUserId") UUID currentUserId,
             @Param("isBookmarked") Boolean isBookmarked,
             @Param("isWatched") Boolean isWatched,
             @Param("categoryTagId") UUID categoryTagId,
@@ -119,6 +139,7 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
 
     @Query("""
         SELECT COUNT(*) FROM forum_threads t
+        INNER JOIN forum_categories c ON t.category_id = c.id
         WHERE (:categoryId IS NULL OR category_id = :categoryId::uuid)
             AND (:creatorId IS NULL OR creator_id = :creatorId::uuid)
             AND (:threadType IS NULL OR thread_type = :threadType::thread_type_enum)
@@ -127,20 +148,36 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             AND (:isFeatured IS NULL OR is_featured = :isFeatured)
             AND (:hasContentWarning IS NULL OR
                     (CASE WHEN :hasContentWarning = true
-                     THEN content_warning_type != 'NONE'
-                     ELSE content_warning_type = 'NONE' END))
-            AND (:search IS NULL OR
-                LOWER(t.title) LIKE '%' || LOWER(:search) || '%')
+                     THEN t.content_warning_type != 'NONE'
+                     ELSE t.content_warning_type = 'NONE' END))
+        
+            AND (:search IS NULL
+                OR to_tsvector('public.english_unaccent', coalesce(t.title, ''))
+                    @@ websearch_to_tsquery('public.english_unaccent', :search)
+                OR public.unaccent_immutable(t.title) % public.unaccent_immutable(:search)
+            )
+        
+            -- Category visibility
+            AND c.is_active = TRUE
+            AND (
+        
+                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
+                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
+        
+            )
         
             -- Bookmark filter using EXISTS
             AND (:isBookmarked IS NULL OR
                 (:isBookmarked = true AND EXISTS (
                     SELECT 1 FROM thread_bookmarks b
-                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    WHERE b.thread_id = t.id AND b.user_id = :viewerId
                     )) OR
                 (:isBookmarked = false AND NOT EXISTS (
                     SELECT 1 FROM thread_bookmarks b
-                    WHERE b.thread_id = t.id AND b.user_id = :currentUserId
+                    WHERE b.thread_id = t.id AND b.user_id = :viewerId
                     ))
                 )
         
@@ -148,11 +185,11 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             AND (:isWatched IS NULL OR
                 (:isWatched = true AND EXISTS (
                     SELECT 1 FROM watch_threads w
-                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    WHERE w.thread_id = t.id AND w.user_id = :viewerId
                     )) OR
                 (:isWatched = false AND NOT EXISTS (
                     SELECT 1 FROM watch_threads w
-                    WHERE w.thread_id = t.id AND w.user_id = :currentUserId
+                    WHERE w.thread_id = t.id AND w.user_id = :viewerId
                     ))
                 )
         
@@ -164,6 +201,10 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             ))
         """)
     Mono<Long> countAllPaginated(
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified,
             @Param("categoryId") UUID categoryId,
             @Param("creatorId") UUID creatorId,
             @Param("threadType") String threadType,
@@ -171,7 +212,6 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
             @Param("isDeleted") Boolean isDeleted,
             @Param("isFeatured") Boolean isFeatured,
             @Param("hasContentWarning") Boolean hasContentWarning,
-            @Param("currentUserId") UUID currentUserId,
             @Param("isBookmarked") Boolean isBookmarked,
             @Param("isWatched") Boolean isWatched,
             @Param("categoryTagId") UUID categoryTagId,
