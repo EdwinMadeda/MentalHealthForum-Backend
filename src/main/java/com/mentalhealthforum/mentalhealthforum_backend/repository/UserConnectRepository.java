@@ -73,8 +73,15 @@ public interface UserConnectRepository extends R2dbcRepository<UserConnectEntity
             END
         WHERE (c.user_1 = :userId OR c.user_2 = :userId)
             AND c.status = 'ACCEPTED'
-            AND (:search IS NULL OR
-                LOWER(other_user.display_name) LIKE '%' || LOWER(:search) || '%')
+
+            AND (:search IS NULL
+    
+                  OR to_tsvector('public.simple_unaccent', coalesce(other_user.display_name, ''))
+                        @@ websearch_to_tsquery('public.simple_unaccent', :search)
+    
+                  OR public.unaccent_immutable(other_user.display_name) % public.unaccent_immutable(:search)
+             )
+    
             AND (:notificationEnabled IS NULL OR c.notification_enabled = :notificationEnabled)
         ORDER BY
             CASE :sortDirection
@@ -116,8 +123,15 @@ public interface UserConnectRepository extends R2dbcRepository<UserConnectEntity
             END
         WHERE (c.user_1 = :userId OR c.user_2 = :userId)
             AND c.status = 'ACCEPTED'
-            AND (:search IS NULL OR
-                LOWER(other_user.display_name) LIKE '%' || LOWER(:search) || '%')
+    
+            AND (:search IS NULL
+    
+                  OR to_tsvector('public.simple_unaccent', coalesce(other_user.display_name, ''))
+                        @@ websearch_to_tsquery('public.simple_unaccent', :search)
+    
+                  OR public.unaccent_immutable(other_user.display_name) % public.unaccent_immutable(:search)
+             )
+    
             AND (:notificationEnabled IS NULL OR c.notification_enabled = :notificationEnabled)
     """)
     Mono<Long> countAcceptedConnectionsWithFilters(
@@ -141,8 +155,15 @@ public interface UserConnectRepository extends R2dbcRepository<UserConnectEntity
                 (:filter = 'OUTGOING' AND c.initiated_by = :userId) OR
                 (:filter = 'ALL')
             )
-            AND (:search IS NULL OR
-                LOWER(u.display_name) LIKE '%' || LOWER(:search) || '%')
+
+            AND (:search IS NULL
+    
+                  OR to_tsvector('public.simple_unaccent', coalesce(u.display_name, ''))
+                        @@ websearch_to_tsquery('public.simple_unaccent', :search)
+    
+                  OR public.unaccent_immutable(u.display_name) % public.unaccent_immutable(:search)
+            )
+    
         ORDER BY
             CASE :sortDirection
                 WHEN 'DESC' THEN
@@ -189,8 +210,15 @@ public interface UserConnectRepository extends R2dbcRepository<UserConnectEntity
                 (:filter = 'OUTGOING' AND c.initiated_by = :userId) OR
                 (:filter = 'ALL')
             )
-            AND (:search IS NULL OR
-                LOWER(u.display_name) LIKE '%' || LOWER(:search) || '%')
+   
+            AND (:search IS NULL
+    
+                  OR to_tsvector('public.simple_unaccent', coalesce(u.display_name, ''))
+                        @@ websearch_to_tsquery('public.simple_unaccent', :search)
+    
+                  OR public.unaccent_immutable(u.display_name) % public.unaccent_immutable(:search)
+            )
+
     """)
     Mono<Long> countPendingRequestsWithFilters(
             @Param("userId") UUID userId,

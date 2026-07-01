@@ -33,7 +33,16 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
             WHERE (:isActive IS NULL OR is_active = :isActive)
               AND (:role IS NULL OR :role = ANY(roles))
               AND (:groups IS NULL OR groups && :groups)
-              AND (:search IS NULL OR LOWER(display_name) LIKE '%' || LOWER(:search) || '%')
+           
+              -- Search: GIN index, accent-insensitive, exact word matching  + Trigram (typo/partial) fallback
+              AND (:search IS NULL
+          
+                  OR to_tsvector('public.simple_unaccent', coalesce(display_name, ''))
+                        @@ websearch_to_tsquery('public.simple_unaccent', :search)
+           
+                  OR public.unaccent_immutable(display_name) % public.unaccent_immutable(:search)
+              )
+           
               AND (:isConnected IS NULL OR
                     (:isConnected = true AND EXISTS(
                         SELECT 1 FROM user_connections c
@@ -108,7 +117,15 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
             WHERE (:isActive IS NULL OR is_active = :isActive)
               AND (:role IS NULL OR :role = ANY(roles))
               AND (:groups IS NULL OR groups && :groups)
-              AND (:search IS NULL OR LOWER(display_name) LIKE '%' || LOWER(:search) || '%')
+
+              AND (:search IS NULL
+            
+                  OR to_tsvector('public.simple_unaccent', coalesce(display_name, ''))
+                        @@ websearch_to_tsquery('public.simple_unaccent', :search)
+           
+                  OR public.unaccent_immutable(display_name) % public.unaccent_immutable(:search)
+              )
+            
               AND (:isConnected IS NULL OR
                     (:isConnected = true AND EXISTS(
                         SELECT 1 FROM user_connections c
