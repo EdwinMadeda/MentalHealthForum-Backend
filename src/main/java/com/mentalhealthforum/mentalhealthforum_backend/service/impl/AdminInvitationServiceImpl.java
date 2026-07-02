@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.InviterDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.PendingAdminInviteDto;
@@ -12,7 +13,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitatio
 import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AdminInvitationService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.KeycloakAdminManager;
-import io.r2dbc.spi.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,6 +22,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 
@@ -113,7 +114,6 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 .then();
     }
 
-
     @Override
     public Mono<PaginatedResponse<PendingAdminInviteDto>> getPendingInvites(
             int page,
@@ -129,81 +129,49 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
         }
 
         int offset = page * size;
+
+        String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
+        String effectiveOnboardingStage = onboardingStage != null ? onboardingStage.name() : null;
+        String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
         PendingInviteSortField sortByField = PendingInviteSortField.fromString(sortBy);
-        String normalizedDir = "asc".equalsIgnoreCase(sortDirection) ? "ASC" : "DESC";
+        String normalizedSortDirection = sortByField.determineSortDirection(sortDirection);
 
-        String whereClause = """
-                WHERE (:search IS NULL OR :search = ''
-                    OR LOWER(ai.email) LIKE LOWER(CONCAT('%%', :search, '%%'))
-                    OR LOWER(ai.username) LIKE LOWER(CONCAT('%%', :search, '%%'))
-                    OR LOWER(ai.first_name) LIKE LOWER(CONCAT('%%', :search, '%%'))
-                    OR LOWER(ai.last_name) LIKE LOWER(CONCAT('%%', :search, '%%')))
-                AND (cardinality(CAST(:groups AS text[])) = 0 OR ai.groups && :groups)
-                AND (:invitedByUserId IS NULL OR ai.invited_by = :invitedByUserId)
-                AND (:onboardingStage IS NULL OR ai.current_stage = :onboardingStage::onboarding_stage_enum)
-            """;
+        Flux<PendingAdminInviteDto> pendingInviteFlux = adminInvitationRepository.findPendingInvitesPaginated(
+                invitedByUserId,
+                effectiveGroups,
+                effectiveOnboardingStage,
+                effectiveSearch,
+                sortByField.getValue(),
+                normalizedSortDirection,
+                size,
+                offset
+        );
 
-        String dataSql = """
-            SELECT ai.*, au.keycloak_id as inviter_id, au.display_name as inviter_name
-            FROM admin_invitations ai
-            LEFT JOIN app_users au ON ai.invited_by = au.keycloak_id
-            %s
-            ORDER BY ai.%s %s
-            LIMIT :limit OFFSET :offset
-        """.formatted(whereClause, sortByField.getValue(), normalizedDir); // Using .formatted() is much cleaner!
+        Mono<Long> totalCount = adminInvitationRepository.countPendingInvitesWithFilters(
+                invitedByUserId,
+                effectiveGroups,
+                effectiveOnboardingStage,
+                effectiveSearch
+        );
 
-        String countSql = "SELECT COUNT(*) FROM admin_invitations ai %s".formatted(whereClause);
 
-        // Execute Data Query
-        Flux<PendingAdminInviteDto> contentFlux = databaseClient.sql(dataSql)
-                .bind("search", search != null ? search.toLowerCase() : "")
-                .bind("groups", groups != null ? groups : new String[0])
-                .bind("limit", size)
-                .bind("offset", offset)
-                .bind("invitedByUserId", invitedByUserId != null
-                        ? invitedByUserId
-                        : Parameters.in(UUID.class))
-                .bind("onboardingStage", onboardingStage != null
-                        ? onboardingStage // Bind the Enum object, not .name()
-                        : Parameters.in(OnboardingStage.class))
-                .map((row, metadata) -> new PendingAdminInviteDto(
-                        row.get("keycloak_id", UUID.class),
-                        row.get("username", String.class),
-                        row.get("first_name", String.class),
-                        row.get("last_name", String.class),
-                        row.get("email", String.class),
-                        row.get("groups", String[].class),
-                        Boolean.TRUE.equals(row.get("is_enabled", Boolean.class)),
-                        Boolean.TRUE.equals(row.get("is_email_verified", Boolean.class)),
-                        new InviterDto(
-                                row.get("inviter_id", UUID.class),
-                                row.get("inviter_name", String.class)
-                        ),
-                        row.get("date_created", Instant.class),
-                        row.get("updated_at", Instant.class),
-                        row.get("current_stage", OnboardingStage.class)
-                ))
-                .all();
+        return Mono.zip(pendingInviteFlux.collectList(), totalCount)
+                .map(tuple -> {
+                    List<PendingAdminInviteDto> adminInvites = tuple.getT1();
+                    Long total = tuple.getT2();
 
-        // Execute Count Query
-        Mono<Long> totalCount = databaseClient.sql(countSql)
-                .bind("search", search != null ? search.toLowerCase() : "")
-                .bind("groups", groups != null ? groups : new String[0])
-                .bind("invitedByUserId", invitedByUserId != null
-                        ? invitedByUserId
-                        : Parameters.in(UUID.class))
-                .bind("onboardingStage", onboardingStage != null
-                        ? onboardingStage // Bind the Enum object, not .name()
-                        : Parameters.in(OnboardingStage.class))
-                .map((row, metadata) -> row.get(0, Long.class))
-                .one()
-                .defaultIfEmpty(0L);
+                    if(adminInvites.isEmpty()){
+                        return new PaginatedResponse<>(List.of(), page, size, 0L);
+                    }
 
-        return Mono.zip(contentFlux.collectList(), totalCount)
-                .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                    FilterMetadata<Object> filters = FilterMetadata.builder()
+                            .sortOptions(getPendingInviteSortOptions())
+                            .build();
+
+                    return new PaginatedResponse<>(adminInvites, page, size, total, filters);
+                });
+
     }
-
-
 
     @Override
     public Mono<Void> completeInvitation(UUID keycloakId){
@@ -218,6 +186,12 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 })
                 .doOnSuccess(v -> log.info("Lobby record for {} successfully cleared.", keycloakId))
                 .then();
+    }
+
+    private List<SortOption> getPendingInviteSortOptions(){
+        return Arrays.stream(PendingInviteSortField.values())
+                .map(PendingInviteSortField::toSortOption)
+                .toList();
     }
 }
 

@@ -7,24 +7,27 @@ import java.util.UUID;
 
 public record PendingAdminInviteDto(
         // Primary key used by the application
-        UUID userId,
+        UUID user_id,
 
         // Basic Profile Information
         String username,
-        String firstName,
-        String lastName,
+        String first_name,
+        String last_name,
         String email,
 
         String[] groups,
 
         // Status and Audit Fields
-        boolean enabled,
-        boolean emailVerified,
+        boolean is_enabled,
+        boolean is_email_verified,
 
-        InviterDto invitedBy,
+        // Invited by Details
+        UUID invited_by,
+        String invited_by_display_name,
+        String invited_by_avatar_url,
 
-        Instant createdDate,
+        Instant date_created,
         Instant updated_at,
 
-        OnboardingStage currentStage
+        OnboardingStage current_stage
 ) {}
