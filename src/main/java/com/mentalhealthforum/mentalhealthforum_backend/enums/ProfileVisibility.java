@@ -6,5 +6,6 @@ package com.mentalhealthforum.mentalhealthforum_backend.enums;
  */
 public enum ProfileVisibility {
     MEMBERS_ONLY,  // Default: Only logged-in members can see
+    CONNECTED_ONLY,    // Only connected members can see full details
     PRIVATE        // Only user themselves (or admins)
 }

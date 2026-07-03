@@ -196,7 +196,7 @@ public class AppUserServiceImpl implements AppUserService {
                 })
                 .flatMap(appUser -> evaluateOnboardingPolicyCompliance(appUser, viewerContext).thenReturn(appUser))
                 .flatMap(this::enrichWithPendingEmail)
-                .map(appUser ->  userResponseMapper.mapUserBasedOnContext(appUser, viewerContext));
+                .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
     /**
      * @deprecated replaced by {@link #syncUserViaAdminClient(KeycloakUserDto, ViewerContext)}
@@ -302,7 +302,7 @@ public class AppUserServiceImpl implements AppUserService {
                 })
                 .flatMap(this::enrichWithPendingEmail)
                 // Mapper now receives appUser with pendingEmail already attached
-                .map(appUser -> userResponseMapper.mapUserBasedOnContext(appUser, viewerContext));
+                .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
     /**
      * Fetches paginated list of all users with privacy rules applied for each.
@@ -340,7 +340,21 @@ public class AppUserServiceImpl implements AppUserService {
         }
 
         int offset = page * size;
-        UUID currentUserId = viewerContext != null? UUID.fromString(viewerContext.getUserId()) : null;
+
+        UUID currentUserId = null;
+        boolean isAdmin = false;
+        boolean isModeratorOrAdmin = false;
+
+        if(viewerContext != null && viewerContext.getUserId() != null){
+            try{
+                currentUserId = UUID.fromString(viewerContext.getUserId());
+                isAdmin = viewerContext.isAdmin();
+                isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+            } catch (IllegalArgumentException e){
+                log.error("Failed to parse viewer keycloak UUID string from context: {}", viewerContext.getUserId());
+            }
+        }
+
         String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
         AppUserSortField sortByField = validateAndNormalizeSortBy(sortBy);
@@ -352,18 +366,17 @@ public class AppUserServiceImpl implements AppUserService {
         Flux<AppUserEntity> appUsersFlux = appUserRepository.findAllPaginated(
                 isActive, role, effectiveGroups,
                 currentUserId, applyCurrentUserFirst,
-                isConnected,
-                effectiveSearch,
-                sortByField.getValue(), normalizedDirection, size, offset
-        );
+                isAdmin, isModeratorOrAdmin,
+                isConnected, effectiveSearch, sortByField.getValue(), normalizedDirection,
+                size, offset);
 
         Mono<Long> totalCount = appUserRepository.countAll(
                 isActive, role, effectiveGroups,
                 currentUserId,
-                isConnected,
-                effectiveSearch
-        );
+                isAdmin, isModeratorOrAdmin,
+                isConnected, effectiveSearch);
 
+        UUID finalCurrentUserId = currentUserId;
         return Mono.zip(appUsersFlux.collectList(), totalCount)
                 .flatMap(tuple -> {
                     List<AppUserEntity> appUsers = tuple.getT1();
@@ -373,7 +386,7 @@ public class AppUserServiceImpl implements AppUserService {
                         return Mono.just(new PaginatedResponse<>(List.of(), page, size, total));
                     }
 
-                    return enrichAppUsersWithConnectionStatus(appUsers, currentUserId, viewerContext)
+                    return enrichAppUsersWithConnectionStatus(appUsers, finalCurrentUserId, viewerContext)
                             .map(content -> {
                                 FilterMetadata<Object> filters = FilterMetadata.builder()
                                         .sortOptions(getUserSortOptions())
@@ -450,7 +463,7 @@ public class AppUserServiceImpl implements AppUserService {
                                 .then(evaluateOnboardingPolicyCompliance(savedUser, viewerContext))
                                 .thenReturn(savedUser))
                 .flatMap(this::enrichWithPendingEmail)
-                .map(appUser -> userResponseMapper.mapUserBasedOnContext(appUser, viewerContext));
+                .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
     /**
      * Deletes the local R2DBC profile for the authenticated user.
@@ -563,6 +576,31 @@ public class AppUserServiceImpl implements AppUserService {
     }
 
     /**
+     * Enriches the AppUserEntity model with transient isConnected metadata.
+     * This ensures the 'isConnected' field is populated across all retrieval and sync flows.
+     */
+    private Mono<UserResponse> enrichSingleUserWithConnectionStatus(AppUserEntity targetUser, ViewerContext viewerContext) {
+
+        Mono<Boolean> connectionMono;
+        if (viewerContext == null || viewerContext.getUserId() == null) {connectionMono = Mono.just(false);}
+        else {
+            UUID viewerId = UUID.fromString(viewerContext.getUserId());
+            UUID targetId = targetUser.getKeycloakId();
+
+            if (viewerId.equals(targetId)) {connectionMono = Mono.just(false);}
+            else {
+                connectionMono = userConnectRepository.areConnected(viewerId, targetId)
+                        .defaultIfEmpty(false);
+            }
+        }
+
+       return  connectionMono.map(isConnected -> {
+           targetUser.setIsConnected(isConnected);
+           return userResponseMapper.mapUserBasedOnContext(targetUser, viewerContext);
+       });
+    }
+
+    /**
      * Enriches a list of users with connection status for the current viewer.
      * Uses batch fetching to avoid N+1 queries.
      *
@@ -572,18 +610,17 @@ public class AppUserServiceImpl implements AppUserService {
      * @return A Mono containing the list of enriched UserResponse objects
      */
     private Mono<List<UserResponse>> enrichAppUsersWithConnectionStatus(
-        List<AppUserEntity> appUsers,
-        UUID currentUserId,
-        ViewerContext viewerContext
+            List<AppUserEntity> appUsers,
+            UUID currentUserId,
+            ViewerContext viewerContext
     ){
         // if no current user, all connections are false
         if(currentUserId == null){
             return Mono.just(appUsers.stream()
                     .map(appUser -> {
-                        UserResponse response = userResponseMapper.mapUserBasedOnContext(appUser, viewerContext);
-                        response.setIsConnected(false);
+                        appUser.setIsConnected(false);
 
-                        return response;
+                        return userResponseMapper.mapUserBasedOnContext(appUser, viewerContext);
                     })
                     .collect(Collectors.toList()));
         }
@@ -599,10 +636,9 @@ public class AppUserServiceImpl implements AppUserService {
 
                     return appUsers.stream()
                             .map(appUser -> {
-                                UserResponse response = userResponseMapper.mapUserBasedOnContext(appUser, viewerContext);
-                                response.setIsConnected(connectedSet.contains(appUser.getKeycloakId()));
+                                appUser.setIsConnected(connectedSet.contains(appUser.getKeycloakId()));
 
-                                return response;
+                                return userResponseMapper.mapUserBasedOnContext(appUser, viewerContext);
                             })
                             .collect(Collectors.toList());
 

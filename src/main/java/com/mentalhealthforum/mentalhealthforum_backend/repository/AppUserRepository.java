@@ -28,21 +28,25 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
     """)
    Mono<Void> updateLocalEmail(UUID keycloakId, String email);
 
+    // ==================== PAGINATED QUERIES ====================
+
     @Query("""
-            SELECT * FROM app_users
-            WHERE (:isActive IS NULL OR is_active = :isActive)
-              AND (:role IS NULL OR :role = ANY(roles))
-              AND (:groups IS NULL OR groups && :groups)
+            SELECT u.*
+            FROM app_users u
+            WHERE (:isActive IS NULL OR u.is_active = :isActive)
+              AND (:role IS NULL OR :role = ANY(u.roles))
+              AND (:groups IS NULL OR u.groups && :groups)
            
               -- Search: GIN index, accent-insensitive, exact word matching  + Trigram (typo/partial) fallback
               AND (:search IS NULL
           
-                  OR to_tsvector('public.simple_unaccent', coalesce(display_name, ''))
+                  OR to_tsvector('public.simple_unaccent', coalesce(u.display_name, ''))
                         @@ websearch_to_tsquery('public.simple_unaccent', :search)
            
-                  OR public.unaccent_immutable(display_name) % public.unaccent_immutable(:search)
+                  OR public.unaccent_immutable(u.display_name) % public.unaccent_immutable(:search)
               )
            
+              -- Connection filter
               AND (:isConnected IS NULL OR
                     (:isConnected = true AND EXISTS(
                         SELECT 1 FROM user_connections c
@@ -57,23 +61,66 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
                                 AND c.status = 'ACCEPTED'
                     ))
                   )
-          
+           
+              -- Profile Visibility Filter
+              AND (
+                  u.keycloak_id = :currentUserId
+           
+                 -- ADMIN/MOD OVERRIDE (1) – always visible to logged‑in members
+                 OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
+           
+                  -- Normal visibility for regular users
+           
+                  -- MEMBERS_ONLY: visible to all logged-in members
+                  OR (u.profile_visibility = 'MEMBERS_ONLY' AND :currentUserId IS NOT NULL)
+           
+                  -- CONNECTED_ONLY: visible only to connected members
+                  OR (u.profile_visibility = 'CONNECTED_ONLY' AND :currentUserId IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM user_connections uc
+                            WHERE uc.status = 'ACCEPTED'
+                                AND (
+                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
+                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
+                                    )
+                        )
+                  )
+            
+                 -- PRIVATE: visible only to self, admins, or moderators
+                  OR (u.profile_visibility = 'PRIVATE' AND (
+           
+                        :isAdmin = TRUE
+                        OR :isModeratorOrAdmin = TRUE
+                         -- ADMIN/MOD OVERRIDE (2) – same as above, for robustness
+                        OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
+           
+                        OR EXISTS (
+                            SELECT 1 FROM user_connections uc
+                            WHERE uc.status = 'ACCEPTED'
+                                AND (
+                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
+                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
+                                    )
+                        )
+                  ))
+              )
+           
+     
             ORDER BY
                 -- 1. Current user first
                 CASE WHEN :currentUserId IS NOT NULL AND :currentUserFirst = true
-                    AND keycloak_id = :currentUserId::uuid
+                    AND u.keycloak_id = :currentUserId::uuid
                          THEN 0 ELSE 1 END,
            
                 -- 2. Sort by selected field and direction: DESC (ALL CAST TO TEXT to fix type mismatch)
                 CASE :sortDirection
                     WHEN 'DESC' THEN
                         CASE :sortBy
-                            WHEN 'date_joined' THEN date_joined::text
-                            WHEN 'posts_count' THEN LPAD(posts_count::text, 10, '0')
-                            WHEN 'reputation_score' THEN LPAD(TO_CHAR(reputation_score, 'FM999999.99'), 15, '0')
-                            WHEN 'last_posted_at' THEN last_posted_at::text
-                            WHEN 'last_active_at' THEN last_active_at::text
-                            WHEN 'display_name' THEN COALESCE(NULLIF(display_name, ''), 'zzzzzzzz')
+                            WHEN 'date_joined' THEN u.date_joined::text
+                            WHEN 'posts_count' THEN LPAD(u.posts_count::text, 10, '0')
+                            WHEN 'reputation_score' THEN LPAD(TO_CHAR(u.reputation_score, 'FM999999.99'), 15, '0')
+                            WHEN 'last_posted_at' THEN u.last_posted_at::text
+                            WHEN 'last_active_at' THEN u.last_active_at::text
+                            WHEN 'display_name' THEN COALESCE(NULLIF(u.display_name, ''), 'zzzzzzzz')
                             ELSE NULL
                         END
                     ELSE NULL
@@ -83,19 +130,19 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
                 CASE :sortDirection
                     WHEN 'ASC' THEN
                         CASE :sortBy
-                            WHEN 'date_joined' THEN date_joined::text
-                            WHEN 'posts_count' THEN LPAD(posts_count::text, 10, '0')
-                            WHEN 'reputation_score' THEN LPAD(TO_CHAR(reputation_score, 'FM999999.99'), 15, '0')
-                            WHEN 'last_posted_at' THEN last_posted_at::text
-                            WHEN 'last_active_at' THEN last_active_at::text
-                            WHEN 'display_name' THEN COALESCE(NULLIF(display_name, ''), 'zzzzzzzz')
+                            WHEN 'date_joined' THEN u.date_joined::text
+                            WHEN 'posts_count' THEN LPAD(u.posts_count::text, 10, '0')
+                            WHEN 'reputation_score' THEN LPAD(TO_CHAR(u.reputation_score, 'FM999999.99'), 15, '0')
+                            WHEN 'last_posted_at' THEN u.last_posted_at::text
+                            WHEN 'last_active_at' THEN u.last_active_at::text
+                            WHEN 'display_name' THEN COALESCE(NULLIF(u.display_name, ''), 'zzzzzzzz')
                             ELSE NULL
                         END
                     ELSE NULL
                 END ASC NULLS FIRST,
            
                 -- 4. Tie breaker for deterministic ordering
-                keycloak_id
+                u.keycloak_id
             LIMIT :limit OFFSET :offset;
            """)
     Flux<AppUserEntity> findAllPaginated(
@@ -104,6 +151,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
             @Param("groups") String[] groups,
             @Param("currentUserId") UUID currentUserId,
             @Param("currentUserFirst") boolean currentUserFirst,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
             @Param("isConnected") Boolean isConnected,
             @Param("search") String search,
             @Param("sortBy") String sortBy,
@@ -113,17 +162,17 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
     );
 
     @Query("""
-            SELECT COUNT(*) FROM app_users
-            WHERE (:isActive IS NULL OR is_active = :isActive)
-              AND (:role IS NULL OR :role = ANY(roles))
-              AND (:groups IS NULL OR groups && :groups)
+            SELECT COUNT(*) FROM app_users u
+            WHERE (:isActive IS NULL OR u.is_active = :isActive)
+              AND (:role IS NULL OR :role = ANY(u.roles))
+              AND (:groups IS NULL OR u.groups && :groups)
 
               AND (:search IS NULL
             
-                  OR to_tsvector('public.simple_unaccent', coalesce(display_name, ''))
+                  OR to_tsvector('public.simple_unaccent', coalesce(u.display_name, ''))
                         @@ websearch_to_tsquery('public.simple_unaccent', :search)
            
-                  OR public.unaccent_immutable(display_name) % public.unaccent_immutable(:search)
+                  OR public.unaccent_immutable(u.display_name) % public.unaccent_immutable(:search)
               )
             
               AND (:isConnected IS NULL OR
@@ -139,13 +188,58 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
                                 AND (c.user_1 = keycloak_id OR c.user_2 = keycloak_id)
                                 AND c.status = 'ACCEPTED'
                     ))
+              )
+            
+              -- Profile Visibility Filter
+              AND (
+                  u.keycloak_id = :currentUserId
+           
+                 -- ADMIN/MOD OVERRIDE (1) – always visible to logged‑in members
+                 OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
+           
+                  -- Normal visibility for regular users
+           
+                  -- MEMBERS_ONLY: visible to all logged-in members
+                  OR (u.profile_visibility = 'MEMBERS_ONLY' AND :currentUserId IS NOT NULL)
+            
+                  -- CONNECTED_ONLY: visible only to connected members
+                  OR (u.profile_visibility = 'CONNECTED_ONLY' AND :currentUserId IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM user_connections uc
+                            WHERE uc.status = 'ACCEPTED'
+                                AND (
+                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
+                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
+                                    )
+                        )
                   )
+            
+                 -- PRIVATE: visible only to self, admins, or moderators
+                  OR (u.profile_visibility = 'PRIVATE' AND (
+           
+                        :isAdmin = TRUE
+                        OR :isModeratorOrAdmin = TRUE
+                         -- ADMIN/MOD OVERRIDE (2) – same as above, for robustness
+                        OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
+           
+                        OR EXISTS (
+                            SELECT 1 FROM user_connections uc
+                            WHERE uc.status = 'ACCEPTED'
+                                AND (
+                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
+                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
+                                    )
+                        )
+                  ))
+              )
+           
             """)
     Mono<Long> countAll(
             @Param("isActive") Boolean isActive,
             @Param("role") String role,
             @Param("groups") String[] groups,
             @Param("currentUserId") UUID currentUserId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
             @Param("isConnected") Boolean isConnected,
             @Param("search") String search
     );

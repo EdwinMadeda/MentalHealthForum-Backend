@@ -63,7 +63,6 @@ public interface UserConnectRepository extends R2dbcRepository<UserConnectEntity
             @Param("userIds") List<UUID> userIds
     );
 
-
     @Query("""
         SELECT c.* FROM user_connections c
         INNER JOIN app_users other_user ON other_user.keycloak_id =
@@ -232,6 +231,16 @@ public interface UserConnectRepository extends R2dbcRepository<UserConnectEntity
         AND updated_at < NOW() - (:days || ' days')::INTERVAL
     """)
     Mono<Integer> deleteDeclinedOlderThan(@Param("days") int days);
+
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM user_connections
+            WHERE status = 'ACCEPTED'
+            AND ((user_1 = :user1 AND user_2 = :user2)
+              OR (user_1 = :user2 AND user_2 = :user1))
+        )
+    """)
+    Mono<Boolean> areConnected(UUID user1, UUID user2);
 
     @Query("SELECT * FROM user_connections WHERE user_1 = :user1 AND user_2 = :user2")
     Mono<UserConnectEntity> findByUser1AndUser2(@Param("user1") UUID user1, @Param("user2") UUID user2);

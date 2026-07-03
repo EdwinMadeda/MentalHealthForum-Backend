@@ -17,6 +17,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.validation.lastName.Valid
 import com.mentalhealthforum.mentalhealthforum_backend.validation.url.ValidUrl;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.username.ValidUsername;
 import jakarta.validation.constraints.*;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
@@ -112,12 +113,14 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     @Column("language")
     private String language = "en";
 
+    @Getter(AccessLevel.NONE)
     @Column("profile_visibility")
     private ProfileVisibility profileVisibility = ProfileVisibility.MEMBERS_ONLY;
 
     @Column("support_role")
     private SupportRole supportRole = SupportRole.NOT_SPECIFIED;
 
+    @Getter(AccessLevel.NONE)
     @Column("notification_preferences")
     private JsonNode notificationPreferencesJson;
 
@@ -144,7 +147,10 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
 
     // --- Transient / helper fields ---
     @Transient
-    private boolean isSelf = false;
+    private Boolean isSelf = false;
+
+    @Transient
+    private Boolean isConnected = null;
 
     @Transient
     private String pendingEmail;
@@ -198,6 +204,22 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
         this.lastName = lastName;
     }
 
+    // -- ProfileVisibility getter/setter
+    public ProfileVisibility getProfileVisibility(){
+        if(this.isModeratorOrAdmin()){
+            return ProfileVisibility.MEMBERS_ONLY;
+        }
+        return this.profileVisibility;
+    }
+
+    public void setProfileVisibility(ProfileVisibility profileVisibility){
+        if(this.isModeratorOrAdmin()){
+            this.profileVisibility = ProfileVisibility.MEMBERS_ONLY;
+        }
+        else {
+            this.profileVisibility = profileVisibility;
+        }
+    }
 
     // --- NotificationPreferences getter/setter using JsonUtils ---
     public NotificationPreferences getNotificationPreferences() {
@@ -227,6 +249,7 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     public String timezone() {
         return this.timezone;
     }
+
 
     // ==================== HELPER METHODS ====================
 

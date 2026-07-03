@@ -39,7 +39,6 @@ public class UserResponse {
     private TimezoneDetails timezoneDetails;  // Full details (displayName, offset, region)
     private String language;
     private ProfileVisibility profileVisibility;
-    //  private SupportRole supportRole;
 
     // --- Engagement Metrics ---
     private Integer postsCount;
