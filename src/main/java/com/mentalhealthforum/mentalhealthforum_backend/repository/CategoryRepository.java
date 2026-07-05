@@ -28,6 +28,15 @@ public interface CategoryRepository extends R2dbcRepository<CategoryEntity, UUID
     @Query("SELECT * FROM forum_categories WHERE id IN (:ids)")
     Flux<CategoryEntity> findCategoriesByIds(@Param("ids") List<UUID> ids);
 
+    @Query("SELECT category_is_visible(:id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)")
+    Mono<Boolean> isCategoryVisible(
+            @Param("id") UUID id,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
+
     @Query("""
         SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END
         FROM forum_categories
@@ -57,19 +66,40 @@ public interface CategoryRepository extends R2dbcRepository<CategoryEntity, UUID
 
     @Query("""
         SELECT c.* FROM forum_categories c
-        WHERE c.is_active = true
-        AND c.parent_category_id IS NULL
+        WHERE  c.parent_category_id IS NULL
+        AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         ORDER BY c.sort_order ASC
     """)
-    Flux<CategoryEntity> findRootCategories();
+    Flux<CategoryEntity> findRootCategoriesWithVisibility(
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     @Query("""
         SELECT c.* FROM forum_categories c
         WHERE c.parent_category_id = :parentId
-        AND c.is_active = true
+        AND c.is_active = TRUE
         ORDER BY c.sort_order ASC
     """)
-    Flux<CategoryEntity> findChildCategories(@Param("parentId") UUID parentId);
+    Flux<CategoryEntity> findChildCategoriesForAdmin(
+            @Param("parentId") UUID parentId
+    );
+
+    @Query("""
+        SELECT c.* FROM forum_categories c
+        WHERE c.parent_category_id = :parentId
+        AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+        ORDER BY c.sort_order ASC
+    """)
+    Flux<CategoryEntity> findChildCategoriesWithVisibility(
+            @Param("parentId") UUID parentId,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     // ==================== TAG-BASED QUERIES ====================
     @Query("""
@@ -103,15 +133,7 @@ public interface CategoryRepository extends R2dbcRepository<CategoryEntity, UUID
     
             AND (:isActive IS NULL OR c.is_active = :isActive)
     
-            AND (
-    
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-            )
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
             -- Tag filter using centralised tags
             AND (:tagId IS NULL OR EXISTS (
@@ -190,15 +212,7 @@ public interface CategoryRepository extends R2dbcRepository<CategoryEntity, UUID
 
         AND (:isActive IS NULL OR c.is_active = :isActive)
     
-        AND (
-
-             (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-
-        )
+        AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
         -- Tag filter using centralised tags
         AND (:tagId IS NULL OR EXISTS (

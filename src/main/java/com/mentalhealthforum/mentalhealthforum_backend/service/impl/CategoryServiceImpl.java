@@ -227,7 +227,7 @@ public class CategoryServiceImpl implements CategoryService {
                         ErrorCode.RESOURCE_NOT_FOUND)))
                 .flatMap(category -> {
                     // Check if category has active children (can't purge if it has active children)
-                    return categoryRepository.findChildCategories(categoryId)
+                    return categoryRepository.findChildCategoriesForAdmin(categoryId)
                             .filter(CategoryEntity::getIsActive)
                             .hasElements()
                             .flatMap(hasActiveElements -> {
@@ -287,22 +287,52 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     public Mono<CategoryResponse> getCategoryById(UUID id, ViewerContext viewerContext) {
-        // Public - no permission check needed
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
         return categoryRepository.findById(id)
                 .switchIfEmpty(Mono.error(new ApiException(
                         "Category with id '" + id + "' not found",
                         ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
+                .flatMap(category ->
+                                categoryRepository.isCategoryVisible(category.getId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+                                                .flatMap(visible -> {
+                                                    if(!visible){
+                                                        return Mono.error(new ApiException(
+                                                                "You do not have permission to view this category",
+                                                                ErrorCode.FORBIDDEN
+                                                        ));
+                                                    }
+                                                    return enrichSingleCategoryWithData(category, viewerContext);
+                                                })
+                );
+
     }
 
     @Override
     public Mono<CategoryResponse> getCategoryBySlug(String slug, ViewerContext viewerContext) {
-        // Public - no permission check needed
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
         return categoryRepository.findBySlug(slug)
                 .switchIfEmpty(Mono.error(new ApiException(
                         "Category with slug '" + slug + "' not found",
                         ErrorCode.RESOURCE_NOT_FOUND)))
-                .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
+                .flatMap(category -> categoryRepository.isCategoryVisible(category.getId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+                        .flatMap(visible -> {
+                            if(!visible){
+                                return Mono.error(new ApiException(
+                                        "You do not have permission to view this category",
+                                        ErrorCode.FORBIDDEN
+                                ));
+                            }
+                            return enrichSingleCategoryWithData(category, viewerContext);
+                        })
+                );
     }
 
     @Override
@@ -349,11 +379,15 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     public Flux<CategoryHierarchyDto> getCategoryHierarchy(ViewerContext viewerContext) {
-        // Public - no permission check needed
-        return categoryRepository.findRootCategories()
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
+        return categoryRepository.findRootCategoriesWithVisibility(viewerId, isAdmin ,isModeratorOrAdmin ,isVerified)
                 .flatMap(root -> Mono.zip(
                         enrichSingleCategoryWithData(root, viewerContext),
-                        categoryRepository.findChildCategories(root.getId())
+                        categoryRepository.findChildCategoriesWithVisibility(root.getId(),viewerId, isAdmin ,isModeratorOrAdmin ,isVerified)
                                 .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext))
                                 .collectList(),
                         categoryTagService.getTagsForCategory(root.getId())
@@ -368,15 +402,23 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     public Flux<CategoryResponse> getRootCategories(ViewerContext viewerContext) {
-        // Public - no permission check needed
-        return categoryRepository.findRootCategories()
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
+        return categoryRepository.findRootCategoriesWithVisibility(viewerId, isAdmin , isModeratorOrAdmin , isVerified )
                 .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
     @Override
     public Flux<CategoryResponse> getChildCategories(UUID parentId, ViewerContext viewerContext) {
-        // Public - no permission check needed
-        return categoryRepository.findChildCategories(parentId)
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
+        return categoryRepository.findChildCategoriesWithVisibility(parentId, viewerId, isAdmin , isModeratorOrAdmin , isVerified )
                 .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
     }
 
