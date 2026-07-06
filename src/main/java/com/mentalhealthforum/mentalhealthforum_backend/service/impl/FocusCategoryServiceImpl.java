@@ -12,7 +12,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiExcept
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.FocusCategoryEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
-import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.FocusCategoryRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.CategoryRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadRepository;
@@ -55,7 +54,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
         return validateCategoryExists(categoryId)
                 .then(checkNotAlreadyFocused(userId, categoryId))
                 .then(createFocusCategory(userId, categoryId))
-                .flatMap(this::enrichSingleFocusCategoryWithData)
+                .flatMap(category -> enrichSingleFocusCategoryWithData(category, viewerContext))
                 .as(transactionalOperator::transactional);
     }
 
@@ -114,7 +113,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
                         return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
                     }
 
-                    return enrichFocusCategoriesWithBatchData(focusCategories)
+                    return enrichFocusCategoriesWithBatchData(focusCategories, viewerContext)
                             .zipWith(focusCategoryRepository.countByUserIdWithFilters(
                                     viewerId,
                                     isAdmin, isModeratorOrAdmin, isVerified,
@@ -177,10 +176,15 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
      * Enriches a single focus category with category details and thread count.
      * Uses individual queries since only one item is being fetched.
      */
-    private Mono<FocusCategoryResponse> enrichSingleFocusCategoryWithData(FocusCategoryEntity focusCategory){
+    private Mono<FocusCategoryResponse> enrichSingleFocusCategoryWithData(FocusCategoryEntity focusCategory, ViewerContext viewerContext){
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
         return Mono.zip(
                 categoryRepository.findById(focusCategory.getCategoryId()),
-                threadRepository.countActiveThreadsByCategory(focusCategory.getCategoryId())
+                threadRepository.countActiveThreadsByCategory(focusCategory.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
         ).map(tuple-> {
             CategoryEntity category = tuple.getT1();
             Long threadCount = tuple.getT2();
@@ -193,10 +197,27 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
      * Uses batch fetching to avoid N+1 queries.
      */
     private Mono<List<FocusCategoryResponse>> enrichFocusCategoriesWithBatchData(
-        List<FocusCategoryEntity> focusCategories
+        List<FocusCategoryEntity> focusCategories,
+        ViewerContext viewerContext
     ){
         if(focusCategories.isEmpty()){
             return Mono.just(List.of());
+        }
+
+        UUID viewerId = null;
+        boolean isAdmin = false;
+        boolean isModeratorOrAdmin = false;
+        boolean isVerified = false;
+
+        if(viewerContext != null && viewerContext.getUserId() != null){
+            try{
+                viewerId = UUID.fromString(viewerContext.getUserId());
+                isAdmin = viewerContext.isAdmin();
+                isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+                isVerified = viewerContext.isVerified();
+            } catch (IllegalArgumentException e){
+                log.error("Failed to parse viewer keycloak UUID string from context: {}", viewerContext.getUserId());
+            }
         }
 
         List<UUID> categoryIds = focusCategories.stream()
@@ -211,7 +232,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
 
         // Batch fetch thread counts
         Mono<Map<UUID, Long>> threadCountMap = threadRepository
-                .findThreadCountsByCategoryIds(categoryIds)
+                .findVisibleThreadCountsByCategoryIds(categoryIds, viewerId, isAdmin, isModeratorOrAdmin, isVerified)
                 .collectMap(ThreadCountRecord::category_id, ThreadCountRecord::count)
                 .defaultIfEmpty(new HashMap<>());
 

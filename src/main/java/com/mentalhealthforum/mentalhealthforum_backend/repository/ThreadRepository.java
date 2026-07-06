@@ -45,15 +45,7 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
         
             -- Category visibility
             AND c.is_active = TRUE
-            AND (
-        
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-        
-            )
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         
             -- Bookmark filter using EXISTS
             AND (:isBookmarked IS NULL OR
@@ -159,15 +151,7 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
         
             -- Category visibility
             AND c.is_active = TRUE
-            AND (
-        
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-        
-            )
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         
             -- Bookmark filter using EXISTS
             AND (:isBookmarked IS NULL OR
@@ -220,25 +204,37 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
 
     // ==================== CATEGORY-SPECIFIC PAGINATED QUERIES ====================
     @Query("""
-        SELECT * FROM forum_threads
-        WHERE category_id = :categoryId
-            AND is_deleted = false
-        ORDER BY is_sticky DESC, last_activity_at DESC
+        SELECT t.* FROM forum_threads t
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE t.category_id = :categoryId
+            AND t.is_deleted = false
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+        ORDER BY t.is_sticky DESC, t.last_activity_at DESC
         LIMIT :limit OFFSET :offset
         """)
     Flux<ThreadEntity> findActiveThreadsByCategoryPaginated(
             @Param("categoryId") UUID categoryId,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified,
             @Param("limit") int limit,
             @Param("offset") int offset
     );
 
     @Query("""
-        SELECT COUNT(*) FROM forum_threads
-        WHERE category_id = :categoryId
-            AND is_deleted = false
+        SELECT COUNT(*) FROM forum_threads t
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE t.category_id = :categoryId
+            AND t.is_deleted = false
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         """)
     Mono<Long> countActiveThreadsByCategory(
-            @Param("categoryId") UUID categoryId
+            @Param("categoryId") UUID categoryId,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
     );
 
     // ==================== VIEW COUNT ====================
@@ -348,9 +344,16 @@ public interface ThreadRepository extends R2dbcRepository<ThreadEntity, UUID> {
         FROM forum_threads
         WHERE category_id IN (:categoryIds)
         AND is_deleted = false
+        AND category_is_visible(category_id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         GROUP BY category_id
     """)
-    Flux<ThreadCountRecord> findThreadCountsByCategoryIds(List<UUID> categoryIds);
+    Flux<ThreadCountRecord> findVisibleThreadCountsByCategoryIds(
+            @Param("categoryIds") List<UUID> categoryIds,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     /**
      * Batch fetch threads by IDs.

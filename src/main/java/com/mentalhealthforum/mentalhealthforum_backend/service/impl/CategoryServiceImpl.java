@@ -580,11 +580,15 @@ public class CategoryServiceImpl implements CategoryService {
      * This is simpler and more readable than the batch approach for single items.
      */
     private Mono<CategoryResponse> enrichSingleCategoryWithData(CategoryEntity category, ViewerContext viewerContext){
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
         return Mono.zip(
                 focusCategoryService.isCategoryFocused(category.getId(), viewerContext),
                 categoryTagService.getTagsForCategory(category.getId()).collectList(),
-                threadRepository.countActiveThreadsByCategory(category.getId())
+                threadRepository.countActiveThreadsByCategory(category.getId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
         ).map(tuple -> {
             Boolean isFocused = tuple.getT1();
             List<CategoryTagResponse> tags = tuple.getT2();
@@ -610,7 +614,21 @@ public class CategoryServiceImpl implements CategoryService {
             ));
         }
 
-        UUID currentUserId = viewerContext != null? UUID.fromString(viewerContext.getUserId()): null;
+        UUID viewerId = null;
+        boolean isAdmin = false;
+        boolean isModeratorOrAdmin = false;
+        boolean isVerified = false;
+
+        if(viewerContext != null && viewerContext.getUserId() != null){
+            try{
+                viewerId = UUID.fromString(viewerContext.getUserId());
+                isAdmin = viewerContext.isAdmin();
+                isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+                isVerified = viewerContext.isVerified();
+            } catch (IllegalArgumentException e){
+                log.error("Failed to parse viewer keycloak UUID string from context: {}", viewerContext.getUserId());
+            }
+        }
 
         List<UUID> categoryIds = categories.stream()
                 .map(CategoryEntity::getId)
@@ -623,14 +641,14 @@ public class CategoryServiceImpl implements CategoryService {
 
         // Batch fetch focus status for all categories (if user authenticated)
         Mono<Set<UUID>> focusedSet = Mono.just(Set.of());
-        if(currentUserId != null){
-            focusedSet = focusCategoryRepository.findFocusCategoryIds(currentUserId, categoryIds)
+        if(viewerId != null){
+            focusedSet = focusCategoryRepository.findFocusCategoryIds(viewerId, categoryIds)
                     .collect(Collectors.toSet())
                     .defaultIfEmpty(Set.of());
         }
 
         // Batch fetch thread counts for categories
-        Mono<Map<UUID, Long>> threadCountsMap = threadRepository.findThreadCountsByCategoryIds(categoryIds)
+        Mono<Map<UUID, Long>> threadCountsMap = threadRepository.findVisibleThreadCountsByCategoryIds(categoryIds, viewerId, isAdmin, isModeratorOrAdmin, isVerified)
                 .collectMap(ThreadCountRecord::category_id, ThreadCountRecord::count)
                 .defaultIfEmpty(new HashMap<>());
 
