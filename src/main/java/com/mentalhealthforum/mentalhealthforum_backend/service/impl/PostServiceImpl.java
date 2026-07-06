@@ -16,10 +16,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.PostEditHistoryEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.PostEntity;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.PostEditHistoryRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.PostRepository;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AnonymousNameGenerator;
 import com.mentalhealthforum.mentalhealthforum_backend.service.PostService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
@@ -43,6 +40,7 @@ public class PostServiceImpl implements PostService {
     private final TransactionalOperator transactionalOperator;
     private final PostRepository postRepository;
     private final ThreadRepository threadRepository;
+    private final CategoryRepository categoryRepository;
     private final AppUserRepository appUserRepository;
     private final PostEditHistoryRepository postEditHistoryRepository;
     private final AnonymousNameGenerator anonymousNameGenerator;
@@ -52,6 +50,7 @@ public class PostServiceImpl implements PostService {
             TransactionalOperator transactionalOperator,
             PostRepository postRepository,
             ThreadRepository threadRepository,
+            CategoryRepository categoryRepository,
             AppUserRepository appUserRepository,
             PostEditHistoryRepository postEditHistoryRepository,
             AnonymousNameGenerator anonymousNameGenerator,
@@ -59,6 +58,7 @@ public class PostServiceImpl implements PostService {
         this.transactionalOperator = transactionalOperator;
         this.postRepository = postRepository;
         this.threadRepository = threadRepository;
+        this.categoryRepository = categoryRepository;
         this.appUserRepository = appUserRepository;
         this.postEditHistoryRepository = postEditHistoryRepository;
         this.anonymousNameGenerator = anonymousNameGenerator;
@@ -74,7 +74,8 @@ public class PostServiceImpl implements PostService {
         return appUserRepository.findAppUserByKeycloakId(userId)
                 .switchIfEmpty(Mono.error(new ApiException("User not found", ErrorCode.RESOURCE_NOT_FOUND)))
                 .flatMap(appUser -> userModerationService.requireNotMuted(appUser.getKeycloakId(), "create posts")
-                        .then(findActiveThread(request.getThreadId())))
+                        .then(findActiveThread(request.getThreadId(), viewerContext))
+                )
                 .flatMap(thread -> validateParentPost(thread, request.getParentPostId()))
                 .flatMap(thread -> createAndSavePost(request, userId, thread.getId()))
                 .flatMap(this::enrichSinglePostWithData)
@@ -83,7 +84,7 @@ public class PostServiceImpl implements PostService {
 
     @Override
     public Mono<PostResponse> getPost(UUID postId, ViewerContext viewerContext) {
-        return findPost(postId)
+        return findPostWithVisibility(postId, viewerContext)
                 .flatMap(this::enrichSinglePostWithData);
     }
 
@@ -183,7 +184,7 @@ public class PostServiceImpl implements PostService {
     @Override
     public Mono<Void> softDeleteAnyPost(UUID postId, ViewerContext viewerContext) {
         return ModerationAction.POST_DELETED.checkPermission(viewerContext)
-                .then(performModeratorAction(postId,
+                .then(performModeratorAction(postId, viewerContext,
                         post -> postRepository.softDeletePost(postId),
                         List.of(new ValidationRule(PostEntity::getIsDeleted, "Cannot delete an already deleted post")),
                         true));
@@ -192,7 +193,7 @@ public class PostServiceImpl implements PostService {
     @Override
     public Mono<Void> restorePost(UUID postId, ViewerContext viewerContext) {
         return ModerationAction.POST_RESTORED.checkPermission(viewerContext)
-                .then(performModeratorAction(postId,
+                .then(performModeratorAction(postId, viewerContext,
                         post -> postRepository.restorePost(postId),
                         List.of(new ValidationRule(post -> !post.getIsDeleted(), "Cannot restore a post that is not deleted")),
                         false));
@@ -205,7 +206,7 @@ public class PostServiceImpl implements PostService {
         UUID moderatorId = UUID.fromString(viewerContext.getUserId());
 
         return ModerationAction.POST_CONTENT_WARNING_ADDED.checkPermission(viewerContext)
-                .then(performModeratorAction(postId,
+                .then(performModeratorAction(postId, viewerContext,
                         post -> {
                             // Capture previous warning state
                             String previousContent = post.getContent();
@@ -254,20 +255,23 @@ public class PostServiceImpl implements PostService {
     @Override
     public Mono<Void> permanentlyDeletePost(UUID postId, ViewerContext viewerContext) {
         return ModerationAction.POST_PERMANENTLY_DELETED.checkPermission(viewerContext)
-                .then(findPost(postId))
+                .then(findPostWithVisibility(postId, viewerContext))
                 .flatMap(postRepository::delete)
                 .as(transactionalOperator::transactional);
     }
 
     // ==================== PRIVATE HELPERS ====================
 
-    private Mono<PostEntity> findPost(UUID postId) {
+
+    private Mono<PostEntity> findPostWithVisibility(UUID postId, ViewerContext viewerContext) {
         return postRepository.findById(postId)
-                .switchIfEmpty(Mono.error(new ApiException("Post not found", ErrorCode.RESOURCE_NOT_FOUND)));
+                .switchIfEmpty(Mono.error(new ApiException("Post not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(post -> validateCategoryVisibleForThread(post.getThreadId(), viewerContext).thenReturn(post));
+
     }
 
-    private Mono<PostEntity> findActivePost(UUID postId) {
-        return findPost(postId)
+    private Mono<PostEntity> findActivePost(UUID postId, ViewerContext viewerContext) {
+        return findPostWithVisibility(postId, viewerContext)
                 .flatMap(post -> {
                     if (post.getIsDeleted()) {
                         return Mono.error(new ApiException("Cannot modify a deleted post", ErrorCode.VALIDATION_FAILED));
@@ -276,13 +280,8 @@ public class PostServiceImpl implements PostService {
                 });
     }
 
-    private Mono<ThreadEntity> findThread(UUID threadId) {
-        return threadRepository.findById(threadId)
-                .switchIfEmpty(Mono.error(new ApiException("Thread not found", ErrorCode.RESOURCE_NOT_FOUND)));
-    }
-
-    private Mono<ThreadEntity> findActiveThread(UUID threadId) {
-        return findThread(threadId)
+    private Mono<ThreadEntity> findActiveThread(UUID threadId, ViewerContext viewerContext) {
+        return validateCategoryVisibleForThread(threadId, viewerContext)
                 .flatMap(thread -> {
                     if (thread.getIsDeleted()) {
                         return Mono.error(new ApiException("Cannot post in a deleted thread", ErrorCode.VALIDATION_FAILED));
@@ -290,8 +289,28 @@ public class PostServiceImpl implements PostService {
                     if (thread.getThreadStatus() == ThreadStatus.CLOSED) {
                         return Mono.error(new ApiException("Cannot post in a closed thread", ErrorCode.VALIDATION_FAILED));
                     }
+
                     return Mono.just(thread);
                 });
+    }
+
+    private Mono<ThreadEntity> validateCategoryVisibleForThread(UUID threadId, ViewerContext viewerContext){
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
+        return threadRepository.findById(threadId)
+                .switchIfEmpty(Mono.error(new ApiException("Thread not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(thread ->
+                        categoryRepository.isCategoryVisible(thread.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+                                .flatMap(visible -> {
+                                    if(!visible){
+                                        return Mono.error(new ApiException("You do not have permission to access this thread", ErrorCode.FORBIDDEN));
+                                    }
+                                    return Mono.just(thread);
+                                })
+                );
     }
 
     private Mono<ThreadEntity> validateParentPost(ThreadEntity thread, UUID parentPostId) {
@@ -415,7 +434,7 @@ public class PostServiceImpl implements PostService {
             Predicate<PostEntity> validator,
             String validationErrorMessage
     ) {
-        return findActivePost(postId)
+        return findActivePost(postId, viewerContext)
                 .flatMap(post -> {
                     if (!post.getAuthorId().toString().equals(viewerContext.getUserId())) {
                         return Mono.error(new ApiException("Only post author can " + actionDescription, ErrorCode.FORBIDDEN));
@@ -430,11 +449,12 @@ public class PostServiceImpl implements PostService {
 
     private <T> Mono<T> performModeratorAction(
             UUID postId,
+            ViewerContext viewerContext,
             Function<PostEntity, Mono<T>> action,
             List<ValidationRule> validators,
             boolean requireActive
     ) {
-        Mono<PostEntity> postMono = requireActive ? findActivePost(postId) : findPost(postId);
+        Mono<PostEntity> postMono = requireActive ? findActivePost(postId, viewerContext) : findPostWithVisibility(postId, viewerContext);
 
         return postMono
                 .flatMap(post -> {

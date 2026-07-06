@@ -46,16 +46,7 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
                 )
     
                 -- Category visibility
-                AND c.is_active = TRUE
-                AND (
-    
-                     (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-                )
+                AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
                 AND p.is_deleted = :isDeleted
                 ORDER BY
@@ -126,16 +117,7 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
                 )
     
                 -- Category visibility
-                AND c.is_active = TRUE
-                AND (
-    
-                     (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                     OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-                )
+                AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
  
                 AND p.is_deleted = :isDeleted
     """)

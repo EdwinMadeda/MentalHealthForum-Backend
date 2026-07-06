@@ -742,7 +742,7 @@ public class ThreadServiceImpl implements ThreadService {
                                 .flatMap(visible -> {
                                     if(!visible){
                                         return Mono.error(new ApiException(
-                                                "You do not have permission to view this thread",
+                                                "You do not have permission to access this thread",
                                                 ErrorCode.FORBIDDEN
                                         ));
                                     }
