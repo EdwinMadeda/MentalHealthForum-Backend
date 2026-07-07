@@ -1,0 +1,209 @@
+TODO - Critical Infrastructure & Security Enhancements
+1. Super Admin Implementation ✅ PARTIALLY COMPLETED
+   Description
+   Implement a super admin mechanism for the first user who registers in an empty system. This user must have absolute, immutable privileges and must never be deactivated or deleted.
+
+Completed Work
+✅ Added is_super_admin BOOLEAN DEFAULT FALSE column to app_users
+
+✅ Created unique partial index to enforce only one super admin exists:
+
+sql
+CREATE UNIQUE INDEX idx_unique_super_admin ON app_users (is_super_admin) WHERE is_super_admin = TRUE;
+✅ Updated triggers to protect super admin from deactivation/deletion:
+
+sql
+-- In prevent_admin_deactivation()
+OR (OLD.is_super_admin = TRUE)
+OR (NEW.is_super_admin = TRUE)
+
+-- In prevent_admin_deletion()
+OR (OLD.is_super_admin = TRUE)
+Pending Work
+A. Atomic First-User Assignment (Registration Service)
+When the system starts with zero users, the first successful registration must atomically assign is_super_admin = TRUE. Use this pattern to prevent race conditions:
+
+sql
+-- In registration service (transactional)
+WITH first_user_check AS (
+SELECT COUNT(*) = 0 AS is_empty FROM app_users
+)
+UPDATE app_users
+SET is_super_admin = TRUE
+WHERE keycloak_id = :newUserId
+AND (SELECT is_empty FROM first_user_check) = TRUE
+AND NOT EXISTS (SELECT 1 FROM app_users WHERE is_super_admin = TRUE);
+Important:
+
+This query is idempotent – if a super admin already exists, it silently does nothing.
+
+The UNIQUE constraint guarantees that even with concurrent registrations, only one transaction will commit successfully. Others will fail the constraint or quietly skip.
+
+B. Super Admin Bypass in Visibility Functions
+The profile_is_visible function should grant full visibility to the super admin. Add this early check:
+
+sql
+-- In profile_is_visible(), after the viewer admin/mod bypass:
+IF p_is_super_admin = TRUE THEN  -- Need to add this parameter
+RETURN TRUE;
+END IF;
+Note: This requires adding p_is_super_admin BOOLEAN as a parameter to profile_is_visible. Update all callers to pass viewerContext.isSuperAdmin().
+
+C. Super Admin in Moderation Checks
+The ModerationAction enum should include a super admin bypass:
+
+java
+// In ModerationAction.isAllowedFor(ViewerContext viewerContext)
+if (viewerContext.isSuperAdmin()) {
+return true;
+}
+D. Super Admin in Application Logic
+Add isSuperAdmin() getter to ViewerContext and PrivilegedUser interface.
+
+Ensure JWT token mapping extracts/derives super admin status (or use a static system property + first-user logic).
+
+Consider a break-glass mechanism: if the super admin loses access, a backdoor (e.g., a reserved environment variable or manual database override) can assign a new super admin.
+
+2. Activity Tracking (last_active_at) ⚠️ NOT STARTED
+   Description
+   Populate the app_users.last_active_at timestamp to enable "last active" sorting and display in connections, member discovery, and global search results.
+
+Why This Matters
+last_active_at is already in the AppUserRepository sorting options (sortBy = 'last_active_at').
+
+Without updates, the sort order is NULL-heavy → poor UX.
+
+Activity tracking is essential for "active now" indicators in user connections.
+
+Architecture Decision: Rate-Limited Updates (Anti-Write-Storm Pattern)
+Do NOT update on every request. Use a cooldown period (e.g., 5 minutes) to avoid write storms.
+
+Implementation Steps
+1. Add a tracking column:
+
+sql
+ALTER TABLE app_users ADD COLUMN last_active_updated_at TIMESTAMP DEFAULT NULL;
+2. Create a partial index for performance:
+
+sql
+CREATE INDEX idx_active_users ON app_users (last_active_at) WHERE is_active = TRUE;
+3. In a WebFilter/Interceptor (Reactive), implement the rate-limited update:
+
+java
+// Java/Spring WebFlux example
+@Component
+public class ActivityTrackingFilter implements WebFilter {
+private static final Duration UPDATE_THRESHOLD = Duration.ofMinutes(5);
+private final UserRepository userRepository;
+private final Cache<String, Instant> activityCache; // Optional, for even fewer DB hits
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        return chain.filter(exchange)
+            .then(Mono.defer(() -> updateActivityIfNeeded(exchange)))
+            .then(); // or .then(chain.filter(exchange)) depending on placement
+    }
+
+    private Mono<Void> updateActivityIfNeeded(ServerWebExchange exchange) {
+        String userId = getAuthenticatedUserId(exchange);
+        if (userId == null) return Mono.empty();
+
+        return userRepository.findById(UUID.fromString(userId))
+            .filter(user -> shouldUpdate(user.getLastActiveUpdatedAt()))
+            .flatMap(user -> userRepository.updateLastActive(userId, Instant.now()))
+            .then();
+    }
+
+    private boolean shouldUpdate(Instant lastUpdated) {
+        if (lastUpdated == null) return true;
+        return Duration.between(lastUpdated, Instant.now()).compareTo(UPDATE_THRESHOLD) >= 0;
+    }
+}
+4. Reactive Repository Methods:
+
+java
+// In AppUserRepository
+@Modifying
+@Query("UPDATE app_users SET last_active_at = :timestamp, last_active_updated_at = :timestamp WHERE keycloak_id = :userId")
+Mono<Void> updateLastActive(@Param("userId") UUID userId, @Param("timestamp") Instant timestamp);
+Acceptance Criteria
+last_active_at is updated at most once every 5 minutes per user.
+
+Sorting by last_active_at works correctly with minimal write load.
+
+The column is populated in the profile_is_visible test data (so admins/mods appear in activity sort).
+
+3. Demotion + Deactivation Transaction Control ⚠️ NOT STARTED
+   Description
+   Prevent admins/moderators from being deactivated in the same transaction where they are demoted. This ensures the trigger's NEW check doesn't bypass the deactivation protection.
+
+Implementation Approach
+In the Backend Service Layer:
+
+java
+// UserModerationService or AdminService
+@Transactional
+public Mono<Void> demoteAndDeactivate(UUID userId) {
+// Step 1: Demote (remove admin/mod roles/groups)
+return appUserRepository.demoteUser(userId)
+// Step 2: Deactivate (only after demotion is committed)
+.then(appUserRepository.deactivateUser(userId))
+.as(transactionalOperator::transactional);
+}
+Important:
+
+Ensure Step 1 (demote) is committed before Step 2 (deactivate) executes.
+
+Use Mono.defer() or Mono.fromCallable() to sequence them explicitly.
+
+If Step 2 fails, the demotion should roll back (or be logged) – use the @Transactional propagation correctly.
+
+Alternative (Safest):
+
+java
+// Two separate API calls from the frontend:
+// 1. POST /api/admin/users/{id}/demote
+// 2. POST /api/admin/users/{id}/deactivate (only after demotion is confirmed)
+This eliminates the risk of a combined transaction.
+
+TODO Checklist
+Add service-level validation: "Cannot deactivate an admin. Please demote first."
+
+Audit existing code for any combined demotion+deactivation calls.
+
+Document the proper order in the admin UI (if applicable).
+
+4. Additional Super Admin Considerations (Optional)
+   A. Super Admin Audit Logging
+   Log any action taken by the super admin with high severity. Add a trigger or service-level interceptor.
+
+B. Emergency Break-Glass Account
+If the super admin is accidentally locked out, have a manual override mechanism:
+
+Use an environment variable: SUPER_ADMIN_OVERRIDE_EMAIL=admin@example.com.
+
+In the registration/login flow, if that email matches and no super admin exists, assign is_super_admin = TRUE.
+
+Or, a SQL migration that lets the DBA assign a new super admin manually.
+
+C. Super Admin in Keycloak
+Consider mapping a special Keycloak group (e.g., /superadmin) to is_super_admin for consistency. But keep the database flag as the source of truth – Keycloak syncs, but the DB flag is immutable.
+
+5. Dependencies & Affected Areas
+   Feature	Affected Code	Priority
+   Super Admin	profile_is_visible(), ModerationAction, ViewerContext, PrivilegedUser	Medium
+   Activity Tracking	AppUserRepository, GlobalSearchRepository, WebFilter	Medium
+   Demotion Transaction	UserModerationService, AdminService	Low (but important)
+   Key Learnings & Architectural Principles
+   Belts & Suspenders: Always layer database-level enforcement (CHECK constraints, triggers) with application-level orchestration.
+
+Fail Closed: Any ambiguity (NULL values, malformed JSON) should result in FALSE/denial. COALESCE(..., FALSE) is your friend.
+
+Immutable Admin/Super Admin Accounts: No deactivation, no hard deletion. Soft-delete flags are never set.
+
+Rate-Limit Writes: Activity tracking must be throttled to avoid write storms.
+
+Atomic First-User Assignment: Use database uniqueness and conditional updates, never rely on application-level locks.
+
+Current Status: Super Admin infrastructure (column, index, trigger protections) is complete. Activity Tracking and Demotion Transaction Control are pending and should be tackled together as a comprehensive feature.
+
