@@ -16,11 +16,48 @@ import java.util.UUID;
 @Repository
 public interface WatchThreadRepository extends R2dbcRepository<WatchThreadEntity, UUID> {
 
-    Mono<Boolean> existsByUserIdAndThreadId(UUID userId, UUID threadId);
+    @Query("SELECT EXISTS(SELECT 1 FROM watch_threads WHERE user_id = :userId AND thread_id = :threadId)")
+    Mono<Boolean> existsByUserIdAndThreadId(
+            @Param("userId") UUID userId,
+            @Param("threadId") UUID threadId);
+
+    @Query("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM watch_threads wt
+            INNER JOIN forum_threads t ON wt.thread_id = t.id
+            INNER JOIN forum_categories c ON t.category_id = c.id
+            WHERE wt.user_id = :userId
+                AND wt.thread_id = :threadId
+                AND t.is_deleted = false
+                AND category_is_visible(c.id, :userId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+            )
+    """)
+    Mono<Boolean> existsVisibleByUserIdAndThreadId(
+            @Param("userId") UUID userId,
+            @Param("threadId") UUID threadId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     Mono<Void> deleteByUserIdAndThreadId(UUID userId, UUID threadId);
 
-    Mono<Long> countByUserId(UUID userId);
+    @Query("""
+        SELECT COUNT(*)
+        FROM watch_threads wt
+        INNER JOIN forum_threads t ON wt.thread_id = t.id
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE wt.user_id = :userId
+            AND t.is_deleted = false
+            AND category_is_visible(c.id, :userId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+    """)
+    Mono<Long> countVisibleByUserId(
+            @Param("userId") UUID userId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     /**
      * Batch fetch watch status for threads
@@ -91,16 +128,7 @@ public interface WatchThreadRepository extends R2dbcRepository<WatchThreadEntity
             )
     
             -- Category visibility
-            AND c.is_active = TRUE
-            AND (
-    
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-            )
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
             AND (:notificationEnabled IS NULL OR wt.notification_enabled = :notificationEnabled)
             AND (:categoryId IS NULL OR t.category_id = :categoryId)
@@ -184,16 +212,7 @@ public interface WatchThreadRepository extends R2dbcRepository<WatchThreadEntity
             )
     
             -- Category visibility
-            AND c.is_active = TRUE
-            AND (
-    
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-            )
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
             AND (:notificationEnabled IS NULL OR wt.notification_enabled = :notificationEnabled)
             AND (:categoryId IS NULL OR t.category_id = :categoryId)

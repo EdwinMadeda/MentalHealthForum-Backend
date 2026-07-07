@@ -66,7 +66,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
     public Mono<WatchThreadResponse> watchThread(UUID threadId, ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
 
-        return validateThreadExists(threadId)
+        return validateThreadVisible(threadId, viewerContext)
                 .then(checkNotAlreadyWatching(userId, threadId))
                 .then(createWatch(userId, threadId))
                 .flatMap(watchThread -> enrichSingleWatchedThreadWithData(watchThread, userId))
@@ -84,8 +84,11 @@ public class WatchThreadServiceImpl implements WatchThreadService {
     @Override
     public Mono<Boolean> isWatchingThread(UUID threadId, ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
-        return watchThreadRepository.existsByUserIdAndThreadId(userId, threadId);
+        return  watchThreadRepository.existsVisibleByUserIdAndThreadId(userId, threadId, isAdmin, isModeratorOrAdmin, isVerified);
     }
 
     @Override
@@ -158,20 +161,32 @@ public class WatchThreadServiceImpl implements WatchThreadService {
     @Override
     public Mono<Long> getWatchThreadCount(ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
-        return watchThreadRepository.countByUserId(userId);
+        return watchThreadRepository.countVisibleByUserId(userId, isAdmin, isModeratorOrAdmin, isVerified);
     }
 
     // ==================== PRIVATE HELPERS ====================
 
-    private Mono<Void> validateThreadExists(UUID threadId) {
-        return threadRepository.existsById(threadId)
-                .flatMap(exists -> {
-                    if(!exists){
-                        return Mono.error(new ApiException("Thread not found", ErrorCode.VALIDATION_FAILED));
-                    }
-                    return Mono.empty();
-                });
+    private Mono<Void> validateThreadVisible(UUID threadId, ViewerContext viewerContext) {
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
+        return threadRepository.findById(threadId)
+                .switchIfEmpty(Mono.error(new ApiException("Thread not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(thread ->
+                        categoryRepository.isCategoryVisible(thread.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+                                .flatMap(visible -> {
+                                    if (!visible) {
+                                        return Mono.error(new ApiException("You do not have permission to access this thread", ErrorCode.FORBIDDEN));
+                                    }
+                                    return Mono.empty();
+                                })
+                );
     }
 
     private Mono<Void> checkNotAlreadyWatching(UUID userId, UUID threadId) {
