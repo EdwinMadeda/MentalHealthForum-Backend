@@ -83,24 +83,7 @@ public class GlobalSearchRepository {
                     AND to_tsvector('public.english_unaccent', coalesce(t.title, '')) @@ (SELECT tsquery FROM query_token)
         
                     -- Category visibility filter (same as CATEGORIES block below
-                    AND c.is_active = TRUE
-                    AND (
-                         -- PUBLIC: always visible'
-                         (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-        
-                         -- MEMBERS_ONLY: viewer must be logged in
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-        
-                         -- VERIFIED_ONLY: viewer must be trusted, peer supporter or admin
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-        
-                         -- MODERATORS_ONLY: viewer must be moderator or admin
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-        
-                         -- ADMINS_ONLY: viewer must be moderator or admin
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-        
-                        )
+                    AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         
                 UNION ALL
        
@@ -130,16 +113,7 @@ public class GlobalSearchRepository {
                     AND t.is_deleted = FALSE
         
                     -- Category visibility (same as above)
-                    AND c.is_active = TRUE
-                    AND (
-       
-                         (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-        
-                        )
+                    AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
        
                 UNION ALL
         
@@ -179,15 +153,7 @@ public class GlobalSearchRepository {
                     )
         
                     -- Category visibility (same as above)
-                    AND (
-        
-                         (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                         OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-       
-                        )
+                    AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
         
                 UNION ALL
                 -- 4. USER PROFILES (Display Name + Bio)
@@ -210,48 +176,8 @@ public class GlobalSearchRepository {
                           to_tsvector('public.english_unaccent', coalesce(u.bio, '')) @@ (SELECT tsquery FROM query_token)
                     )
         
-              -- Unified Profile Visibility Filter
-              AND (
-                  -- Self: always visible
-                  u.keycloak_id = :viewerId
-        
-                 -- ADMIN/MOD OVERRIDE (1) – always visible to logged‑in members
-                 OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
-        
-                  -- Normal visibility for regular users
-        
-                  -- MEMBERS_ONLY: visible to all logged-in members
-                  OR (u.profile_visibility = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-        
-                  -- CONNECTED_ONLY: visible only to connected members
-                  OR (u.profile_visibility = 'CONNECTED_ONLY' AND :viewerId IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM user_connections uc
-                            WHERE uc.status = 'ACCEPTED'
-                                AND (
-                                    (uc.user_1 = :viewerId AND uc.user_2 = u.keycloak_id)
-                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :viewerId)
-                                    )
-                        )
-                  )
-        
-                 -- PRIVATE: visible only to self, admins, or moderators, or connections
-                  OR (u.profile_visibility = 'PRIVATE' AND (
-        
-                        :isAdmin = TRUE
-                        OR :isModeratorOrAdmin = TRUE
-                         -- ADMIN/MOD OVERRIDE (2) – same as above, for robustness
-                        OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
-        
-                        OR EXISTS (
-                            SELECT 1 FROM user_connections uc
-                            WHERE uc.status = 'ACCEPTED'
-                                AND (
-                                    (uc.user_1 = :viewerId AND uc.user_2 = u.keycloak_id)
-                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :viewerId)
-                                    )
-                        )
-                  ))
-              )
+              -- Unified Profile Visibility Filter (centralised)
+              AND profile_is_visible(u.keycloak_id, :viewerId, :isAdmin, :isModeratorOrAdmin)
         
         """;
 

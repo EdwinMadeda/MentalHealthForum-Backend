@@ -62,48 +62,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
                     ))
                   )
            
-              -- Profile Visibility Filter
-              AND (
-                  u.keycloak_id = :currentUserId
-           
-                 -- ADMIN/MOD OVERRIDE (1) – always visible to logged‑in members
-                 OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
-           
-                  -- Normal visibility for regular users
-           
-                  -- MEMBERS_ONLY: visible to all logged-in members
-                  OR (u.profile_visibility = 'MEMBERS_ONLY' AND :currentUserId IS NOT NULL)
-           
-                  -- CONNECTED_ONLY: visible only to connected members
-                  OR (u.profile_visibility = 'CONNECTED_ONLY' AND :currentUserId IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM user_connections uc
-                            WHERE uc.status = 'ACCEPTED'
-                                AND (
-                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
-                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
-                                    )
-                        )
-                  )
-            
-                 -- PRIVATE: visible only to self, admins, or moderators
-                  OR (u.profile_visibility = 'PRIVATE' AND (
-           
-                        :isAdmin = TRUE
-                        OR :isModeratorOrAdmin = TRUE
-                         -- ADMIN/MOD OVERRIDE (2) – same as above, for robustness
-                        OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
-           
-                        OR EXISTS (
-                            SELECT 1 FROM user_connections uc
-                            WHERE uc.status = 'ACCEPTED'
-                                AND (
-                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
-                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
-                                    )
-                        )
-                  ))
-              )
-           
+              -- Profile Visibility Filter (centralised)
+              AND profile_is_visible(u.keycloak_id, :currentUserId, :isAdmin, :isModeratorOrAdmin)
      
             ORDER BY
                 -- 1. Current user first
@@ -190,47 +150,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
                     ))
               )
             
-              -- Profile Visibility Filter
-              AND (
-                  u.keycloak_id = :currentUserId
-           
-                 -- ADMIN/MOD OVERRIDE (1) – always visible to logged‑in members
-                 OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
-           
-                  -- Normal visibility for regular users
-           
-                  -- MEMBERS_ONLY: visible to all logged-in members
-                  OR (u.profile_visibility = 'MEMBERS_ONLY' AND :currentUserId IS NOT NULL)
-            
-                  -- CONNECTED_ONLY: visible only to connected members
-                  OR (u.profile_visibility = 'CONNECTED_ONLY' AND :currentUserId IS NOT NULL AND EXISTS (
-                            SELECT 1 FROM user_connections uc
-                            WHERE uc.status = 'ACCEPTED'
-                                AND (
-                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
-                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
-                                    )
-                        )
-                  )
-            
-                 -- PRIVATE: visible only to self, admins, or moderators
-                  OR (u.profile_visibility = 'PRIVATE' AND (
-           
-                        :isAdmin = TRUE
-                        OR :isModeratorOrAdmin = TRUE
-                         -- ADMIN/MOD OVERRIDE (2) – same as above, for robustness
-                        OR ('admin' = ANY(u.roles) OR 'moderator' = ANY(u.roles) OR u.groups && ARRAY['/administrators', '/moderators/professional', '/moderators/peer'])
-           
-                        OR EXISTS (
-                            SELECT 1 FROM user_connections uc
-                            WHERE uc.status = 'ACCEPTED'
-                                AND (
-                                    (uc.user_1 = :currentUserId AND uc.user_2 = u.keycloak_id)
-                                    OR (uc.user_2 = u.keycloak_id AND uc.user_1 = :currentUserId)
-                                    )
-                        )
-                  ))
-              )
+              -- Profile Visibility Filter (centralised)
+              AND profile_is_visible(u.keycloak_id, :currentUserId, :isAdmin, :isModeratorOrAdmin)
            
             """)
     Mono<Long> countAll(
