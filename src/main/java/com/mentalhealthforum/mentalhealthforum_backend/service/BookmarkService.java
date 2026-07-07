@@ -33,6 +33,5 @@ public interface BookmarkService {
 
     Mono<Long> getBookmarkCountByUserId(ViewerContext viewerContext);
 
-
-    Mono<Long> getBookmarkCountForThread(UUID threadId);
+    Mono<Long> getBookmarkCountForThread(UUID threadId, ViewerContext viewerContext);
 }

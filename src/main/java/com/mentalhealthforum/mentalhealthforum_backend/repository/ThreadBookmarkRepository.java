@@ -17,6 +17,26 @@ import java.util.UUID;
 @Repository
 public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmarkEntity, UUID> {
 
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1
+            FROM thread_bookmarks b
+            INNER JOIN forum_threads t ON b.thread_id = t.id
+            INNER JOIN forum_categories c ON t.category_id = c.id
+            WHERE b.user_id = :userId
+                AND b.thread_id = :threadId
+                AND t.is_deleted = false
+                AND category_is_visible(c.id, :userId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+        )
+    """)
+    Mono<Boolean> existsVisibleByUserIdAndThreadId(
+            @Param("userId") UUID userId,
+            @Param("threadId") UUID threadId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
+
     Mono<Boolean> existsByUserIdAndThreadId(UUID userId, UUID threadId);
 
     Mono<Void> deleteByUserIdAndThreadId(UUID userId, UUID threadId);
@@ -108,16 +128,7 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
         )
     
         -- Category visibility
-        AND c.is_active = TRUE
-        AND (
-    
-             (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-        )
+        AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
    
         AND (:categoryId IS NULL OR t.category_id = :categoryId)
         AND (:creatorId IS NULL OR t.creator_id = :creatorId)
@@ -194,16 +205,7 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
         )
     
         -- Category visibility
-        AND c.is_active = TRUE
-        AND (
-    
-             (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-             OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-        )
+        AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
         AND (:categoryId IS NULL OR t.category_id = :categoryId)
         AND (:creatorId IS NULL OR t.creator_id = :creatorId)
@@ -229,9 +231,37 @@ public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmark
            @Param("search") String search
     );
 
-    @Query("SELECT COUNT(*) FROM thread_bookmarks WHERE user_id = :userId")
-    Mono<Long> countByUserId(@Param("userId") UUID userId);
+    @Query("""
+        SELECT COUNT(*)
+        FROM thread_bookmarks b
+        INNER JOIN forum_threads t ON b.thread_id = t.id
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE b.user_id = :userId
+            AND t.is_deleted = false
+            AND category_is_visible(c.id, :userId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+    """)
+    Mono<Long> countVisibleByUserId(
+            @Param("userId") UUID userId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
-    @Query("SELECT COUNT(*) FROM thread_bookmarks WHERE user_id = :threadId")
-    Mono<Long> countByThreadId(@Param("threadId") UUID threadId);
+    @Query("""
+        SELECT COUNT(*)
+        FROM thread_bookmarks b
+        INNER JOIN forum_threads t ON b.thread_id = t.id
+        INNER JOIN forum_categories c ON t.category_id = c.id
+        WHERE b.thread_id = :threadId
+            AND t.is_deleted = false
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+    """)
+    Mono<Long> countVisibleByThreadId(
+            @Param("threadId") UUID threadId,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
+
 }

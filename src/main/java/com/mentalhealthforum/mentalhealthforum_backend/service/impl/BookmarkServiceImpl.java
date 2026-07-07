@@ -65,7 +65,7 @@ public class BookmarkServiceImpl implements BookmarkService {
         UUID userId = UUID.fromString(viewerContext.getUserId());
         UUID threadId = request.threadId();
 
-        return validateThreadExists(threadId)
+        return validateThreadVisible(threadId, viewerContext)
                 .then(checkNotAlreadyBookmarked(userId, threadId))
                 .then(createBookmark(userId, threadId, request.notes()))
                 .flatMap(this::enrichSingleBookmarkWithData)
@@ -150,26 +150,50 @@ public class BookmarkServiceImpl implements BookmarkService {
     @Override
     public Mono<Boolean> isBookmarked(UUID threadId, ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
-        return bookmarkRepository.existsByUserIdAndThreadId(userId, threadId);
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+        return bookmarkRepository.existsVisibleByUserIdAndThreadId(userId, threadId, isAdmin, isModeratorOrAdmin, isVerified);
     }
 
     @Override
     public Mono<Long> getBookmarkCountByUserId(ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
-        return bookmarkRepository.countByUserId(userId);
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+        return bookmarkRepository.countVisibleByUserId(userId, isAdmin, isModeratorOrAdmin, isVerified);
     }
 
     @Override
-    public Mono<Long> getBookmarkCountForThread(UUID threadId){
-        return bookmarkRepository.countByThreadId(threadId);
+    public Mono<Long> getBookmarkCountForThread(UUID threadId, ViewerContext viewerContext){
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+        return bookmarkRepository.countVisibleByThreadId(threadId, viewerId, isAdmin, isModeratorOrAdmin, isVerified);
     }
 
 
     // ==================== PRIVATE HELPERS ====================
 
-    private Mono<Void> validateThreadExists(UUID threadId) {
+    private Mono<Void> validateThreadVisible(UUID threadId, ViewerContext viewerContext) {
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
         return threadRepository.findByIdAndIsDeletedFalse(threadId)
                 .switchIfEmpty(Mono.error(new ApiException("Thread not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(thread ->
+                        categoryRepository.isCategoryVisible(thread.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+                                .flatMap(visible -> {
+                                    if(!visible){
+                                        return Mono.error(new ApiException("You do not have permission to access this thread", ErrorCode.FORBIDDEN));
+                                    }
+                                    return Mono.empty();
+                                })
+                )
                 .then();
     }
 

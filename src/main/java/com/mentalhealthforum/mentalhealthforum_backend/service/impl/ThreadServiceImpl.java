@@ -960,7 +960,7 @@ public class ThreadServiceImpl implements ThreadService {
                 bookmarkService.isBookmarked(thread.getId(), viewerContext)
                         .defaultIfEmpty(false),
 
-                bookmarkService.getBookmarkCountForThread(thread.getId())
+                bookmarkService.getBookmarkCountForThread(thread.getId(), viewerContext)
                         .defaultIfEmpty(0L),
 
                 watchThreadService.isWatchingThread(threadId, viewerContext)
