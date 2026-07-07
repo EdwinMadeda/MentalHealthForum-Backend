@@ -14,15 +14,45 @@ import java.util.UUID;
 @Repository
 public interface FocusCategoryRepository extends R2dbcRepository<FocusCategoryEntity, UUID> {
 
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1
+            FROM focus_categories fc
+            INNER JOIN forum_categories c ON fc.category_id = c.id
+            WHERE fc.user_id = :userId
+                AND fc.category_id = :categoryId
+                AND category_is_visible(c.id, :userId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+        )
+    """)
+    Mono<Boolean> existsVisibleByUserIdAndCategoryId(
+            @Param("userId") UUID userId,
+            @Param("categoryId") UUID categoryId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
+
     Mono<Boolean> existsByUserIdAndCategoryId(UUID userId, UUID categoryId);
 
     Mono<Void> deleteByUserIdAndCategoryId(UUID userId, UUID categoryId);
 
-    Mono<Long> countByUserId(UUID userId);
+    @Query("""
+         SELECT COUNT(*)
+            FROM focus_categories fc
+            INNER JOIN forum_categories c ON fc.category_id = c.id
+            WHERE fc.user_id = :userId
+                AND category_is_visible(c.id, :userId, :isAdmin, :isModeratorOrAdmin, :isVerified)
+    """)
+    Mono<Long> countVisibleByUserId(
+            @Param("userId") UUID userId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     @Query("""
         SELECT fc.* FROM focus_categories fc
-        INNER JOIN forum_categories C ON fc.category_id = c.id
+        INNER JOIN forum_categories c ON fc.category_id = c.id
         WHERE fc.user_id = :viewerId
    
             -- Search: FTS + Trigram (User existing GIN index)
@@ -35,16 +65,8 @@ public interface FocusCategoryRepository extends R2dbcRepository<FocusCategoryEn
                 OR public.unaccent_immutable(c.description) % public.unaccent_immutable(:search)
             )
     
-            AND c.is_active = TRUE
-            AND (
-    
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-            )
+        -- Category visibility
+        AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
     
             AND (:notificationEnabled IS NULL OR fc.notification_enabled = :notificationEnabled)
         ORDER BY
@@ -84,7 +106,7 @@ public interface FocusCategoryRepository extends R2dbcRepository<FocusCategoryEn
 
     @Query("""
         SELECT COUNT(*) FROM focus_categories fc
-        INNER JOIN forum_categories C ON fc.category_id = c.id
+        INNER JOIN forum_categories c ON fc.category_id = c.id
         WHERE fc.user_id = :viewerId
    
             -- Search: FTS + Trigram (User existing GIN index)
@@ -97,16 +119,8 @@ public interface FocusCategoryRepository extends R2dbcRepository<FocusCategoryEn
                 OR public.unaccent_immutable(c.description) % public.unaccent_immutable(:search)
             )
 
-            AND c.is_active = TRUE
-            AND (
-    
-                 (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'PUBLIC')
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MEMBERS_ONLY' AND :viewerId IS NOT NULL)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'VERIFIED_ONLY' AND :isVerified = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'MODERATORS_ONLY' AND :isModeratorOrAdmin = TRUE)
-                 OR (COALESCE(c.participation_requirements ->> 'viewAccess', 'MEMBERS_ONLY') = 'ADMINS_ONLY' AND :isAdmin = TRUE)
-    
-            )
+            -- Category visibility
+            AND category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)
   
             AND (:notificationEnabled IS NULL OR fc.notification_enabled = :notificationEnabled)
     """)

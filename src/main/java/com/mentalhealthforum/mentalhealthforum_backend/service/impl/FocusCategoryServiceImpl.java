@@ -51,7 +51,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
     public Mono<FocusCategoryResponse> addFocusCategory(UUID categoryId, ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
 
-        return validateCategoryExists(categoryId)
+        return validateCategoryVisible(categoryId, viewerContext)
                 .then(checkNotAlreadyFocused(userId, categoryId))
                 .then(createFocusCategory(userId, categoryId))
                 .flatMap(category -> enrichSingleFocusCategoryWithData(category, viewerContext))
@@ -70,8 +70,11 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
     @Override
     public Mono<Boolean> isCategoryFocused(UUID categoryId, ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
-        return focusCategoryRepository.existsByUserIdAndCategoryId(userId, categoryId);
+        return focusCategoryRepository.existsVisibleByUserIdAndCategoryId(userId, categoryId, isAdmin, isModeratorOrAdmin, isVerified);
 
     }
 
@@ -135,15 +138,31 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
     @Override
     public Mono<Long> getFocusCategoriesCount(ViewerContext viewerContext){
         UUID userId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
-        return focusCategoryRepository.countByUserId(userId);
+        return focusCategoryRepository.countVisibleByUserId(userId, isAdmin, isModeratorOrAdmin, isVerified);
     }
 
     // ==================== PRIVATE HELPERS ====================
 
-    private Mono<Void> validateCategoryExists(UUID categoryId) {
+    private Mono<Void> validateCategoryVisible(UUID categoryId, ViewerContext viewerContext) {
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
+
         return categoryRepository.findById(categoryId)
                 .switchIfEmpty(Mono.error(new ApiException("Category not found", ErrorCode.RESOURCE_NOT_FOUND)))
+                .flatMap(category ->
+                        categoryRepository.isCategoryVisible(category.getId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified))
+                .flatMap(visible -> {
+                    if(!visible){
+                        return Mono.error(new ApiException("You do not have permission to access this category", ErrorCode.FORBIDDEN));
+                    }
+                    return Mono.empty();
+                })
                 .then();
     }
 
