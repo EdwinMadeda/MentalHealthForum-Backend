@@ -130,6 +130,7 @@ public class ThreadEntity {
     public ThreadDetails toThreadDetails(){
         return ThreadDetails.builder()
                 .title(this.title)
+                .categoryId(this.categoryId)
                 .build();
     }
 
@@ -137,6 +138,7 @@ public class ThreadEntity {
     public static ThreadDetails defaultThread() {
         return ThreadDetails.builder()
                 .title(null)
+                .categoryId(null)
                 .build();
     }
 

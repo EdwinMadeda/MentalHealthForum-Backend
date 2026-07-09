@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.repository;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.ProfileVisibilityRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;
@@ -19,6 +20,25 @@ import java.util.UUID;
 public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String> {
 
     Mono<AppUserEntity> findAppUserByKeycloakId(String keycloakId);
+
+    /**
+     * Batch fetch users by Keycloak IDs
+     */
+    @Query("SELECT * FROM app_users WHERE keycloak_id IN (:ids)")
+    Flux<AppUserEntity> findAppUsersByKeycloakIds(@Param("ids") List<UUID> ids);
+
+    @Query("""
+        SELECT u.keycloak_id AS userId,
+            profile_is_visible(u.keycloak_id, :viewerId, :isAdmin, :isModeratorOrAdmin) AS visible
+        FROM app_users u
+        WHERE u.keycloak_id IN (:userIds)
+    """)
+    Flux<ProfileVisibilityRecord> checkProfileVisibilityBatch(
+            @Param("userIds") List<UUID> userIds,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin
+    );
 
     @Modifying
     @Query("""
@@ -164,11 +184,5 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
             @Param("isConnected") Boolean isConnected,
             @Param("search") String search
     );
-
-    /**
-     * Batch fetch users by Keycloak IDs
-     */
-    @Query("SELECT * FROM app_users WHERE keycloak_id IN (:ids)")
-    Flux<AppUserEntity> findAppUsersByKeycloakIds(@Param("ids") List<UUID> ids);
 
 }

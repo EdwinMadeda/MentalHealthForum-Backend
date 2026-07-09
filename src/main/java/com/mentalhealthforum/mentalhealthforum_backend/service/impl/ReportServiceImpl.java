@@ -3,7 +3,9 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryVisibilityRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.ProfileVisibilityRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
@@ -44,6 +46,7 @@ public class ReportServiceImpl implements ReportService {
     private final PostRepository postRepository;
     private final ThreadRepository threadRepository;
     private final AppUserRepository appUserRepository;
+    private final CategoryRepository categoryRepository;
 
     public ReportServiceImpl(
             TransactionalOperator transactionalOperator,
@@ -54,7 +57,8 @@ public class ReportServiceImpl implements ReportService {
             UserReportHistoryRepository userReportHistoryRepository,
             PostRepository postRepository,
             ThreadRepository threadRepository,
-            AppUserRepository appUserRepository) {
+            AppUserRepository appUserRepository,
+            CategoryRepository categoryRepository) {
         this.transactionalOperator = transactionalOperator;
         this.contentReportRepository = contentReportRepository;
         this.reportTemplateRepository = reportTemplateRepository;
@@ -64,6 +68,7 @@ public class ReportServiceImpl implements ReportService {
         this.postRepository = postRepository;
         this.threadRepository = threadRepository;
         this.appUserRepository = appUserRepository;
+        this.categoryRepository = categoryRepository;
     }
 
     // ==================== USER ACTIONS ====================
@@ -86,7 +91,7 @@ public class ReportServiceImpl implements ReportService {
                             .thenReturn(targetUserId)
                 )
                 .flatMap(targetUserId -> createThreadReportEntity(reporterId, request, targetUserId))
-                .flatMap(this::enrichSingleReportWithData)
+                .flatMap(report -> enrichSingleReportWithData(report, viewerContext))
                 .as(transactionalOperator::transactional);
     }
 
@@ -103,7 +108,7 @@ public class ReportServiceImpl implements ReportService {
 
         // Validate target exists
         return validateAndCreatePostReport(reporterId, request)
-                .flatMap(this::enrichSingleReportWithData)
+                .flatMap(report -> enrichSingleReportWithData(report, viewerContext))
                 .as(transactionalOperator::transactional);
     }
 
@@ -121,7 +126,7 @@ public class ReportServiceImpl implements ReportService {
         return validateUserExists(request.getReportedUserId())
                 .then(validateNotDuplicateReport(reporterId, null, null, request.getReportedUserId()))
                 .then(createUserReportEntity(reporterId, request))
-                .flatMap(this::enrichSingleReportWithData)
+                .flatMap(report -> enrichSingleReportWithData(report, viewerContext))
                 .as(transactionalOperator::transactional);
     }
 
@@ -172,7 +177,7 @@ public class ReportServiceImpl implements ReportService {
                         return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
                     }
 
-                    return enrichReportsWithBatchData(reports)
+                    return enrichReportsWithBatchData(reports, viewerContext)
                             .map(enrichedReports -> {
 
                                 FilterMetadata<ReportFilterDto> filters = FilterMetadata.<ReportFilterDto>builder()
@@ -244,7 +249,7 @@ public class ReportServiceImpl implements ReportService {
                         return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
                     }
 
-                    return enrichReportsWithBatchData(reports)
+                    return enrichReportsWithBatchData(reports, viewerContext)
                             .map(enrichedReports -> {
 
                                 FilterMetadata<ReportFilterDto> filters = buildReportFilters(enrichedReports);
@@ -265,7 +270,7 @@ public class ReportServiceImpl implements ReportService {
                   if(!report.getReporterId().equals(userId) && !viewerContext.isModeratorOrAdmin()){
                         return Mono.error(new ApiException("You can only view your own reports", ErrorCode.FORBIDDEN));
                     }
-                    return enrichSingleReportWithData(report);
+                    return enrichSingleReportWithData(report, viewerContext);
                 });
     }
 
@@ -300,7 +305,7 @@ public class ReportServiceImpl implements ReportService {
                                 report.setLastModifiedAt(Instant.now());
 
                                 return contentReportRepository.save(report).
-                                        flatMap(this::enrichSingleReportWithData);
+                                        flatMap(savedReport -> enrichSingleReportWithData(savedReport, viewerContext));
                             },
                             List.of(
                                     new ValidationRule(
@@ -333,7 +338,7 @@ public class ReportServiceImpl implements ReportService {
                                 report.setLastModifiedAt(Instant.now());
                                 // dismissalReason remains null for resolve actions
                                 return contentReportRepository.save(report)
-                                        .flatMap(this::enrichSingleReportWithData);
+                                        .flatMap(savedReport -> enrichSingleReportWithData(savedReport, viewerContext));
 
                             },
                             List.of(
@@ -376,7 +381,7 @@ public class ReportServiceImpl implements ReportService {
                     report.setLastModifiedAt(Instant.now());
 
                     return contentReportRepository.save(report)
-                            .flatMap(this::enrichSingleReportWithData);
+                            .flatMap(savedReport -> enrichSingleReportWithData(savedReport, viewerContext));
                 },
                 List.of(
                         new ValidationRule(
@@ -416,7 +421,7 @@ public class ReportServiceImpl implements ReportService {
                     // Keep existing assignedModeratorId for audit trail
 
                     return contentReportRepository.save(report)
-                            .flatMap(this::enrichSingleReportWithData);
+                            .flatMap(savedReport -> enrichSingleReportWithData(savedReport, viewerContext));
                 },
                 List.of(
                         new ValidationRule(
@@ -474,9 +479,9 @@ public class ReportServiceImpl implements ReportService {
                     if(updated){
                         report.setLastModifiedAt(Instant.now());
                         return contentReportRepository.save(report)
-                                .flatMap(this::enrichSingleReportWithData);
+                                .flatMap(savedReport -> enrichSingleReportWithData(savedReport, viewerContext));
                     }
-                    return Mono.just(report).flatMap(this::enrichSingleReportWithData);
+                    return Mono.just(report).flatMap(existingReport -> enrichSingleReportWithData(existingReport, viewerContext));
                 },
                 List.of(
                         new ValidationRule(
@@ -832,7 +837,12 @@ public class ReportServiceImpl implements ReportService {
      * Enriches a single report with reporter, reported user, thread, assigned moderator, reviewed by details.
      * Uses individual fetches since only one report is being enriched.
      */
-    private Mono<ReportResponse> enrichSingleReportWithData(ContentReportEntity report){
+    private Mono<ReportResponse> enrichSingleReportWithData(ContentReportEntity report, ViewerContext viewerContext){
+
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
         // Fetch reporter (if not anonymous)
         Mono<UserDetails> reporterMono = report.getIsAnonymous()
@@ -854,6 +864,7 @@ public class ReportServiceImpl implements ReportService {
         Mono<ThreadDetails> threadMono = report.getThreadId() != null
                 ? threadRepository.findById(report.getThreadId())
                   .map(ThreadEntity::toThreadDetails)
+                  .cache()
                 : Mono.just(ThreadEntity.defaultThread());
 
         // Fetch assigned moderator (if exists)
@@ -871,24 +882,59 @@ public class ReportServiceImpl implements ReportService {
                 .defaultIfEmpty(AppUserEntity.defaultUser())
                 : Mono.just(AppUserEntity.defaultUser());
 
+
+        Mono<Boolean> categoryVisibleMono =  threadMono.flatMap(thread ->
+                categoryRepository.isCategoryVisible(thread.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified));
+
+        // Get all userId maps
+        Set<UUID> allUserIds = new HashSet<>();
+        if(report.getReporterId() != null) allUserIds.add(report.getReporterId());
+        if(report.getReportedUserId() != null) allUserIds.add(report.getReportedUserId());
+        if(report.getAssignedModeratorId() != null) allUserIds.add(report.getAssignedModeratorId());
+        if(report.getReviewedBy() != null) allUserIds.add(report.getReviewedBy());
+
+        Mono<Map<UUID, Boolean>> profileVisibilityMap = allUserIds.isEmpty()
+                ? Mono.just(Map.of())
+                : appUserRepository.checkProfileVisibilityBatch(new ArrayList<>(allUserIds), viewerId, isAdmin, isModeratorOrAdmin)
+                .collectMap(ProfileVisibilityRecord::userId, ProfileVisibilityRecord::visible);
+
         return Mono.zip(
                 reporterMono,
                 reportedUserMono,
                 threadMono,
                 assignedModeratorMono,
-                reviewedByMono
-        ).map(tuple -> mapToTypedResponseWithData(
-                report,
-                tuple.getT1(), // reporter
-                tuple.getT2(), // reportedUser
-                tuple.getT3(), // thread
-                tuple.getT4(), // assignedModerator
-                tuple.getT5()  // reviewedBy
-        ));
+                reviewedByMono,
+                categoryVisibleMono,
+                profileVisibilityMap
+        ).map(tuple -> {
+
+            Boolean canViewCategory = tuple.getT6();
+            Map<UUID, Boolean> profileVisible = tuple.getT7();
+
+            CanViewProfile canViewProfile = new CanViewProfile(
+                    profileVisible.getOrDefault(report.getReporterId(), false),
+                    profileVisible.getOrDefault(report.getReportedUserId(), false),
+                    profileVisible.getOrDefault(report.getAssignedModeratorId(), false),
+                    profileVisible.getOrDefault(report.getReviewedBy(), false)
+            );
+
+            return mapToTypedResponseWithData(
+                    report,
+                    tuple.getT1(), // reporter
+                    tuple.getT2(), // reportedUser
+                    tuple.getT3(), // thread
+                    tuple.getT4(), // assignedModerator
+                    tuple.getT5(),  // reviewedBy
+                    canViewCategory,
+                    canViewProfile);
+        });
     }
 
 
-    private Mono<EnrichedReportData> enrichReportsWithBatchData(List<ContentReportEntity> reports) {
+    private Mono<EnrichedReportData> enrichReportsWithBatchData(
+            List<ContentReportEntity> reports,
+            ViewerContext viewerContext
+    ) {
         if(reports.isEmpty()){
             return Mono.just(new EnrichedReportData(
                    List.of(),
@@ -900,6 +946,11 @@ public class ReportServiceImpl implements ReportService {
                    Map.of()
             ));
         }
+
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
+        boolean isAdmin = viewerContext.isAdmin();
+        boolean isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+        boolean isVerified = viewerContext.isVerified();
 
         // Extract IDs
         List<UUID> reporterIds = reports.stream()
@@ -947,7 +998,7 @@ public class ReportServiceImpl implements ReportService {
                 .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
 
         // Batch fetch threads
-        Mono<Map<UUID, ThreadDetails>> threadsMap = threadIds.isEmpty()
+        Mono<Map<UUID, ThreadDetails>> threadsDetailMap = threadIds.isEmpty()
                 ? Mono.just(Map.of())
                 : threadRepository
                 .findThreadsByIds(threadIds)
@@ -967,44 +1018,110 @@ public class ReportServiceImpl implements ReportService {
                 .findAppUsersByKeycloakIds(reviewerIds)
                 .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
 
+
+        // Batch fetch associated categories
+        Mono<Map<UUID, UUID>> threadCategoryMapMono = threadIds.isEmpty()
+                ? Mono.just(Map.of())
+                : threadRepository
+                .findThreadsByIds(threadIds)
+                .collectMap(ThreadEntity::getId, ThreadEntity::getCategoryId);
+
+        Mono<Map<UUID, Boolean>> categoryVisibilityMap =  threadCategoryMapMono.flatMap(threadCategoryMap -> {
+
+            List<UUID> categoryIds = threadCategoryMap.values().stream()
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+
+            log.info("Admin? {}", viewerContext.isAdmin());
+            log.info("Category IDs to check: {}", categoryIds);
+
+            // Batch fetch category visibility
+            return categoryIds.isEmpty()
+                    ? Mono.just(Map.of())
+                    : categoryRepository.checkCategoryVisibilityBatch(categoryIds, viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+                      .collectMap(CategoryVisibilityRecord::category_id, CategoryVisibilityRecord::visible);
+
+        });
+
+        // Get all userId maps
+        Set<UUID> allUserIds = new HashSet<>();
+        reports.forEach(report -> {
+            if(report.getReporterId() != null) allUserIds.add(report.getReporterId());
+            if(report.getReportedUserId() != null) allUserIds.add(report.getReportedUserId());
+            if(report.getAssignedModeratorId() != null) allUserIds.add(report.getAssignedModeratorId());
+            if(report.getReviewedBy() != null) allUserIds.add(report.getReviewedBy());
+        });
+
+        Mono<Map<UUID, Boolean>> profileVisibilityMap = allUserIds.isEmpty()
+                ? Mono.just(Map.of())
+                : appUserRepository.checkProfileVisibilityBatch(new ArrayList<>(allUserIds), viewerId, isAdmin, isModeratorOrAdmin)
+                  .collectMap(ProfileVisibilityRecord::userId, ProfileVisibilityRecord::visible);
+
+
         return Mono.zip(
                 reportersMap,
                 reportedUserMap,
-                threadsMap,
+                threadsDetailMap,
                 assignedModeratorsMap,
-                reviewersMap
+                reviewersMap,
+                categoryVisibilityMap,
+                profileVisibilityMap
         ).map(tuple -> {
             Map<UUID, UserDetails> reporters = tuple.getT1();
             Map<UUID, UserDetails> reportedUsers = tuple.getT2();
             Map<UUID, ThreadDetails> threads = tuple.getT3();
             Map<UUID, UserDetails> assignedModerators = tuple.getT4();
             Map<UUID, UserDetails> reviewers = tuple.getT5();
+            Map<UUID, Boolean> categoryVisible = tuple.getT6();
+            Map<UUID, Boolean> profileVisible = tuple.getT7();
+
+            log.info("Category visibility map: {}", categoryVisible);
 
             List<ReportResponse> responses = reports.stream()
-                    .map(report -> mapToTypedResponseWithData(
-                            report,
+                    .map(report -> {
 
-                            report.getReporterId() != null
-                                ? reporters.getOrDefault(report.getReporterId(), AppUserEntity.defaultUser())
-                                : AppUserEntity.defaultUser(),
-
-                            report.getReportedUserId() != null
-                                ? reportedUsers.getOrDefault(report.getReportedUserId(), AppUserEntity.defaultUser())
-                                : AppUserEntity.defaultUser(),
-
-                            report.getThreadId() != null
+                        ThreadDetails thread = report.getThreadId() != null
                                 ? threads.getOrDefault(report.getThreadId(), ThreadEntity.defaultThread())
-                                : ThreadEntity.defaultThread(),
+                                : ThreadEntity.defaultThread();
 
-                            report.getAssignedModeratorId() != null
-                                ? assignedModerators.getOrDefault(report.getAssignedModeratorId(), AppUserEntity.defaultUser())
-                                : AppUserEntity.defaultUser(),
+                        UUID categoryId = thread != null? thread.getCategoryId() : null;
+                        boolean canViewCategory = categoryId != null && categoryVisible.getOrDefault(categoryId, false);
 
-                            report.getReviewedBy()  != null
-                                ? reviewers.getOrDefault(report.getReviewedBy(), AppUserEntity.defaultUser())
-                                : AppUserEntity.defaultUser()
+                        CanViewProfile canViewProfile = new CanViewProfile(
+                                profileVisible.getOrDefault(report.getReporterId(), false),
+                                profileVisible.getOrDefault(report.getReportedUserId(), false),
+                                profileVisible.getOrDefault(report.getAssignedModeratorId(), false),
+                                profileVisible.getOrDefault(report.getReviewedBy(), false)
+                        );
 
-                    ))
+                        return mapToTypedResponseWithData(
+                                report,
+
+                                report.getReporterId() != null
+                                        ? reporters.getOrDefault(report.getReporterId(), AppUserEntity.defaultUser())
+                                        : AppUserEntity.defaultUser(),
+
+                                report.getReportedUserId() != null
+                                        ? reportedUsers.getOrDefault(report.getReportedUserId(), AppUserEntity.defaultUser())
+                                        : AppUserEntity.defaultUser(),
+
+                                thread,
+
+                                report.getAssignedModeratorId() != null
+                                        ? assignedModerators.getOrDefault(report.getAssignedModeratorId(), AppUserEntity.defaultUser())
+                                        : AppUserEntity.defaultUser(),
+
+                                report.getReviewedBy()  != null
+                                        ? reviewers.getOrDefault(report.getReviewedBy(), AppUserEntity.defaultUser())
+                                        : AppUserEntity.defaultUser(),
+
+                                canViewCategory,
+
+                                canViewProfile
+
+                        );
+                    })
                     .toList();
 
             return new EnrichedReportData(
@@ -1020,6 +1137,13 @@ public class ReportServiceImpl implements ReportService {
         });
     }
 
+    private record CanViewProfile(
+            boolean reporter,
+            boolean reportedUser,
+            boolean assignedModerator,
+            boolean reviewer
+    ){};
+
     /**
      * Maps a report to a response WITH enrichment data.
      */
@@ -1030,17 +1154,29 @@ public class ReportServiceImpl implements ReportService {
             UserDetails reportedUser,
             ThreadDetails thread,
             UserDetails assignedModerator,
-            UserDetails reviewer
+            UserDetails reviewer,
+            boolean canViewCategory,
+            CanViewProfile canViewProfile
     ) {
+
         UUID reporterId = report.getReporterId();
         String reporterDisplayName = reporter.getDisplayName();
-        String reporterAvatarUrl = reporter.getAvatarUrl();
+        String reporterAvatarUrl = canViewProfile.reporter? reporter.getAvatarUrl(): null;
 
         if(report.getIsAnonymous()){
             reporterId = null;
             reporterDisplayName = null;
             reporterAvatarUrl = null;
         }
+
+        String reportedUserAvatarUrl = canViewProfile.reportedUser? reportedUser.getAvatarUrl(): null;
+        String assignedModeratorAvatarUrl = canViewProfile.assignedModerator? assignedModerator.getAvatarUrl(): null;
+        String reviewerAvatarUrl = canViewProfile.reviewer? reviewer.getAvatarUrl(): null;
+
+//        String threadTitle = canViewCategory? thread.getTitle() : "[Content Unavailable]";
+
+        String threadTitle = canViewCategory? thread.getTitle() : "[Content Unavailable]";
+        String postContent = canViewCategory? report.getPostContent(): "[Content Unavailable]";
 
         return switch (report.getTargetType()){
             case THREAD -> ThreadReportResponse.builder()
@@ -1054,7 +1190,7 @@ public class ReportServiceImpl implements ReportService {
                     // Target info
                     .targetType(report.getTargetType())
                     .threadId(report.getThreadId())
-                    .threadTitle(thread.getTitle())
+                    .threadTitle(threadTitle)
 
 
                     // Report details
@@ -1067,7 +1203,7 @@ public class ReportServiceImpl implements ReportService {
                     // Moderation info
                     .assignedModeratorId(report.getAssignedModeratorId())
                     .assignedModeratorDisplayName(assignedModerator.getDisplayName())
-                    .assignedModeratorAvatarUrl(assignedModerator.getAvatarUrl())
+                    .assignedModeratorAvatarUrl(assignedModeratorAvatarUrl)
                     .assignedAt(report.getAssignedAt())
                     .actionTaken(report.getActionTaken())
                     .actionTakenDetails(report.getActionTakenDetails())
@@ -1076,7 +1212,7 @@ public class ReportServiceImpl implements ReportService {
                     .reviewedAt(report.getReviewedAt())
                     .reviewedBy(report.getReviewedBy())
                     .reviewedByDisplayName(reviewer.getDisplayName())
-                    .reviewedByAvatarUrl(reviewer.getAvatarUrl())
+                    .reviewedByAvatarUrl(reviewerAvatarUrl)
 
                     // Timestamps
                     .reportedAt(report.getReportedAt())
@@ -1095,16 +1231,16 @@ public class ReportServiceImpl implements ReportService {
                     // Target info
                     .targetType(report.getTargetType())
                     .postId(report.getPostId())
-                    .postContent(report.getPostContent())
+                    .postContent(postContent)
                     // Thread context - optional, but if threadId exists, thread should exist
                     .threadId(report.getThreadId())
-                    .threadTitle(thread != null? thread.getTitle() : null)
+                    .threadTitle(threadTitle)
 
 
                     // Reported user - OPTIONAL for POST reports
                     .reportedUserId(report.getReportedUserId())
                     .reportedUserDisplayName(reportedUser.getDisplayName())
-                    .reportedUserAvatarUrl(reportedUser.getAvatarUrl())
+                    .reportedUserAvatarUrl(reportedUserAvatarUrl)
 
                     // Report details
                     .reportCategory(report.getReportCategory())
@@ -1116,7 +1252,7 @@ public class ReportServiceImpl implements ReportService {
                     // Moderation info
                     .assignedModeratorId(report.getAssignedModeratorId())
                     .assignedModeratorDisplayName(assignedModerator.getDisplayName())
-                    .assignedModeratorAvatarUrl(assignedModerator.getAvatarUrl())
+                    .assignedModeratorAvatarUrl(assignedModeratorAvatarUrl)
                     .assignedAt(report.getAssignedAt())
                     .actionTaken(report.getActionTaken())
                     .actionTakenDetails(report.getActionTakenDetails())
@@ -1125,7 +1261,7 @@ public class ReportServiceImpl implements ReportService {
                     .reviewedAt(report.getReviewedAt())
                     .reviewedBy(report.getReviewedBy())
                     .reviewedByDisplayName(reviewer.getDisplayName())
-                    .reviewedByAvatarUrl(reviewer.getAvatarUrl())
+                    .reviewedByAvatarUrl(reviewerAvatarUrl)
 
                     // Timestamps
                     .reportedAt(report.getReportedAt())
@@ -1147,7 +1283,7 @@ public class ReportServiceImpl implements ReportService {
                     // User fields - REQUIRED
                     .reportedUserId(report.getReportedUserId())
                     .reportedUserDisplayName(reportedUser.getDisplayName())
-                    .reportedUserAvatarUrl(reportedUser.getAvatarUrl())
+                    .reportedUserAvatarUrl(reportedUserAvatarUrl)
 
                     // Report details
                     .reportCategory(report.getReportCategory())
@@ -1159,7 +1295,7 @@ public class ReportServiceImpl implements ReportService {
                     // Moderation info
                     .assignedModeratorId(report.getAssignedModeratorId())
                     .assignedModeratorDisplayName(assignedModerator.getDisplayName())
-                    .assignedModeratorAvatarUrl(assignedModerator.getAvatarUrl())
+                    .assignedModeratorAvatarUrl(assignedModeratorAvatarUrl)
                     .assignedAt(report.getAssignedAt())
                     .actionTaken(report.getActionTaken())
                     .actionTakenDetails(report.getActionTakenDetails())

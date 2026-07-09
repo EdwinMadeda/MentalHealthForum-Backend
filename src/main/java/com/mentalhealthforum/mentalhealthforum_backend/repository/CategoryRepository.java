@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.repository;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryVisibilityRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
@@ -27,6 +28,20 @@ public interface CategoryRepository extends R2dbcRepository<CategoryEntity, UUID
      */
     @Query("SELECT * FROM forum_categories WHERE id IN (:ids)")
     Flux<CategoryEntity> findCategoriesByIds(@Param("ids") List<UUID> ids);
+
+    @Query("""
+        SELECT c.id AS category_id,
+            category_is_visible(c.id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified) AS visible
+            FROM forum_categories c
+            WHERE c.id IN (:categoryIds)
+    """)
+    Flux<CategoryVisibilityRecord> checkCategoryVisibilityBatch(
+            @Param("categoryIds") List<UUID> categoryIds,
+            @Param("viewerId") UUID viewerId,
+            @Param("isAdmin") boolean isAdmin,
+            @Param("isModeratorOrAdmin") boolean isModeratorOrAdmin,
+            @Param("isVerified") boolean isVerified
+    );
 
     @Query("SELECT category_is_visible(:id, :viewerId, :isAdmin, :isModeratorOrAdmin, :isVerified)")
     Mono<Boolean> isCategoryVisible(
