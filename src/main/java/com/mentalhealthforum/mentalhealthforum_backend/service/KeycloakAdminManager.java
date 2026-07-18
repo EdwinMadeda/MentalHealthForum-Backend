@@ -68,12 +68,6 @@ public interface KeycloakAdminManager {
 
     Optional<String> getUserAttribute(String userId, String key);
 
-    void markAsSyncedLocally(String userId, boolean sync);
-
-    boolean isSyncedLocally(String userId);
-
-    List<UserRepresentation> findUnsyncedUsers();
-
     void verifyUserEmail(String email);
 
     CredentialRepresentation createPasswordCredential(String password) throws InvalidPasswordException;

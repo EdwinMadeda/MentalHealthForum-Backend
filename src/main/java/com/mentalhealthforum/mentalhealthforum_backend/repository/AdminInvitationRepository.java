@@ -19,6 +19,8 @@ public interface AdminInvitationRepository extends R2dbcRepository<AdminInvitati
     // Simple lookup to see if someone is already in the "Lobby"
     Mono<AdminInvitationEntity> findByKeycloakId(UUID keycloakId);
 
+    Mono<Boolean> existsByKeycloakId(UUID keycloakId);
+
     Mono<AdminInvitationEntity> findByEmail(String email);
 
     @Query("""

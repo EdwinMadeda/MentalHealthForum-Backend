@@ -151,7 +151,6 @@ public class UserServiceImpl implements UserService {
 
             // Assign to the group specified in the token (e.g., MEMBERS_NEW)
             adminManager.assignUserToGroup(userId, GroupPath.MEMBERS_NEW);
-            adminManager.markAsSyncedLocally(userId, false);
             adminManager.assignInternalRole(userId, InternalRole.ONBOARDING);
 
             return userId;

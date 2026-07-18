@@ -475,24 +475,6 @@ public class KeycloakAdminManagerImpl implements KeycloakAdminManager {
                 : Optional.empty();
     }
 
-
-    @Override
-    public void markAsSyncedLocally(String userId, boolean sync){
-        setUserAttribute(userId, KeycloakAttributes.IS_SYNCED_LOCALLY, sync? "true": "false");
-    }
-
-    @Override
-    public boolean isSyncedLocally(String userId){
-        return getUserAttribute(userId, KeycloakAttributes.IS_SYNCED_LOCALLY)
-                .map(Boolean::parseBoolean)
-                .orElse(false);
-    }
-
-    @Override
-    public List<UserRepresentation> findUnsyncedUsers(){
-        return getUsersResource().searchByAttributes(String.format("%s:false", KeycloakAttributes.IS_SYNCED_LOCALLY));
-    }
-
     @Override
     public void verifyUserEmail(String email) {
         findUserByEmail(email).ifPresent(userRep -> {

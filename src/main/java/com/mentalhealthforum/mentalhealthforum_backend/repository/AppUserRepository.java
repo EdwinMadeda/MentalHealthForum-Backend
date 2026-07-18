@@ -21,6 +21,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
 
     Mono<AppUserEntity> findAppUserByKeycloakId(String keycloakId);
 
+    Mono<Boolean> existsByKeycloakId(UUID keycloakId);
+
     /**
      * Batch fetch users by Keycloak IDs
      */

@@ -6,7 +6,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.notification.Notifica
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.SupportRole;
 import com.mentalhealthforum.mentalhealthforum_backend.service.PrivilegedUser;
-//import com.mentalhealthforum.mentalhealthforum_backend.utils.JsonUtils;
 import com.mentalhealthforum.mentalhealthforum_backend.service.OnboardingProfileData;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.JsonUtils;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.ValidEmail;

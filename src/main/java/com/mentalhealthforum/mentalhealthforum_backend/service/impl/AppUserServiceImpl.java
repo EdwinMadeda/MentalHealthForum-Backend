@@ -175,16 +175,10 @@ public class AppUserServiceImpl implements AppUserService {
                                             log.info("User {} cleared all hurdles. Transitioning to AppUserEntity.", keycloakUserDto.userId());
 //                                            userDetails.setBio(generateDefaultBio(keycloakUserDto.firstName(), keycloakUserDto.lastName()));
 
-                                            return appUserRepository.save(userDetails)
-                                                    .flatMap(savedUser -> {
-                                                        // 4. Trigger simultaneous side effects
-                                                        return adminInvitationService.completeInvitation(savedUser.getKeycloakId())
-                                                                .then(Mono.fromRunnable(() ->
-                                                                        adminManager.markAsSyncedLocally(savedUser.getKeycloakId().toString(), true))
-                                                                        .subscribeOn(Schedulers.boundedElastic())
-                                                                )
-                                                                .thenReturn(savedUser);
-                                                    });
+                                            // 4. Trigger simultaneous side effects
+                                            return adminInvitationService.completeInvitation(UUID.fromString(keycloakUserDto.userId()))
+                                                    .then(appUserRepository.save(userDetails));
+
                                         });
                             }));
                 })
