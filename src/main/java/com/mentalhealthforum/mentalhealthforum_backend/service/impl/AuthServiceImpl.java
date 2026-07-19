@@ -4,19 +4,24 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.JwtResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.LoginRequest;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.AuthenticationFailedException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserActionRequiredException;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.service.AuthService;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
+import com.mentalhealthforum.mentalhealthforum_backend.service.*;
+import com.mentalhealthforum.mentalhealthforum_backend.utils.JwtUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -24,7 +29,9 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -44,6 +51,12 @@ public class AuthServiceImpl implements AuthService {
 
 
     private final AdminInvitationRepository adminInvitationRepository;
+    private final AppUserService appUserService;
+    private final AppUserRepository appUserRepository;
+    private final KeycloakAdminManager adminManager;
+    private final KeycloakUserDtoMapper keycloakUserDtoMapper;
+    private final JwtClaimsExtractor jwtClaimsExtractor;
+    private final JwtUtils jwtUtils;
 
     private final WebClient webClient;
     private final String clientId;
@@ -52,9 +65,21 @@ public class AuthServiceImpl implements AuthService {
 
     public AuthServiceImpl(
             AdminInvitationRepository adminInvitationRepository,
+            AppUserService appUserService,
+            AppUserRepository appUserRepository,
+            KeycloakAdminManager adminManager,
+            KeycloakUserDtoMapper keycloakUserDtoMapper,
+            JwtClaimsExtractor jwtClaimsExtractor,
+            JwtUtils jwtUtils,
             WebClient.Builder webClientBuilder,
             KeycloakProperties properties) {
         this.adminInvitationRepository = adminInvitationRepository;
+        this.appUserService = appUserService;
+        this.appUserRepository = appUserRepository;
+        this.adminManager = adminManager;
+        this.keycloakUserDtoMapper = keycloakUserDtoMapper;
+        this.jwtClaimsExtractor = jwtClaimsExtractor;
+        this.jwtUtils = jwtUtils;
 
         String authServerUrl = properties.getAuthServerUrl();
         String realm = properties.getRealm();
@@ -162,6 +187,17 @@ public class AuthServiceImpl implements AuthService {
                            // No Lobby record? They are a regular user, let them through
                            .defaultIfEmpty(jwtResponse);
                 })
+                // Sync User after successful login
+                .flatMap(jwtResponse ->
+                     syncUserAfterAuth(jwtResponse.accessToken())
+                            .thenReturn(jwtResponse)
+
+                )
+                .flatMap(jwtResponse -> {
+                    UUID userId = extractSubject(jwtResponse.accessToken());
+                    return updateLastLogin(userId.toString())
+                            .thenReturn(jwtResponse);
+                })
                 .onErrorResume(WebClientRequestException.class, e -> {
                     log.error("Cannot connect to authentication service: {}", e.getMessage());
                     return Mono.error(new ApiException(
@@ -225,7 +261,10 @@ public class AuthServiceImpl implements AuthService {
                                         ));
                                     });
                         })
-                .bodyToMono(JwtResponse.class);
+                .bodyToMono(JwtResponse.class)
+                .flatMap(jwtResponse -> syncUserAfterAuth(jwtResponse.accessToken())
+                            .thenReturn(jwtResponse)
+                );
     }
 
     @Override
@@ -257,5 +296,52 @@ public class AuthServiceImpl implements AuthService {
                         })
                 .bodyToMono(Void.class)
                 .doOnError(e -> log.error("Unexpected error during Keycloak logout: {}", e.getMessage()));
+    }
+
+    private Mono<Void> syncUserAfterAuth(String accessToken){
+        return Mono.fromCallable(()-> {
+                Jwt jwt = jwtUtils.createJwtFromToken(accessToken);
+                ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+                String userId = viewerContext.getUserId();
+
+                KeycloakUserDto keycloakUserDto =  adminManager.findUserByUserId(userId)
+                    .map(keycloakUserDtoMapper::mapToKeycloakUserDto)
+                    .orElseThrow(()-> new RuntimeException("User not found in keycloak during auth sync"));
+
+                return new SyncContext(viewerContext, keycloakUserDto);
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(ctx ->
+                  appUserService.syncUserViaAdminClient(ctx.keycloakUserDto, ctx.viewerContext)
+                            .doOnSuccess(user -> log.debug("User {} synced successfully during auth flow.", ctx.viewerContext.getUserId()))
+                            .doOnError(e -> log.error("Failed to sync user {} during auth flow: {}", ctx.viewerContext.getUserId(), e.getMessage()))
+                            .then()
+                )
+                .onErrorResume(e -> {
+                    log.error("Unexpected error during auth sync: {}", e.getMessage(), e);
+                    return Mono.empty(); // Never break authentication flow
+                });
+
+    }
+
+    /**
+     * Simple holder for sync context
+     */
+    private record SyncContext(ViewerContext viewerContext, KeycloakUserDto keycloakUserDto){}
+
+    /**
+     * Updates the user's last login timestamp after successful authentication
+     * This is a separate from the sync to keep concerns clean
+     */
+    private Mono<Void> updateLastLogin(String userId){
+        return Mono.just(UUID.fromString(userId))
+                .flatMap(appUserRepository::updateLastLogin)
+                .doOnSuccess(v -> log.debug("Updated last_login_at for user {}", userId))
+                .doOnError(e -> log.error("Failed to update last_login_at for user {}: {}", userId, e.getMessage()))
+                .onErrorResume(e -> {
+                    log.error("Error updating last_login_at for user {}: {}", userId, e.getMessage());
+                    return Mono.empty();
+                })
+                .then();
     }
 }

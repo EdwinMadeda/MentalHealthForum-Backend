@@ -182,6 +182,7 @@ public class AppUserServiceImpl implements AppUserService {
                                         });
                             }));
                 })
+                .doOnSuccess(appUser -> log.debug("User {} synced successfully. lastSyncedAt = {}", appUser.getKeycloakId(), appUser.getLastSyncedAt()))
                 .flatMap(appUser -> {
                     if(appUser.getId() != null){
                         return novuServiceImpl.upsertSubscriber(appUser).thenReturn(appUser);

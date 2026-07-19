@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,7 +18,7 @@ import java.util.UUID;
  * Reactive Repository for the application's internal AppUserEntity profiles (R2DBC).
  */
 @Repository
-public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String> {
+public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> {
 
     Mono<AppUserEntity> findAppUserByKeycloakId(String keycloakId);
 
@@ -186,5 +187,15 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, String
             @Param("isConnected") Boolean isConnected,
             @Param("search") String search
     );
+
+    /**
+     * Updates the last login timestamp for a user.
+     * Called on successful authentication.
+     */
+    @Query("UPDATE app_users SET last_login_at = NOW() WHERE keycloak_id = :userId")
+    Mono<Void> updateLastLogin(@Param("userId") UUID userId);
+
+    @Query("UPDATE app_users SET last_active_at = NOW() WHERE keycloak_id = :userId")
+    Mono<Void> updateLastActive(@Param("userId") UUID userId);
 
 }
