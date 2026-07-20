@@ -45,6 +45,7 @@ public class UserResponse {
     private Double reputationScore;
     private Instant lastActiveAt;
     private Instant lastPostedAt;
+    private Instant lastLoginAt;
     private Boolean isActive;
 
     // --- Cached Keycloak Data (UI Context) ---

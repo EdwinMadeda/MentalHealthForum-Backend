@@ -99,6 +99,7 @@ public class UserResponseMapper {
         setTimezoneDetails(response, appUser);
         response.setLanguage(appUser.getLanguage());
         response.setPendingEmail(appUser.getPendingEmail());
+        response.setLastLoginAt(appUser.getLastLoginAt());
     }
 
     private void setExtendedFields(UserResponse response, AppUserEntity appUser) {
