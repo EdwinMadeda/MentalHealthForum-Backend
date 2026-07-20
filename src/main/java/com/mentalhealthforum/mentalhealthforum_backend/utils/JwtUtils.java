@@ -2,6 +2,10 @@ package com.mentalhealthforum.mentalhealthforum_backend.utils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.AuthenticationFailedException;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AuthServiceImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +15,7 @@ import java.util.Map;
 @Component
 public class JwtUtils {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtUtils.class);
     /**
      * Creates a Spring Security Jwt object from a raw token string.
      * Converts timestamp claims (exp, iat, nbf) from Integer/Long to Instant.
@@ -42,7 +47,8 @@ public class JwtUtils {
                     .build();
         }
         catch (Exception e){
-            throw new RuntimeException("Failed to parse JWT token", e);
+            log.error("Failed to extract subject from JWT during login intercept", e);
+            throw new AuthenticationFailedException("Authentication failed: invalid session token.", e);
         }
     }
 

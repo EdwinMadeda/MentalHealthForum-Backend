@@ -138,6 +138,9 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     @Column("last_active_at")
     private Instant lastActiveAt; // TODO: Implement activity tracking to update this timestamp
 
+    @Column("last_active_updated_at")
+    private Instant LastActiveUpdatedAt;
+
     @Column("last_posted_at")
     private Instant lastPostedAt;
 

@@ -96,7 +96,7 @@ public class NovuServiceImpl implements NovuService {
         );
 
         return webClient.post()
-                .uri("/v1/subscribers")
+                .uri("/subscribers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request)
                 .retrieve()

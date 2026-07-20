@@ -31,7 +31,6 @@ import org.springframework.web.reactive.function.client.WebClientRequestExceptio
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -52,7 +51,7 @@ public class AuthServiceImpl implements AuthService {
 
     private final AdminInvitationRepository adminInvitationRepository;
     private final AppUserService appUserService;
-    private final AppUserRepository appUserRepository;
+    private final UserActivityService userActivityService;
     private final KeycloakAdminManager adminManager;
     private final KeycloakUserDtoMapper keycloakUserDtoMapper;
     private final JwtClaimsExtractor jwtClaimsExtractor;
@@ -67,6 +66,7 @@ public class AuthServiceImpl implements AuthService {
             AdminInvitationRepository adminInvitationRepository,
             AppUserService appUserService,
             AppUserRepository appUserRepository,
+            UserActivityService userActivityService,
             KeycloakAdminManager adminManager,
             KeycloakUserDtoMapper keycloakUserDtoMapper,
             JwtClaimsExtractor jwtClaimsExtractor,
@@ -75,7 +75,7 @@ public class AuthServiceImpl implements AuthService {
             KeycloakProperties properties) {
         this.adminInvitationRepository = adminInvitationRepository;
         this.appUserService = appUserService;
-        this.appUserRepository = appUserRepository;
+        this.userActivityService = userActivityService;
         this.adminManager = adminManager;
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
@@ -164,7 +164,8 @@ public class AuthServiceImpl implements AuthService {
                 .bodyToMono(JwtResponse.class)
                 .flatMap(jwtResponse -> {
                     // Extract keycloak UUID (sub) from the token
-                    UUID keycloakId = extractSubject(jwtResponse.accessToken());
+                    Jwt jwt = jwtUtils.createJwtFromToken(jwtResponse.accessToken());
+                    UUID keycloakId = UUID.fromString(jwt.getSubject());
 
                    return  adminInvitationRepository.findByKeycloakId(keycloakId)
                            .flatMap(adminInvitation -> {
@@ -187,16 +188,23 @@ public class AuthServiceImpl implements AuthService {
                            // No Lobby record? They are a regular user, let them through
                            .defaultIfEmpty(jwtResponse);
                 })
-                // Sync User after successful login
-                .flatMap(jwtResponse ->
-                     syncUserAfterAuth(jwtResponse.accessToken())
-                            .thenReturn(jwtResponse)
-
-                )
                 .flatMap(jwtResponse -> {
-                    UUID userId = extractSubject(jwtResponse.accessToken());
-                    return updateLastLogin(userId.toString())
-                            .thenReturn(jwtResponse);
+                    Jwt jwt = jwtUtils.createJwtFromToken(jwtResponse.accessToken());
+                    UUID keycloakId = UUID.fromString(jwt.getSubject());
+
+                    // Critical path: Database updates
+                    Mono<Void> activityUpdates = userActivityService.recordLoginActivity(keycloakId);
+
+                    // Fire-and-forget: Sync in the background
+                    syncUserAfterAuth(jwtResponse.accessToken())
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .doOnSuccess(v -> log.debug("On Login: Background sync completed for user {}", keycloakId))
+                            .doOnError(e -> log.error("On Login: Background sync failed for user {}", keycloakId, e))
+                            .subscribe();
+
+                    // Return immediately after activity updates
+                    return activityUpdates.thenReturn(jwtResponse);
+
                 })
                 .onErrorResume(WebClientRequestException.class, e -> {
                     log.error("Cannot connect to authentication service: {}", e.getMessage());
@@ -214,18 +222,6 @@ public class AuthServiceImpl implements AuthService {
                             e
                     ));
                 });
-    }
-
-    private UUID extractSubject(String accessToken) {
-        try{
-            String[] chunks = accessToken.split("\\.");
-            String payload = new String(java.util.Base64.getUrlDecoder().decode(chunks[1]));
-            Map<String, Object> claims = objectMapper.readValue(payload, new TypeReference<>() {});
-            return UUID.fromString((String) claims.get("sub"));
-        } catch(Exception e){
-            log.error("Failed to extract subject from JWT during login intercept", e);
-            throw new AuthenticationFailedException("Authentication failed: invalid session token.");
-        }
     }
 
     /**
@@ -262,9 +258,25 @@ public class AuthServiceImpl implements AuthService {
                                     });
                         })
                 .bodyToMono(JwtResponse.class)
-                .flatMap(jwtResponse -> syncUserAfterAuth(jwtResponse.accessToken())
-                            .thenReturn(jwtResponse)
-                );
+                .flatMap(jwtResponse -> {
+                    Jwt jwt = jwtUtils.createJwtFromToken(jwtResponse.accessToken());
+                    UUID keycloakId = UUID.fromString(jwt.getSubject());
+
+
+                    // Critical path: Database updates
+                    Mono<Void> activityUpdates = userActivityService.trackActivity(keycloakId);
+
+                    // Fire-and-forget: Sync in the background
+                    syncUserAfterAuth(jwtResponse.accessToken())
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .doOnSuccess(v -> log.debug("On refresh: Background sync completed for user {}", keycloakId))
+                            .doOnError(e -> log.error("On refresh: Background sync failed for user {}", keycloakId, e))
+                            .subscribe();
+
+                    // Return immediately after activity updates
+                    return activityUpdates.thenReturn(jwtResponse);
+
+                });
     }
 
     @Override
@@ -329,19 +341,5 @@ public class AuthServiceImpl implements AuthService {
      */
     private record SyncContext(ViewerContext viewerContext, KeycloakUserDto keycloakUserDto){}
 
-    /**
-     * Updates the user's last login timestamp after successful authentication
-     * This is a separate from the sync to keep concerns clean
-     */
-    private Mono<Void> updateLastLogin(String userId){
-        return Mono.just(UUID.fromString(userId))
-                .flatMap(appUserRepository::updateLastLogin)
-                .doOnSuccess(v -> log.debug("Updated last_login_at for user {}", userId))
-                .doOnError(e -> log.error("Failed to update last_login_at for user {}: {}", userId, e.getMessage()))
-                .onErrorResume(e -> {
-                    log.error("Error updating last_login_at for user {}: {}", userId, e.getMessage());
-                    return Mono.empty();
-                })
-                .then();
-    }
+
 }

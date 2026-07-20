@@ -192,10 +192,45 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
      * Updates the last login timestamp for a user.
      * Called on successful authentication.
      */
-    @Query("UPDATE app_users SET last_login_at = NOW() WHERE keycloak_id = :userId")
-    Mono<Void> updateLastLogin(@Param("userId") UUID userId);
+    @Query("""
+        UPDATE app_users
+        SET
+            last_login_at = :timestamp,
+            last_active_at = :timestamp, last_active_updated_at = :timestamp,
+            is_active = true
+        WHERE keycloak_id = :keycloakId
+    """)
+    Mono<Integer> recordLoginActivity(
+            @Param("keycloakId") UUID keycloakId,
+            @Param("timestamp") Instant timestamp
+    );
 
-    @Query("UPDATE app_users SET last_active_at = NOW() WHERE keycloak_id = :userId")
-    Mono<Void> updateLastActive(@Param("userId") UUID userId);
+    /**
+     * Updates the last active_at timestamp for a user
+     * Used during login, token refresh, and API activity
+     */
+    @Query("""
+        UPDATE app_users
+        SET last_active_at = :timestamp, last_active_updated_at = :timestamp
+        WHERE keycloak_id = :keycloakId
+    """)
+    Mono<Integer> updateLastActive(
+            @Param("keycloakId") UUID keycloakId,
+            @Param("timestamp") Instant timestamp
+    );
+
+    /**
+     * Activates a user account (sets is_active = true).
+     * Called on successful login to reactivate accounts.
+     * */
+    @Query("UPDATE app_users SET is_active = true WHERE keycloak_id = :keycloakId")
+    Mono<Integer> activateUser(@Param("keycloakId") UUID keycloakId);
+
+    /**
+     * Deactivates a user account (sets is_active = true).
+     * Called when a user deletes their account or admin disables them.
+     * */
+    @Query("UPDATE app_users SET is_active = false WHERE keycloak_id = :keycloakId")
+    Mono<Integer> deactivateUser(@Param("keycloakId") UUID keycloakId);
 
 }

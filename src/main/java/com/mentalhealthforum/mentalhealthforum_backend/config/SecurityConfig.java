@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.config;
 
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -19,7 +20,6 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-
 
 @Configuration
 // Change to the reactive security annotation
@@ -42,16 +42,6 @@ public class SecurityConfig {
         this.securityExceptionHandler = securityExceptionHandler;
         this.accessAuthorizationManager = accessAuthorizationManager;
     }
-
-    private static final String[] AUTH_WHITELIST = {
-            "/swagger-ui/**",
-            "/v3/api-docs/**",
-            "/actuator/**",
-            "/error/**",
-            "/api/users/register/**",
-            "/api/auth/**", // Consolidated authentication paths for login, refresh, and logout
-            "/api/timezones/**"
-    };
 
     /**
      * Creates a composite converter that checks the cookie OR the Authorization header.
@@ -82,7 +72,7 @@ public class SecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .cors(Customizer.withDefaults())
                 .authorizeExchange(auth -> auth
-                        .pathMatchers(AUTH_WHITELIST).permitAll() // Allow unauthenticated access to whitelist
+                        .pathMatchers(SecurityConstants.AUTH_WHITELIST).permitAll() // Allow unauthenticated access to whitelist
 //                        .anyExchange().authenticated() // Require authentication for all other requests
                                 .anyExchange().access(accessAuthorizationManager)
                 )

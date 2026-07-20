@@ -185,7 +185,13 @@ public class AppUserServiceImpl implements AppUserService {
                 .doOnSuccess(appUser -> log.debug("User {} synced successfully. lastSyncedAt = {}", appUser.getKeycloakId(), appUser.getLastSyncedAt()))
                 .flatMap(appUser -> {
                     if(appUser.getId() != null){
-                        return novuServiceImpl.upsertSubscriber(appUser).thenReturn(appUser);
+                        // Fire-and-forget: Don't wait for Novu
+                            novuServiceImpl.upsertSubscriber(appUser)
+                                .subscribeOn(Schedulers.boundedElastic())
+                                .doOnError(e -> log.error("Novu sync failed for user {}", appUser.getKeycloakId()))
+                                .subscribe();
+
+                            return Mono.just(appUser);
                     }
                     return Mono.just(appUser);
                 })
@@ -193,6 +199,7 @@ public class AppUserServiceImpl implements AppUserService {
                 .flatMap(this::enrichWithPendingEmail)
                 .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
+
     /**
      * @deprecated replaced by {@link #syncUserViaAdminClient(KeycloakUserDto, ViewerContext)}
      * due to limitations in token-based synchronization. The userinfo endpoint lacks critical
