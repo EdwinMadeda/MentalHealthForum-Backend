@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.controller;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.RegisterUserRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.ResetPasswordRequest;
@@ -8,8 +9,10 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InsufficientPermissionException;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
+import com.mentalhealthforum.mentalhealthforum_backend.service.UserActivityService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AppUserServiceImpl;
+import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -22,6 +25,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 
@@ -33,11 +38,13 @@ public class UserController {
 
     private final UserService userService;
     private final AppUserService appUserService;
+    private final UserActivityService userActivityService;
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
-    public UserController(UserService userService, AppUserServiceImpl appUserService, JwtClaimsExtractor jwtClaimsExtractor) {
+    public UserController(UserService userService, AppUserServiceImpl appUserService, UserActivityService userActivityService, JwtClaimsExtractor jwtClaimsExtractor) {
         this.userService = userService;
         this.appUserService = appUserService;
+        this.userActivityService = userActivityService;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
 
@@ -79,12 +86,11 @@ public class UserController {
     }
 
     @GetMapping
-    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserResponse>>>> getAllUsers(
+    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserResponse>>>> getActiveUsers(
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "true", name = "current_user_first") @Parameter(name = "current_user_first") boolean currentUserFirst,
-            @RequestParam(required = false, name = "is_active") @Parameter(name = "is_active") Boolean isActive,
             @RequestParam(required = false, name = "is_connected") @Parameter(name = "is_connected", description = "Filter by connection status: true (connected), false (not connected)") Boolean isConnected,
             @RequestParam(required = false) String role,
             @RequestParam(required = false) String[] groups,
@@ -96,9 +102,9 @@ public class UserController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
         // userService.getAllUsers returns Mono<PaginatedResponse<UserRepresentation>>
-        return appUserService.getAllAppUsersWithContext(page, size, currentUserFirst, isActive, isConnected, role, groups, search, sortBy, sortDirection, viewerContext)
+        return appUserService.getActiveAppUsersWithContext(page, size, currentUserFirst, isConnected, role, groups, search, sortBy, sortDirection, viewerContext)
                 .map(paginatedUsers -> {
-                    String message = "Paginated user records retrieved successfully.";
+                    String message = "User records retrieved successfully.";
                     StandardSuccessResponse<PaginatedResponse<UserResponse>> response = new StandardSuccessResponse<>(message, paginatedUsers);
                     return ResponseEntity.ok(response);
                 });
@@ -162,11 +168,9 @@ public class UserController {
     }
 
     @DeleteMapping("/{userId}")
-    public Mono<? extends ResponseEntity<?>> deleteUser(
+    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> softDeleteUser(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId) {
-        // userService.deleteUser returns Mono<Void>. We use thenReturn() to wait for completion
-        // and then emit the 204 No Content response.
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
@@ -175,21 +179,40 @@ public class UserController {
             throw new InsufficientPermissionException("Forbidden: Cannot delete another user's profile.");
         }
 
-        // Keycloak update Mono
-        Mono<Void> keycloakDelete = userService.deleteUser(String.valueOf(userId))
-                .doOnError(e -> log.error("Keycloak deletion failed: {}", e.getMessage()));
+        Instant scheduledAt = Instant.now().plus(AppConstants.ACCOUNT_DELETION_RETENTION_WINDOW);
+        String readableDate = DateTimeUtils.toHumanReadable(
+                scheduledAt,
+                String.format("within %s days", AppConstants.ACCOUNT_DELETION_RETENTION_WINDOW)
+        );
 
-        // Local DB deletion
-        Mono<Void> localDelete = appUserService.deleteLocalProfile(String.valueOf(userId), viewerContext)
-                .doOnError(e -> log.error("Local DB deletion failed: {}", e.getMessage()));
+        return userService.softDeleteUser(String.valueOf(userId))
+                .thenReturn(ResponseEntity.ok(
+                        new StandardSuccessResponse<>(
+                               String.format(
+                                       "Account deletion scheduled. You have until %s to cancel. " +
+                                               "Your data will be permanently removed after that period.",
+                                       readableDate
+                               )
+                        )
+                ));
+    }
 
-        return Mono.zip(keycloakDelete, localDelete)
-                .thenReturn(ResponseEntity.noContent().build())
-                .onErrorResume(e -> {
-                    log.error("User deletion partially failed: {}", e.getMessage(), e);
-                    // Return 500 with a message; 204 is only for full success
-                    StandardSuccessResponse<Void> response = new StandardSuccessResponse<>("User deletion partially failed");
-                    return Mono.just(ResponseEntity.status(500).body(response));
-                });
+    @PostMapping("/{userId}/reactivate")
+    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> reactivateAccount(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID userId) {
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        // -- Authorization check --
+        if(viewerContext == null || !viewerContext.getUserId().equals(String.valueOf(userId))){
+            throw new InsufficientPermissionException("Forbidden: Cannot reactivate another's account");
+        }
+
+        return userActivityService.reactivateUser(userId)
+                .thenReturn(ResponseEntity.ok(
+                        new StandardSuccessResponse<>("Account reactivated successfully. Welcome back!")
+                ));
+
     }
 }

@@ -60,6 +60,33 @@ public interface AppUserService {
      * @param page             Zero-indexed page number
      * @param size             Number of users per page
      * @param currentUserFirst Whether to place the current user first on page 0
+     * @param isConnected      Optional filter by is connected
+     * @param role             Optional role filter
+     * @param groups           Optional group filter
+     * @param search           Optional search term
+     * @param sortBy           Field to sort by
+     * @param sortDirection    Sort direction ("asc" or "desc")
+     * @param viewerContext    Authenticated viewer context for privacy rules
+     * @return Mono of a paginated response containing user profile data with privacy rules applied.
+     */
+    Mono<PaginatedResponse<UserResponse>> getActiveAppUsersWithContext(
+            int page, int size, boolean currentUserFirst,
+            Boolean isConnected,
+            String role,
+            String[] groups,
+            String search,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext);
+
+    /**
+     * Retrieves a paginated list of all users in the system.
+     * Applies privacy rules for each user based on their profile visibility and the viewer's privileges.
+     * Sets the 'isSelf' flag for the current user in the list.
+     *
+     * @param page             Zero-indexed page number
+     * @param size             Number of users per page
+     * @param currentUserFirst Whether to place the current user first on page 0
      * @param isActive         Optional filter by active status
      * @param isConnected      Optional filter by is connected
      * @param role             Optional role filter
@@ -98,18 +125,6 @@ public interface AppUserService {
      * @throws InsufficientPermissionException if viewer is not updating their own profile
      */
     Mono<UserResponse> updateLocalProfile(String userId, ViewerContext viewerContext, UpdateUserProfileRequest updateUserProfileRequest);
-
-    /**
-     * Deletes the local user profile from the R2DBC database for a given Keycloak ID.
-     * Only allows users to delete their own profiles (authorization enforced).
-     * This only affects the local database record, not Keycloak.
-     *
-     * @param userId The Keycloak ID of the user whose local profile is to be deleted.
-     * @param viewerContext The authenticated viewer's context, used for authorization.
-     * @return Mono<Void> signaling the completion of the delete operation.
-     * @throws InsufficientPermissionException if viewer is not deleting their own profile
-     */
-    Mono<Void> deleteLocalProfile(String userId, ViewerContext viewerContext);
 
     Mono<UserDetails> getUserDetails(UUID userId);
 }

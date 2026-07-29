@@ -11,6 +11,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserInfoDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.InternalRole;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ModerationAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.VerificationType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.AppUserSortField;
@@ -314,6 +315,37 @@ public class AppUserServiceImpl implements AppUserService {
      * @param page             Zero-indexed page number to retrieve
      * @param size             Number of users to return per page
      * @param currentUserFirst Whether to place the current user first on page 0
+     * @param isConnected      Optional filter restricting results by user connections
+     * @param role             Optional role filter; null means no role restriction
+     * @param groups           Optional group filter; empty array is treated as no filter
+     * @param search           Optional search query; blank values ignored
+     * @param sortBy           Field to sort by; falls back to a safe default when invalid
+     * @param sortDirection    Sort direction ("asc" or "desc"); defaults by field when null
+     * @param viewerContext    Authenticated viewer context used to determine field visibility
+     * @return Mono of paginated user responses with privacy rules applied
+     */
+    @Override
+    public Mono<PaginatedResponse<UserResponse>> getActiveAppUsersWithContext(
+            int page, int size, boolean currentUserFirst,
+            Boolean isConnected,
+            String role,
+            String[] groups,
+            String search,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext){
+
+        return executeGetAppUsersQuery(page, size, currentUserFirst, true, isConnected, role, groups, search, sortBy, sortDirection, viewerContext);
+    }
+
+    /**
+     * Fetches paginated list of all users with privacy rules applied for each.
+     * Applies individual privacy rules per user based on their profile visibility
+     * and the viewer's privileges.
+     *
+     * @param page             Zero-indexed page number to retrieve
+     * @param size             Number of users to return per page
+     * @param currentUserFirst Whether to place the current user first on page 0
      * @param isActive         Optional filter restricting results by active/inactive status
      * @param isConnected      Optional filter restricting results by user connections
      * @param role             Optional role filter; null means no role restriction
@@ -336,67 +368,8 @@ public class AppUserServiceImpl implements AppUserService {
             String sortDirection,
             ViewerContext viewerContext){
 
-        if (page < 0 || size <= 0) {
-            log.error("Invalid pagination parameters: page={}, size={}", page, size);
-            throw new InvalidPaginationException();
-        }
-
-        int offset = page * size;
-
-        UUID currentUserId = null;
-        boolean isAdmin = false;
-        boolean isModeratorOrAdmin = false;
-
-        if(viewerContext != null && viewerContext.getUserId() != null){
-            try{
-                currentUserId = UUID.fromString(viewerContext.getUserId());
-                isAdmin = viewerContext.isAdmin();
-                isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
-            } catch (IllegalArgumentException e){
-                log.error("Failed to parse viewer keycloak UUID string from context: {}", viewerContext.getUserId());
-            }
-        }
-
-        String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
-        String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
-        AppUserSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String normalizedDirection = sortByField.determineSortDirection(sortDirection);
-
-        // Only apply current user first on page 0
-        boolean applyCurrentUserFirst = currentUserFirst && page == 0;
-
-        Flux<AppUserEntity> appUsersFlux = appUserRepository.findAllPaginated(
-                isActive, role, effectiveGroups,
-                currentUserId, applyCurrentUserFirst,
-                isAdmin, isModeratorOrAdmin,
-                isConnected, effectiveSearch, sortByField.getValue(), normalizedDirection,
-                size, offset);
-
-        Mono<Long> totalCount = appUserRepository.countAll(
-                isActive, role, effectiveGroups,
-                currentUserId,
-                isAdmin, isModeratorOrAdmin,
-                isConnected, effectiveSearch);
-
-        UUID finalCurrentUserId = currentUserId;
-        return Mono.zip(appUsersFlux.collectList(), totalCount)
-                .flatMap(tuple -> {
-                    List<AppUserEntity> appUsers = tuple.getT1();
-                    long total = tuple.getT2();
-
-                    if(appUsers.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, total));
-                    }
-
-                    return enrichAppUsersWithConnectionStatus(appUsers, finalCurrentUserId, viewerContext)
-                            .map(content -> {
-                                FilterMetadata<Object> filters = FilterMetadata.builder()
-                                        .sortOptions(getUserSortOptions())
-                                        .build();
-                                return new PaginatedResponse<>(content, page, size, total, filters);
-                            });
-
-                });
+        return ModerationAction.USER_VIEW_INACTIVE.checkPermission(viewerContext)
+                .then( executeGetAppUsersQuery(page, size, currentUserFirst, isActive, isConnected, role, groups, search, sortBy, sortDirection, viewerContext));
     }
 
     private AppUserSortField validateAndNormalizeSortBy(String sortBy){
@@ -467,27 +440,7 @@ public class AppUserServiceImpl implements AppUserService {
                 .flatMap(this::enrichWithPendingEmail)
                 .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
-    /**
-     * Deletes the local R2DBC profile for the authenticated user.
-     * Only allows users to delete their own profiles (authorization enforced).
-     * Does not affect Keycloak user account.
-     *
-     * @param userId Keycloak ID of the user whose profile is to be deleted
-     * @param viewerContext Authenticated viewer's context for authorization
-     * @return Mono signaling completion
-     * @throws InsufficientPermissionException if viewer is not deleting their own profile
-     */
-    @Override
-    public Mono<Void> deleteLocalProfile(String userId, ViewerContext viewerContext){
-        // --- Authorization check ---
-        if(viewerContext == null || !viewerContext.getUserId().equals(userId)){
-            return Mono.error(new InsufficientPermissionException("Forbidden: Cannot delete another user's profile."));
-        }
-        return appUserRepository
-                .findAppUserByKeycloakId(userId)
-                .flatMap(appUserRepository::delete)
-                .then();
-    }
+
 
     @Override
     public Mono<UserDetails> getUserDetails(UUID userId) {
@@ -575,6 +528,80 @@ public class AppUserServiceImpl implements AppUserService {
                     return appUser;
                 })
                 .defaultIfEmpty(appUser);
+    }
+
+    private Mono<PaginatedResponse<UserResponse>> executeGetAppUsersQuery(
+            int page, int size, boolean currentUserFirst,
+            Boolean isActive,
+            Boolean isConnected,
+            String role,
+            String[] groups,
+            String search,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext){
+
+        if (page < 0 || size <= 0) {
+            log.error("Invalid pagination parameters: page={}, size={}", page, size);
+            throw new InvalidPaginationException();
+        }
+
+        int offset = page * size;
+
+        UUID currentUserId = null;
+        boolean isAdmin = false;
+        boolean isModeratorOrAdmin = false;
+
+        if(viewerContext != null && viewerContext.getUserId() != null){
+            try{
+                currentUserId = UUID.fromString(viewerContext.getUserId());
+                isAdmin = viewerContext.isAdmin();
+                isModeratorOrAdmin = viewerContext.isModeratorOrAdmin();
+            } catch (IllegalArgumentException e){
+                log.error("Failed to parse viewer keycloak UUID string from context: {}", viewerContext.getUserId());
+            }
+        }
+
+        String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
+        String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
+        AppUserSortField sortByField = validateAndNormalizeSortBy(sortBy);
+        String normalizedDirection = sortByField.determineSortDirection(sortDirection);
+
+        // Only apply current user first on page 0
+        boolean applyCurrentUserFirst = currentUserFirst && page == 0;
+
+        Flux<AppUserEntity> appUsersFlux = appUserRepository.findAllPaginated(
+                isActive, role, effectiveGroups,
+                currentUserId, applyCurrentUserFirst,
+                isAdmin, isModeratorOrAdmin,
+                isConnected, effectiveSearch, sortByField.getValue(), normalizedDirection,
+                size, offset);
+
+        Mono<Long> totalCount = appUserRepository.countAll(
+                isActive, role, effectiveGroups,
+                currentUserId,
+                isAdmin, isModeratorOrAdmin,
+                isConnected, effectiveSearch);
+
+        UUID finalCurrentUserId = currentUserId;
+        return Mono.zip(appUsersFlux.collectList(), totalCount)
+                .flatMap(tuple -> {
+                    List<AppUserEntity> appUsers = tuple.getT1();
+                    long total = tuple.getT2();
+
+                    if(appUsers.isEmpty()){
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, total));
+                    }
+
+                    return enrichAppUsersWithConnectionStatus(appUsers, finalCurrentUserId, viewerContext)
+                            .map(content -> {
+                                FilterMetadata<Object> filters = FilterMetadata.builder()
+                                        .sortOptions(getUserSortOptions())
+                                        .build();
+                                return new PaginatedResponse<>(content, page, size, total, filters);
+                            });
+
+                });
     }
 
     /**

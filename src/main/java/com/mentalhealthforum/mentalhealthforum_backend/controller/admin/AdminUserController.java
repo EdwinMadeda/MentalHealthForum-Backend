@@ -5,6 +5,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -29,16 +30,19 @@ public class AdminUserController {
     private final AdminUserService adminUserService;
     private final AppUserService appUserService;
     private final AdminInvitationService adminInvitationService;
+    private final AccountPurgeSchedulerService accountPurgeSchedulerService;
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
     public AdminUserController(
             AdminUserService adminUserService,
             AppUserService appUserService,
             AdminInvitationService adminInvitationService,
+            AccountPurgeSchedulerService accountPurgeSchedulerService,
             JwtClaimsExtractor jwtClaimsExtractor) {
         this.adminUserService = adminUserService;
         this.appUserService = appUserService;
         this.adminInvitationService = adminInvitationService;
+        this.accountPurgeSchedulerService = accountPurgeSchedulerService;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
 
@@ -143,5 +147,41 @@ public class AdminUserController {
                     .thenReturn(ResponseEntity.ok(
                             new StandardSuccessResponse<>("Invitation revoked and user deleted successfully.", null)
                     ));
+    }
+
+    @PostMapping("/purge-expired")
+    public Mono<ResponseEntity<StandardSuccessResponse<Integer>>> purgeExpiredAccounts(){
+        return accountPurgeSchedulerService.purgeExpiredAccounts()
+                .map(count  -> ResponseEntity.ok(
+                        new StandardSuccessResponse<>(
+                                String.format("Purge for %s expired accounts triggered successfully. ", count)
+                        )
+                ));
+    }
+
+    @GetMapping
+    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserResponse>>>> getAllUsers(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "true", name = "current_user_first") @Parameter(name = "current_user_first") boolean currentUserFirst,
+            @RequestParam(required = false, name = "is_active") @Parameter(name = "is_active") Boolean isActive,
+            @RequestParam(required = false, name = "is_connected") @Parameter(name = "is_connected", description = "Filter by connection status: true (connected), false (not connected)") Boolean isConnected,
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) String[] groups,
+            @RequestParam(required = false, name = "search") @Parameter(name = "search", description = "Search display_name (case-insensitive contains)") String search,
+            @RequestParam(defaultValue = "display_name", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: display_name, date_joined, posts_count, reputation_score, last_posted_at, last_active_at") String sortBy,
+            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+    ){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        // userService.getAllUsers returns Mono<PaginatedResponse<UserRepresentation>>
+        return appUserService.getAllAppUsersWithContext(page, size, currentUserFirst, isActive, isConnected, role, groups, search, sortBy, sortDirection, viewerContext)
+                .map(paginatedUsers -> {
+                    String message = "User records retrieved successfully.";
+                    StandardSuccessResponse<PaginatedResponse<UserResponse>> response = new StandardSuccessResponse<>(message, paginatedUsers);
+                    return ResponseEntity.ok(response);
+                });
     }
 }

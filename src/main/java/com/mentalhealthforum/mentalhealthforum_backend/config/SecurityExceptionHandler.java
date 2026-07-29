@@ -1,9 +1,11 @@
 package com.mentalhealthforum.mentalhealthforum_backend.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardErrorResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.UUID;
 
 
@@ -35,16 +38,20 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
 
     private final ObjectMapper objectMapper;
     private final UserModerationService userModerationService;
+    private final AppUserRepository appUserRepository;
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
     public SecurityExceptionHandler(
             ObjectMapper objectMapper,
             UserModerationService userModerationService,
-            JwtClaimsExtractor jwtClaimsExtractor, JwtClaimsExtractor jwtClaimsExtractor1) {
+            AppUserRepository appUserRepository,
+            JwtClaimsExtractor jwtClaimsExtractor) {
         this.objectMapper = objectMapper;
         this.userModerationService = userModerationService;
-        this.jwtClaimsExtractor = jwtClaimsExtractor1;
+        this.appUserRepository = appUserRepository;
+        this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
+
 
     // --- Handles 401 Unauthorized (Authentication Failure) ---
     @Override
@@ -69,64 +76,98 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
                     UUID userId = UUID.fromString(jwtAuthenticationToken.getToken().getSubject());
                     ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwtAuthenticationToken.getToken());
 
-                    // Check ban first (most severe)
-                    return userModerationService.isUserBanned(userId)
-                            .flatMap(isBanned -> {
-                                if(isBanned){
-                                    return userModerationService.getActiveBanForUser(userId, viewerContext
+
+                    // Check account status first
+                    return appUserRepository.findAppUserByKeycloakId(userId.toString())
+                            .flatMap(appUser -> {
+                                Instant scheduledAt = appUser.getDeletionScheduledAt();
+                                String readableDate = DateTimeUtils.toHumanReadable(
+                                        scheduledAt,
+                                        String.format("within %s days", AppConstants.ACCOUNT_DELETION_RETENTION_WINDOW)
+                                );
+
+                                // Block access if account is pending deletion or purged
+                                if(appUser.isPendingDeletion()){
+                                    return writeErrorResponse(
+                                            exchange,
+                                            HttpStatus.FORBIDDEN,
+                                            ErrorCode.ACCOUNT_PENDING_DELETION,
+                                            String.format(
+                                                    "Account deletion is scheduled for %s. You can reactivate your account by visiting your account settings",
+                                                    readableDate
                                             )
-                                            .flatMap(ban -> writeErrorResponse(
-                                                    exchange,
-                                                    HttpStatus.FORBIDDEN,
-                                                    ErrorCode.FORBIDDEN,
-                                                    String.format(
-                                                            "Your account has been permanently banned. Reason: %s. Please contact support.",
-                                                            ban.getReason()
-                                                    )
-                                            ));
+                                    );
+                                }
+                                if(appUser.isPurged()){
+                                    return writeErrorResponse(
+                                            exchange,
+                                            HttpStatus.FORBIDDEN,
+                                            ErrorCode.ACCOUNT_PURGED,
+                                            "Account has been permanently deleted. This action cannot be undone"
+                                    );
                                 }
 
-                                // Not banned, check suspension
-                                return userModerationService.isUserSuspended(userId)
-                                        .flatMap(isSuspended -> {
-                                            if(isSuspended) {
-                                                return userModerationService.getActiveSuspendForUser(userId, viewerContext)
-                                                        .flatMap(suspension -> {
-                                                            String expiry = DateTimeUtils.toHumanReadable(suspension.getExpiresAt(), "indefinitely");
+                                // Check ban next (most severe)
+                                return userModerationService.isUserBanned(userId)
+                                        .flatMap(isBanned -> {
+                                            if(isBanned){
+                                                return userModerationService.getActiveBanForUser(userId, viewerContext
+                                                        )
+                                                        .flatMap(ban -> writeErrorResponse(
+                                                                exchange,
+                                                                HttpStatus.FORBIDDEN,
+                                                                ErrorCode.FORBIDDEN,
+                                                                String.format(
+                                                                        "Your account has been permanently banned. Reason: %s. Please contact support.",
+                                                                        ban.getReason()
+                                                                )
+                                                        ));
+                                            }
+
+                                            // Not banned, check suspension
+                                            return userModerationService.isUserSuspended(userId)
+                                                    .flatMap(isSuspended -> {
+                                                        if(isSuspended) {
+                                                            return userModerationService.getActiveSuspendForUser(userId, viewerContext)
+                                                                    .flatMap(suspension -> {
+                                                                        String expiry = DateTimeUtils.toHumanReadable(suspension.getExpiresAt(), "indefinitely");
+                                                                        return writeErrorResponse(
+                                                                                exchange,
+                                                                                HttpStatus.FORBIDDEN,
+                                                                                ErrorCode.FORBIDDEN,
+                                                                                String.format(
+                                                                                        "Your account is suspended until %s. Reason: %s.",
+                                                                                        expiry, suspension.getReason()
+                                                                                )
+                                                                        );
+                                                                    });
+                                                        }
+
+                                                        // Check onboarding
+                                                        boolean isOnboarding = jwtAuthenticationToken.getAuthorities().stream()
+                                                                .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ONBOARDING"));
+
+                                                        if (isOnboarding) {
                                                             return writeErrorResponse(
                                                                     exchange,
-                                                                    HttpStatus.FORBIDDEN,
-                                                                    ErrorCode.FORBIDDEN,
-                                                                    String.format(
-                                                                            "Your account is suspended until %s. Reason: %s.",
-                                                                            expiry, suspension.getReason()
-                                                                    )
+                                                                    HttpStatus.PRECONDITION_REQUIRED,
+                                                                    ErrorCode.ONBOARDING_REQUIRED,
+                                                                    "Your profile is incomplete. Please satisfy onboarding requirements first."
                                                             );
-                                                        });
-                                            }
+                                                        }
 
-                                            // Check onboarding
-                                            boolean isOnboarding = jwtAuthenticationToken.getAuthorities().stream()
-                                                    .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ONBOARDING"));
-
-                                            if (isOnboarding) {
-                                                return writeErrorResponse(
-                                                        exchange,
-                                                        HttpStatus.PRECONDITION_REQUIRED,
-                                                        ErrorCode.ONBOARDING_REQUIRED,
-                                                        "Your profile is incomplete. Please satisfy onboarding requirements first."
-                                                );
-                                            }
-
-                                            // Default 403
-                                            return writeErrorResponse(
-                                                    exchange,
-                                                    HttpStatus.FORBIDDEN,
-                                                    ErrorCode.FORBIDDEN,
-                                                    "Forbidden: Insufficient permissions for this resource."
-                                            );
+                                                        // Default 403
+                                                        return writeErrorResponse(
+                                                                exchange,
+                                                                HttpStatus.FORBIDDEN,
+                                                                ErrorCode.FORBIDDEN,
+                                                                "Forbidden: Insufficient permissions for this resource."
+                                                        );
+                                                    });
                                         });
                             });
+
+
 
                 })
                 // If anonymous (unauthenticated) reached here, it's a 403
@@ -138,41 +179,6 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
                 ));
     }
 
-
-//    @Override
-//    public Mono<Void> handle(ServerWebExchange exchange, AccessDeniedException ex) {
-//        logger.warn("403 Forbidden Access Attempt: {}", ex.getMessage());
-//
-//        return exchange.getPrincipal()
-//                .cast(JwtAuthenticationToken.class)
-//                .flatMap(jwtAuthenticationToken -> {
-//                    boolean isOnboarding = jwtAuthenticationToken.getAuthorities().stream()
-//                            .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ONBOARDING"));
-//
-//                    if(isOnboarding){
-//                        return writeErrorResponse(
-//                                exchange,
-//                                HttpStatus.PRECONDITION_REQUIRED,
-//                                ErrorCode.ONBOARDING_REQUIRED,
-//                                "Your profile is incomplete. Please satisfy onboarding requirements first."
-//                        );
-//                    }
-//                    return writeErrorResponse(
-//                            exchange,
-//                            HttpStatus.FORBIDDEN,
-//                            ErrorCode.FORBIDDEN,
-//                            "Forbidden: Insufficient permissions for this resource."
-//                    );
-//                })
-//                // If anonymous (unauthenticated) reached here, it's a 403
-//                .switchIfEmpty(
-//                     writeErrorResponse(
-//                            exchange,
-//                            HttpStatus.FORBIDDEN,
-//                            ErrorCode.FORBIDDEN,
-//                            "Forbidden: Authentication required."
-//                    ));
-//    }
 
     /**
      * Sets headers, creates the custom DTO, writes JSON to the response body, and completes the Mono.

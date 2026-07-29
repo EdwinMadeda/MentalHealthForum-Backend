@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdenti
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.timezone.TimezoneDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
 import lombok.*;
 
@@ -46,6 +47,7 @@ public class UserResponse {
     private Instant lastActiveAt;
     private Instant lastPostedAt;
     private Instant lastLoginAt;
+    private AccountStatus accountStatus;
     private Boolean isActive;
 
     // --- Cached Keycloak Data (UI Context) ---

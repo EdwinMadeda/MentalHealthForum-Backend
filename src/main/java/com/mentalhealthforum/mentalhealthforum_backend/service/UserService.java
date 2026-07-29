@@ -68,10 +68,14 @@ public interface UserService {
     Mono<Void> resetPassword(String userId, ResetPasswordRequest resetPasswordRequest);
 
     /**
-     * Deletes a user.
-     * Error (UserDoesNotExistException) is signaled via Mono.error().
-     * @param userId The ID of the user to delete.
-     * @return Mono<Void> signaling completion.
+     * Marks a user for soft deletion (sets account_status = PENDING_DELETION).
+     * User can reactivate within the retention window.
      */
-    Mono<Void> deleteUser(String userId);
+    Mono<Void> softDeleteUser(String userId);
+
+    /**
+     * Permanently deletes a user from Keycloak and anonymizes local data.
+     * Called by scheduled job after retention window expires.
+     */
+    Mono<Void> permanentlyDeleteUser(String userId);
 }

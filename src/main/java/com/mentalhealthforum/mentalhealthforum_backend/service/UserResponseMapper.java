@@ -5,6 +5,7 @@
 
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.timezone.TimezoneDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
@@ -15,7 +16,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class UserResponseMapper {
 
-    private static final boolean ENFORCE_ADMIN_TRANSPARENCY = true;
     private final TimezoneService timezoneService;
 
     public UserResponseMapper(TimezoneService timezoneService) {
@@ -58,9 +58,15 @@ public class UserResponseMapper {
         response.setPendingEmail(null);
 
         // Admin transparency: viewer or target is admin/moderator show all extended fields
-        if(ENFORCE_ADMIN_TRANSPARENCY && isAdminOrModerator(targetUser, viewerContext)){
+        if(AppConstants.ENFORCE_ADMIN_TRANSPARENCY && isAdminOrModerator(targetUser, viewerContext)){
             setExtendedFields(response, targetUser);
             response.setProfileVisibility(targetUser.getProfileVisibility());
+
+            if(viewerContext.isAdmin()){
+                response.setLastLoginAt(targetUser.getLastLoginAt());
+                response.setAccountStatus(targetUser.getAccountStatus());
+            }
+
             return response;
         }
 
@@ -80,7 +86,7 @@ public class UserResponseMapper {
                 appUser.getReputationScore(),
                 appUser.getLastActiveAt(),
                 appUser.getLastPostedAt(),
-                appUser.getIsActive(),
+                appUser.isActive(),
                 appUser.getRoles(),
                 appUser.getGroups()
         );
@@ -100,6 +106,7 @@ public class UserResponseMapper {
         response.setLanguage(appUser.getLanguage());
         response.setPendingEmail(appUser.getPendingEmail());
         response.setLastLoginAt(appUser.getLastLoginAt());
+        response.setAccountStatus(appUser.getAccountStatus());
     }
 
     private void setExtendedFields(UserResponse response, AppUserEntity appUser) {

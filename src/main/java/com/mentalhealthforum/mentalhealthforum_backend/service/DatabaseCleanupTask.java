@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,6 +20,7 @@ public class DatabaseCleanupTask {
     private final CategoryService categoryService;
     private final ThreadRepository threadRepository;
     private final UserConnectRepository userConnectRepository;
+    private final AccountPurgeSchedulerService accountPurgeSchedulerService;
 
     public DatabaseCleanupTask(
             OtpCredentialRepository otpCredentialRepository,
@@ -26,13 +28,15 @@ public class DatabaseCleanupTask {
             PendingUserRepository pendingUserRepository,
             CategoryService categoryService,
             ThreadRepository threadRepository,
-            UserConnectRepository userConnectRepository) {
+            UserConnectRepository userConnectRepository,
+            AccountPurgeSchedulerService accountPurgeSchedulerService) {
         this.otpCredentialRepository = otpCredentialRepository;
         this.verificationTokenRepository = verificationTokenRepository;
         this.pendingUserRepository = pendingUserRepository;
         this.categoryService = categoryService;
         this.threadRepository = threadRepository;
         this.userConnectRepository = userConnectRepository;
+        this.accountPurgeSchedulerService = accountPurgeSchedulerService;
     }
 
     // Runs at 3:00 AM every day
@@ -104,5 +108,18 @@ public class DatabaseCleanupTask {
                         error -> log.error("Error cleaning up declined connections: {}", error.getMessage())
                 );
     }
+
+    // Runs daily at midnight
+    @Scheduled(cron = "0 0 0 * * *")
+    public void purgeExpiredAccounts(){
+        log.info("Starting scheduled purge of expired accounts");
+
+        accountPurgeSchedulerService.purgeExpiredAccounts()
+                .doOnSuccess(count -> log.info("Scheduled purge completed. Processed {} accounts.", count))
+                .doOnError(e -> log.error("Scheduled purge failed: {}", e.getMessage(), e))
+                .subscribe(); // Fire and forget
+
+    }
+
 
 }

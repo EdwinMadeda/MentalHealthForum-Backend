@@ -46,8 +46,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
     @Modifying
     @Query("""
         UPDATE app_users
-        SET email = :email,
-            WHERE keycloak_id = :keycloakId
+        SET email = :email
+        WHERE keycloak_id = :keycloakId
     """)
    Mono<Void> updateLocalEmail(UUID keycloakId, String email);
 
@@ -56,7 +56,10 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
     @Query("""
             SELECT u.*
             FROM app_users u
-            WHERE (:isActive IS NULL OR u.is_active = :isActive)
+            WHERE (:isActive IS NULL OR
+                (:isActive = true AND u.account_status = 'ACTIVE') OR
+                (:isActive = false AND u.account_status != 'ACTIVE')
+                )
               AND (:role IS NULL OR :role = ANY(u.roles))
               AND (:groups IS NULL OR u.groups && :groups)
            
@@ -146,7 +149,10 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
 
     @Query("""
             SELECT COUNT(*) FROM app_users u
-            WHERE (:isActive IS NULL OR u.is_active = :isActive)
+            WHERE (:isActive IS NULL OR
+                (:isActive = true AND u.account_status = 'ACTIVE') OR
+                (:isActive = false AND u.account_status != 'ACTIVE')
+                )
               AND (:role IS NULL OR :role = ANY(u.roles))
               AND (:groups IS NULL OR u.groups && :groups)
 
@@ -196,9 +202,10 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
         UPDATE app_users
         SET
             last_login_at = :timestamp,
-            last_active_at = :timestamp, last_active_updated_at = :timestamp,
-            is_active = true
+            last_active_at = :timestamp,
+            last_active_updated_at = :timestamp
         WHERE keycloak_id = :keycloakId
+        AND account_status IN ('ACTIVE')
     """)
     Mono<Integer> recordLoginActivity(
             @Param("keycloakId") UUID keycloakId,
@@ -213,6 +220,7 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
         UPDATE app_users
         SET last_active_at = :timestamp, last_active_updated_at = :timestamp
         WHERE keycloak_id = :keycloakId
+        AND account_status = 'ACTIVE'
     """)
     Mono<Integer> updateLastActive(
             @Param("keycloakId") UUID keycloakId,
@@ -220,17 +228,41 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
     );
 
     /**
-     * Activates a user account (sets is_active = true).
-     * Called on successful login to reactivate accounts.
+     * Reactivates a user account.
+     * Called when a user cancels their pending deletion.
      * */
-    @Query("UPDATE app_users SET is_active = true WHERE keycloak_id = :keycloakId")
-    Mono<Integer> activateUser(@Param("keycloakId") UUID keycloakId);
+    @Query("""
+        UPDATE app_users
+        SET
+            account_status = 'ACTIVE',
+            deletion_requested_at = null,
+            deletion_scheduled_at = null
+        WHERE keycloak_id = :keycloakId
+    """)
+    Mono<Integer> reactivateUser(@Param("keycloakId") UUID keycloakId);
 
     /**
-     * Deactivates a user account (sets is_active = true).
+     * Deactivates a user account.
      * Called when a user deletes their account or admin disables them.
      * */
-    @Query("UPDATE app_users SET is_active = false WHERE keycloak_id = :keycloakId")
-    Mono<Integer> deactivateUser(@Param("keycloakId") UUID keycloakId);
+    @Query("""
+        UPDATE app_users
+        SET
+            account_status = 'PENDING_DELETION',
+            deletion_requested_at = :requestedAt,
+            deletion_scheduled_at = :scheduledAt
+        WHERE keycloak_id = :keycloakId
+    """)
+    Mono<Integer> deactivateUser(
+            @Param("keycloakId") UUID keycloakId,
+            @Param("requestedAt") Instant requestedAt,
+            @Param("scheduledAt") Instant scheduledAt
+    );
 
+    @Query("""
+        SELECT * FROM app_users
+        WHERE account_status = 'PENDING_DELETION'
+            AND deletion_scheduled_at < :now
+    """)
+    Flux<AppUserEntity> findPendingDeletionAccounts(@Param("now") Instant now);
 }

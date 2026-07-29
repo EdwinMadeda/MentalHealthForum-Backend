@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.config;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.JwtUtils;
@@ -22,18 +23,16 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants.PUBLIC_PATHS;
+
 @Component
 @Order(3) // After authentication filter
 public class ActivityTrackingFilter implements WebFilter {
 
     private static final Logger log = LoggerFactory.getLogger(ActivityTrackingFilter.class);
 
-    // Rate limit: Update at most once every 5 minutes
-    private static final Duration UPDATE_THRESHOLD = Duration.ofMinutes(5);
-
-    private static final List<String> PUBLIC_PATHS = Arrays.stream(SecurityConstants.AUTH_WHITELIST)
-            .map(pattern -> pattern.replace("/**", "")) // Convert /** to prefix match
-            .toList();
+    // Rate limit: Update at most once for every activity update threshold
+    private static final Duration UPDATE_THRESHOLD = AppConstants.ACTIVITY_UPDATE_THRESHOLD;
 
     private final AppUserRepository appUserRepository;
     private final JwtUtils jwtUtils;

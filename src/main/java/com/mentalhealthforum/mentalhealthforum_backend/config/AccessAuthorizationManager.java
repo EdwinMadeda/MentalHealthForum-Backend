@@ -1,9 +1,12 @@
 package com.mentalhealthforum.mentalhealthforum_backend.config;
 
 
-import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
-import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
+import com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
+import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.ReactiveAuthorizationManager;
 import org.springframework.security.core.Authentication;
@@ -12,6 +15,8 @@ import org.springframework.security.web.server.authorization.AuthorizationContex
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.nio.file.AccessDeniedException;
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 
@@ -19,9 +24,11 @@ import java.util.UUID;
 public class AccessAuthorizationManager implements ReactiveAuthorizationManager<AuthorizationContext> {
 
     private final UserModerationService userModerationService;
+    private final AppUserRepository appUserRepository;
 
-    public AccessAuthorizationManager(UserModerationService userModerationService) {
+    public AccessAuthorizationManager(UserModerationService userModerationService, AppUserRepository appUserRepository) {
         this.userModerationService = userModerationService;
+        this.appUserRepository = appUserRepository;
     }
 
     @Override
@@ -35,28 +42,44 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
                     .defaultIfEmpty(new AuthorizationDecision(true));
         }
 
+        // Bypass account status check for reactivation endpoint
+        if(isReactivationPath(path)){
+            return authentication.map(auth -> new AuthorizationDecision(true))
+                    .defaultIfEmpty(new AuthorizationDecision(false));
+        }
+
         return authentication
                 .cast(JwtAuthenticationToken.class)
                 .flatMap(jwtAuthenticationToken -> {
                     UUID userId = UUID.fromString(jwtAuthenticationToken.getToken().getSubject());// Get user ID from token
 
-                    // check ban first (most severe)
-                    return userModerationService.isUserBanned(userId)
-                            .flatMap(isBanned -> {
-                                if(isBanned){
+                    // Check account status first
+                    return appUserRepository.findAppUserByKeycloakId(userId.toString())
+                            .flatMap(appUser -> {
+                                if(appUser.isPendingDeletion() || appUser.isPurged()){
                                     return Mono.just(new AuthorizationDecision(false));
                                 }
 
-                                // Check suspension
-                                return userModerationService.isUserSuspended(userId)
-                                        .flatMap(isRestricted -> {
-                                            if(isRestricted){
+                                // check ban next (most severe)
+                                return userModerationService.isUserBanned(userId)
+                                        .flatMap(isBanned -> {
+                                            if(isBanned){
                                                 return Mono.just(new AuthorizationDecision(false));
                                             }
 
-                                            // Proceed with existing onboarding/role checks
-                                            return checkOnboardingAndRoles(jwtAuthenticationToken, path);
+                                            // Check suspension
+                                            return userModerationService.isUserSuspended(userId)
+                                                    .flatMap(isRestricted -> {
+                                                        if(isRestricted){
+                                                            return Mono.just(new AuthorizationDecision(false));
+                                                        }
+
+                                                        // Proceed with accountStatus/onboarding/role checks
+                                                        return checkOnboardingAndRoles(jwtAuthenticationToken, path);
+
+                                                    });
                                         });
+
                             });
 
                 })
@@ -64,23 +87,11 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
     }
 
     private Boolean isPublicPath(String path){
-        String[] publicPaths = {
-                "/api/auth",
-                "/api/users/register",
-                "/api/users/reset-password",
-                "/api/users/verify",
-                "/api/timezones",
-                "/swagger-ui",
-                "/v3/api-docs",
-                "/actuator"
-        };
+        return SecurityConstants.PUBLIC_PATHS.stream().anyMatch(path::startsWith);
+    }
 
-        for(String publicPath: publicPaths){
-            if(path.startsWith(publicPath)){
-                return true;
-            }
-        }
-        return false;
+    private Boolean isReactivationPath(String  path){
+        return path.matches(SecurityConstants.REACTIVATION_PATH_REGEX);
     }
 
     private Mono<AuthorizationDecision> checkOnboardingAndRoles(JwtAuthenticationToken jwtAuthenticationToken, String path) {
@@ -135,6 +146,8 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
                 .anyMatch(grantedAuthority ->
                         roleSet.contains( grantedAuthority.getAuthority()));
     }
+
+
 
 
 }

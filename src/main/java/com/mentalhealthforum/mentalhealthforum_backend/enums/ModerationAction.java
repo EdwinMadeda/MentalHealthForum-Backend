@@ -81,6 +81,12 @@ public enum ModerationAction {
     USER_UNBANNED("Unban user", GroupPath.ADMINISTRATORS),
     USER_REPUTATION_ADJUSTED("Adjust reputation", GroupPath.ADMINISTRATORS),
 
+    // User management
+    USER_VIEW_INACTIVE("View inactive users", GroupPath.ADMINISTRATORS),
+    USER_VIEW_DELETED("View deleted users", GroupPath.ADMINISTRATORS),
+    USER_PURGE("Purge user data", GroupPath.ADMINISTRATORS),
+    USER_REACTIVATE("Reactivate User", GroupPath.ADMINISTRATORS),
+
     // Role/permission changes
     ROLE_GRANTED("Grant role", GroupPath.ADMINISTRATORS),
     ROLE_REVOKED("Revoke role", GroupPath.ADMINISTRATORS),

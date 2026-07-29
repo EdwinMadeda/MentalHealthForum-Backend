@@ -1,8 +1,10 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.notification.NotificationPreferences;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.SupportRole;
 import com.mentalhealthforum.mentalhealthforum_backend.service.PrivilegedUser;
@@ -139,16 +141,41 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     private Instant lastActiveAt; // TODO: Implement activity tracking to update this timestamp
 
     @Column("last_active_updated_at")
-    private Instant LastActiveUpdatedAt;
+    private Instant lastActiveUpdatedAt;
 
     @Column("last_posted_at")
     private Instant lastPostedAt;
 
-    @Column("is_active")
-    private Boolean isActive = true;
+    /**
+     * Current status of the user account.
+     * - ACTIVE: Normal active account
+     * - PENDING_DELETION: User requested deletion, waiting for retention window
+     * - PURGED: Account permanently deleted (only anonymized data remains)
+     */
+    @Column("account_status")
+    private AccountStatus accountStatus = AccountStatus.ACTIVE;
 
-    @Column("account_deletion_requested_at")
-    private Instant accountDeletionRequestedAt;
+    /**
+     * Timestamp when user requested account deletion
+     * Null if account is active or purged
+     * */
+    @Column("deletion_requested_at")
+    private Instant deletionRequestedAt;
+
+    /**
+     * Timestamp when the account is scheduled for hard deletion
+     * Calculated as deletionRequestedAt + retentionWindow
+     * Null if account is active or purged
+     * */
+    @Column("deletion_scheduled_at")
+    private Instant deletionScheduledAt;
+
+    /**
+     * Timestamp when account was actually purged
+     * Null if account is active or pending deletion
+     * */
+    @Column("purged_at")
+    private Instant purgedAt;
 
     // --- Transient / helper fields ---
     @Transient
@@ -211,14 +238,16 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
 
     // -- ProfileVisibility getter/setter
     public ProfileVisibility getProfileVisibility(){
-        if(this.isModeratorOrAdmin()){
+        // Only force MEMBERS_ONLY if admin transparency is not enforced
+        if(!AppConstants.ENFORCE_ADMIN_TRANSPARENCY && this.isModeratorOrAdmin()){
             return ProfileVisibility.MEMBERS_ONLY;
         }
         return this.profileVisibility;
     }
 
     public void setProfileVisibility(ProfileVisibility profileVisibility){
-        if(this.isModeratorOrAdmin()){
+        // Only restrict if admin transparency is NOT enforced
+        if(!AppConstants.ENFORCE_ADMIN_TRANSPARENCY && this.isModeratorOrAdmin()){
             this.profileVisibility = ProfileVisibility.MEMBERS_ONLY;
         }
         else {
@@ -287,6 +316,46 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
 
         // Fallback to initials
         return this.getInitials();
+    }
+
+    public boolean isActive(){
+        return AccountStatus.ACTIVE.equals(accountStatus);
+    }
+
+    public boolean isPendingDeletion(){
+        return AccountStatus.PENDING_DELETION.equals(accountStatus);
+    }
+
+    public boolean isPurged(){
+        return AccountStatus.PURGED.equals(accountStatus);
+    }
+
+    public boolean isBanned() { return AccountStatus.BANNED.equals(accountStatus); }
+
+    public boolean isRestricted() {return isPendingDeletion() || isPurged() || isBanned(); }
+
+    public void anonymize() {
+        this.email = "deleted_" + this.keycloakId + "@deleted.local";
+        this.username = "deleted_" + this.keycloakId;
+        this.firstName = "Deleted";
+        this.lastName = "User";
+        this.displayName = "Deleted_User";
+        this.avatarUrl = null;
+        this.bio = null;
+        this.timezone = null;
+        this.language = null;
+        this.lastLoginAt = null;
+        this.lastActiveAt = null;
+        this.lastActiveUpdatedAt = null;
+        this.isEnabled = false;
+        this.accountStatus = AccountStatus.PURGED;
+        this.purgedAt = Instant.now();
+
+        // Keep: keycloakId, dateJoined, postsCount, reputationScore, roles, groups
+        // These are essential for community integrity
+
+        // Optional: Clear sensitive settings
+        this.notificationPreferencesJson = null;
     }
 
 

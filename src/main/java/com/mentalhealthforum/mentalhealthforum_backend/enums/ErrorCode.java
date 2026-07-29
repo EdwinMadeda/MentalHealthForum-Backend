@@ -67,6 +67,9 @@ public enum ErrorCode {
     // Authorization Failure (403)
     FORBIDDEN(HttpStatus.FORBIDDEN, "Access denied. You do not have sufficient permissions for this resource."),
 
+    ACCOUNT_PENDING_DELETION(HttpStatus.FORBIDDEN, "Account deletion pending."),
+    ACCOUNT_PURGED(HttpStatus.FORBIDDEN, "Account has been deleted."),
+
     // --- Action Required Error ---
     USER_ACTION_REQUIRED(HttpStatus.FORBIDDEN, "User authentication succeeded but requires further action."),
 

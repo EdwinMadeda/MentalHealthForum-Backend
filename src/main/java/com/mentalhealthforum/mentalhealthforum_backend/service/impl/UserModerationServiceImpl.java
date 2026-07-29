@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.moderationEnhancedActionsAndWorkflows.*;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ModerationAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.RestrictionType;
@@ -308,7 +309,7 @@ public class UserModerationServiceImpl implements UserModerationService {
                     // Also deactivate user account
                     return appUserRepository.findAppUserByKeycloakId(userId.toString())
                             .flatMap(appUser -> {
-                                appUser.setIsActive(false);
+                                appUser.setAccountStatus(AccountStatus.BANNED);
                                 return appUserRepository.save(appUser);
                             })
                             .then(userRestrictionRepository.save(restriction))
@@ -479,7 +480,7 @@ public class UserModerationServiceImpl implements UserModerationService {
     private Mono<Void> reactivateUserAccount(UUID userId){
         return appUserRepository.findAppUserByKeycloakId(userId.toString())
                 .flatMap(appUser -> {
-                    appUser.setIsActive(true);
+                    appUser.setAccountStatus(AccountStatus.ACTIVE);
                     return appUserRepository.save(appUser);
                 })
                 .then();

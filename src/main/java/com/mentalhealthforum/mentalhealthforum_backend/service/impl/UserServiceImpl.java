@@ -24,6 +24,7 @@ import reactor.core.scheduler.Schedulers;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.setIfChangedStrict;
 
@@ -40,6 +41,7 @@ public class UserServiceImpl implements UserService {
     private final VerificationTokenService tokenWorker;
     private final VerificationService verificationService;
     private final AdminInvitationService adminInvitationService;
+    private final UserActivityService userActivityService;
     private final OtpWorker otpWorker;
     private final NovuService novuService;
 
@@ -52,7 +54,7 @@ public class UserServiceImpl implements UserService {
             VerificationTokenRepository verificationTokenRepository,
             VerificationTokenService tokenWorker,
             VerificationService verificationService,
-            AdminInvitationService adminInvitationService, AdminInvitationRepository adminInvitationRepository,
+            AdminInvitationService adminInvitationService, AdminInvitationRepository adminInvitationRepository, UserActivityService userActivityService,
             OtpWorker otpWorker,
             NovuService novuService) {
         this.adminManager = adminManager;
@@ -62,6 +64,7 @@ public class UserServiceImpl implements UserService {
         this.tokenWorker = tokenWorker;
         this.verificationService = verificationService;
         this.adminInvitationService = adminInvitationService;
+        this.userActivityService = userActivityService;
         this.otpWorker = otpWorker;
         this.novuService = novuService;
     }
@@ -216,7 +219,22 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Mono<Void> deleteUser(String userId) {
+    public Mono<Void> softDeleteUser(String userId){
+        return Mono.fromCallable(() -> {
+            // Verify user exists in Keycloak
+            adminManager.findUserByUserId(userId)
+                    .orElseThrow(UserDoesNotExistException::new);
+                return UUID.fromString(userId);
+            })
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(userActivityService::deactivateUser)
+                .doOnSuccess(v -> log.info("User {} marked for soft deletion", userId))
+                .doOnError(e -> log.error("Failed to mark user {} for deletion: {}", userId, e.getMessage()));
+    }
+
+
+    @Override
+    public Mono<Void> permanentlyDeleteUser(String userId) {
         return Mono.fromRunnable(() -> {
                     // Blocking lookup
                     adminManager.findUserByUserId(userId)

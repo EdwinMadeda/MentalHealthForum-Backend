@@ -9,7 +9,7 @@ public interface UserActivityService {
 
     Mono<Void> trackActivity(UUID userId);
 
-    Mono<Void> activateUser(UUID userId);
+    Mono<Void> reactivateUser(UUID userId);
 
     Mono<Void> deactivateUser(UUID userId);
 }
