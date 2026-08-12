@@ -32,6 +32,7 @@ public class UserResponse {
     // -- Transit Informative Data --
     private String pendingEmail;
     private String initials;
+    private Boolean isOnboarding;
 
     // --- Enhanced Profile Data ---
     private String displayName;

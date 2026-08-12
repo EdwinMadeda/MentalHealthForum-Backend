@@ -144,10 +144,10 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
                                                         }
 
                                                         // Check onboarding
-                                                        boolean isOnboarding = jwtAuthenticationToken.getAuthorities().stream()
-                                                                .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ONBOARDING"));
+//                                                        boolean isOnboarding = jwtAuthenticationToken.getAuthorities().stream()
+//                                                                .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ONBOARDING"));
 
-                                                        if (isOnboarding) {
+                                                        if (appUser.isOnboarding()) {
                                                             return writeErrorResponse(
                                                                     exchange,
                                                                     HttpStatus.PRECONDITION_REQUIRED,

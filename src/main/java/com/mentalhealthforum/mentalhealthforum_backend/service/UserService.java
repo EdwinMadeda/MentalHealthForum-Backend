@@ -21,7 +21,7 @@ public interface UserService {
      * @param registerUserRequest The registration details.
      * @return Mono of the created user's ID.
      */
-    Mono<String> createUserInStaging(RegisterUserRequest registerUserRequest);
+    Mono<RegistrationResult> createUserInStaging(RegisterUserRequest registerUserRequest);
 
     Mono<KeycloakUserDto> createUserInKeycloak(PendingUserEntity pendingUser, String groupPath);
 

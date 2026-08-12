@@ -6,7 +6,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuPreferenceRe
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuSubscriberRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuTriggerRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.NovuWorkflow;
-import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.service.NovuPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.service.NovuService;
 import org.slf4j.Logger;
@@ -83,18 +82,7 @@ public class NovuServiceImpl implements NovuService {
                 });
     }
 
-    public Mono<Void> upsertSubscriber(AppUserEntity appUser){
-        // Create the record
-        var request = new NovuSubscriberRequest(
-                appUser.getKeycloakId().toString(),
-                appUser.getFirstName(),
-                appUser.getLastName(),
-                appUser.getEmail(),
-                appUser.getAvatarUrl(),
-                appUser.getLanguage(),
-                null // Meta-data can be included here if needed
-        );
-
+    public Mono<Void> upsertSubscriber(NovuSubscriberRequest request){
         return webClient.post()
                 .uri("/subscribers")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -105,8 +93,24 @@ public class NovuServiceImpl implements NovuService {
                                 .flatMap(e -> Mono.error(new RuntimeException("Novu sync Error: " + e)))
                 )
                 .toBodilessEntity()
-                .doOnSuccess(v -> log.info("Novu subscriber Synced: {}", appUser.getKeycloakId()))
+                .doOnSuccess(v -> log.info("Novu subscriber Synced: {}", request.subscriberId()))
                 .doOnError(e -> log.error("Novu Sync Failed: {}", e.getMessage()))
+                .onErrorResume(e -> Mono.empty()) // Essential Don't break the user flow
+                .then();
+    }
+
+    @Override
+    public Mono<Void> deleteSubscriber(String subscriberId){
+        return webClient.delete()
+                .uri("/subscribers/{subscriberId}", subscriberId)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, response ->
+                        response.bodyToMono(String.class)
+                                .flatMap(e -> Mono.error(new RuntimeException("Novu delete error: " + e)))
+                )
+                .toBodilessEntity()
+                .doOnSuccess(v -> log.info("Novu subscriber deleted: {}", subscriberId))
+                .doOnError(e -> log.error("Failed to delete Novu subscriber {}: {}", subscriberId, e.getMessage()))
                 .onErrorResume(e -> Mono.empty()) // Essential Don't break the user flow
                 .then();
     }

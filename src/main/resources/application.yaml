@@ -25,6 +25,14 @@ spring:
     database: forum
     username: forum_user
     password: forum_password
+    pool:
+      enabled: true
+      initial-size: 1
+      max-size: 10
+      # These are the key settings
+      validation-depth: LOCAL
+      max-life-time: 300000
+      validation-query: SELECT 1
 #    url: r2dbc:postgresql://localhost:5434/forum
 
   sql:
@@ -40,10 +48,9 @@ keycloak:
     secret: ${MHF_BACKEND_SECRET:2uVmExC9Jm5R3whLLicrICsWuY6n4vMq}
 
 novu:
-  api-key: ${NOVU_API_KEY:90dbbf2702eb22457a356c2c2d14b52c}
+  api-key: ${NOVU_API_KEY:6937415de5134498feb4f78593701e23}
   base-url: http://localhost:3000/v1
-  app-identifier: YIZ_AuFIOVH7
-
+  app-identifier: 7KmbzdsSYZ_6
 frontend:
   base-url: http://localhost:3001
 

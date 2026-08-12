@@ -1,6 +1,8 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuSubscriberData;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuSubscriberRequest;
 
 import java.time.Instant;
 
@@ -34,5 +36,21 @@ public record KeycloakUserDto(
      */
     public Instant getCreatedInstant() {
         return  (createdTimestampMs == null)? null : Instant.ofEpochMilli(createdTimestampMs);
+    }
+
+    /**
+     * Converts this KeycloakUserDto to a Novu subscriber request.
+     * Uses the Keycloak user ID as the subscriber ID.
+     */
+    public NovuSubscriberRequest toNovuSubscriberRequest() {
+        return new NovuSubscriberRequest(
+                this.userId,
+                this.firstName,
+                this.lastName,
+                this.email,
+                null,   // avatarUrl – not available in Keycloak DTO
+                "en",   // language – default
+                NovuSubscriberData.forNewUserInKeycloak()
+        );
     }
 }

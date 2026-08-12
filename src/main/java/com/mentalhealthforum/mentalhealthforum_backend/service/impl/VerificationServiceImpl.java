@@ -1,6 +1,8 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.FrontendProperties;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.verification.VerificationDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AppUserVerificationPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.InvitationLinkRenewalPayload;
@@ -39,6 +41,7 @@ public class VerificationServiceImpl implements VerificationService {
     private final PendingUserRepository pendingUserRepository;
     private final AdminInvitationRepository adminInvitationRepository;
     private final FrontendProperties frontendProperties;
+    private final KeycloakUserDtoMapper keycloakUserDtoMapper;
     private final UserService userService;
     private final AppUserService appUserService;
     private final AdminInvitationService adminInvitationService;
@@ -50,6 +53,7 @@ public class VerificationServiceImpl implements VerificationService {
             PendingUserRepository pendingUserRepository,
             AdminInvitationRepository adminInvitationRepository,
             FrontendProperties frontendProperties,
+            KeycloakUserDtoMapper keycloakUserDtoMapper,
             @Lazy UserService userService,
             AppUserService appUserService,
             AdminInvitationService adminInvitationService, NovuService novuService) {
@@ -58,6 +62,7 @@ public class VerificationServiceImpl implements VerificationService {
         this.pendingUserRepository = pendingUserRepository;
         this.adminInvitationRepository = adminInvitationRepository;
         this.frontendProperties = frontendProperties;
+        this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.userService = userService;
         this.appUserService = appUserService;
         this.adminInvitationService = adminInvitationService;
@@ -197,8 +202,7 @@ public class VerificationServiceImpl implements VerificationService {
     }
 
     private record FinalizeExistingAppUserContext(
-            String userId,
-            String username,
+            UserRepresentation userRep,
             String targetEmail
     ){}
 
@@ -221,22 +225,25 @@ public class VerificationServiceImpl implements VerificationService {
                 adminManager.verifyUserEmail(verificationToken.getEmail());
                 targetEmail = verificationToken.getEmail();
             }
-            return new FinalizeExistingAppUserContext(userRep.getId(), userRep.getUsername(), targetEmail);
+            return new FinalizeExistingAppUserContext(userRep, targetEmail);
         })
                 .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(ctx ->
-                        appUserService.updateLocalEmail(ctx.userId, ctx.targetEmail)
-                                .then(tokenWorker.removeToken(verificationToken.getId()))
-                                .thenReturn(new VerificationDto(
-                                        VerificationType.APP_USER,
-                                        null, // No specific group path needed for existing users
-                                        new VerificationDto.VerificationMetadata(
-                                                ctx.userId,
-                                                ctx.username,
-                                                ctx.targetEmail
-                                        )
-                                ))
-                );
+                .flatMap(ctx -> {
+                    KeycloakUserDto updatedUserDto = keycloakUserDtoMapper.mapToKeycloakUserDto(ctx.userRep);
+
+                    return novuService.upsertSubscriber(updatedUserDto.toNovuSubscriberRequest())
+                            .then(appUserService.updateLocalEmail(ctx.userRep.getId(), ctx.targetEmail))
+                            .then(tokenWorker.removeToken(verificationToken.getId()))
+                            .thenReturn(new VerificationDto(
+                                    VerificationType.APP_USER,
+                                    null, // No specific group path needed for existing users
+                                    new VerificationDto.VerificationMetadata(
+                                            ctx.userRep.getId(),
+                                            ctx.userRep.getUsername(),
+                                            ctx.targetEmail
+                                    )
+                            ));
+                });
     }
 
     private record FinalizeInvitedUserContext(
@@ -275,14 +282,13 @@ public class VerificationServiceImpl implements VerificationService {
                 .flatMap(pendingUser -> {
                     // Delegate the complex Keycloak work back to the UserService
                     return userService.createUserInKeycloak(pendingUser, GroupPath.MEMBERS_NEW.getPath())
-                            .flatMap(keycloakUserDto -> appUserService.syncUserViaAdminClient(keycloakUserDto, null))
-                            .flatMap(syncedUser -> pendingUserRepository.delete(pendingUser)
+                            .flatMap(keycloakUserDto -> pendingUserRepository.delete(pendingUser)
                                 .then(tokenWorker.removeToken(verificationToken.getId()))
                                     .thenReturn(new VerificationDto(
                                             SELF_REG,
                                             verificationToken.getGroupPath(),
                                             new VerificationDto.VerificationMetadata(
-                                                  syncedUser.getUserId().toString(),
+                                                  keycloakUserDto.userId(),
                                                   pendingUser.username(),
                                                   verificationToken.getEmail()
                                             )

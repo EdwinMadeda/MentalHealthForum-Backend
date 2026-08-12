@@ -20,11 +20,9 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitatio
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.UserConnectRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.service.AdminInvitationService;
-import com.mentalhealthforum.mentalhealthforum_backend.service.UserResponseMapper;
+import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
-import com.mentalhealthforum.mentalhealthforum_backend.service.KeycloakAdminManager;
+import org.keycloak.representations.idm.UserRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
@@ -47,7 +45,7 @@ public class AppUserServiceImpl implements AppUserService {
 
     private final AppUserRepository appUserRepository;
     private final KeycloakAdminManager adminManager;
-    private final NovuServiceImpl novuServiceImpl;
+    private final NovuService novuService;
     private final UserResponseMapper userResponseMapper;
     private final UserConnectRepository userConnectRepository;
     private final AdminInvitationService adminInvitationService;
@@ -63,7 +61,7 @@ public class AppUserServiceImpl implements AppUserService {
             WebClient.Builder webClientBuilder,
             KeycloakProperties keycloakProperties,
             KeycloakAdminManager adminManager,
-            NovuServiceImpl novuServiceImpl,
+            NovuService novuService,
             UserResponseMapper userResponseMapper,
             UserConnectRepository userConnectRepository,
             AdminInvitationService adminInvitationService,
@@ -71,7 +69,7 @@ public class AppUserServiceImpl implements AppUserService {
             VerificationTokenRepository verificationTokenRepository) {
         this.appUserRepository = appUserRepository;
         this.adminManager = adminManager;
-        this.novuServiceImpl = novuServiceImpl;
+        this.novuService = novuService;
         this.userResponseMapper = userResponseMapper;
         this.userConnectRepository = userConnectRepository;
         this.adminInvitationService = adminInvitationService;
@@ -127,16 +125,6 @@ public class AppUserServiceImpl implements AppUserService {
                                             })
                             ));
                 })
-                .flatMap(appUser -> {
-                    if (appUser.getId() != null) {
-                        novuServiceImpl.upsertSubscriber(appUser)
-                                .subscribeOn(Schedulers.boundedElastic())
-                                .doOnError(e -> log.error("Novu sync failed for user {}", appUser.getKeycloakId()))
-                                .subscribe();
-                    }
-                    return Mono.just(appUser);
-                })
-                .flatMap(appUser -> evaluateOnboardingPolicyCompliance(appUser, viewerContext).thenReturn(appUser))
                 .flatMap(this::enrichWithPendingEmail)
                 .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
@@ -269,12 +257,23 @@ public class AppUserServiceImpl implements AppUserService {
                     localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.timezone(), appUser.timezone(), appUser::setTimezone);
                     localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.profileVisibility(), appUser.getProfileVisibility(), appUser::setProfileVisibility);
 
-                    return localNeedsUpdate ? appUserRepository.save(appUser) : Mono.just(appUser);
+                    return (localNeedsUpdate ? appUserRepository.save(appUser) : Mono.just(appUser))
+                            .flatMap(savedUser -> {
+
+                                boolean novuNeedsUpdate = false;
+                                novuNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.firstName(), appUser.getFirstName(), appUser::setFirstName);
+                                novuNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.lastName(), appUser.getLastName(), appUser::setLastName);
+                                novuNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.avatarUrl(), appUser.getAvatarUrl(), appUser::setAvatarUrl);
+
+                                Mono<Void> novuUpdate = novuNeedsUpdate
+                                        ? novuService.upsertSubscriber(savedUser.toNovuSubscriberRequest())
+                                        : Mono.empty();
+
+                                return novuUpdate
+                                        .thenReturn(savedUser);
+                            });
+
                 })
-                .flatMap(savedUser ->
-                        novuServiceImpl.upsertSubscriber(savedUser)
-                                .then(evaluateOnboardingPolicyCompliance(savedUser, viewerContext))
-                                .thenReturn(savedUser))
                 .flatMap(this::enrichWithPendingEmail)
                 .flatMap(appUser -> enrichSingleUserWithConnectionStatus(appUser, viewerContext));
     }
@@ -309,13 +308,15 @@ public class AppUserServiceImpl implements AppUserService {
         return Mono.just(updateUserProfileRequest);
     }
 
-    private Mono<Void> evaluateOnboardingPolicyCompliance(AppUserEntity appUser, ViewerContext viewerContext) {
+    @Deprecated
+    private Mono<Void> evaluateOnboardingPolicyCompliance(AppUserEntity appUser) {
         return Mono.fromRunnable(() -> {
             String userId = String.valueOf(appUser.getKeycloakId());
-            if (viewerContext.checkOnboardingPolicy(appUser).isSatisfied()) {
-                adminManager.removeInternalRole(userId, InternalRole.ONBOARDING);
-            } else {
+
+            if(appUser.isOnboarding()){
                 adminManager.assignInternalRole(userId, InternalRole.ONBOARDING);
+            } else {
+                adminManager.removeInternalRole(userId, InternalRole.ONBOARDING);
             }
         }).subscribeOn(Schedulers.boundedElastic()).then();
     }

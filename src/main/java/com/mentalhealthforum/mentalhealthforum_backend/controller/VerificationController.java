@@ -1,14 +1,18 @@
 package com.mentalhealthforum.mentalhealthforum_backend.controller;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.verification.RequestNewVerificationLinkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardSuccessResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.verification.VerificationRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.verification.VerificationDto;
+import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.VerificationService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -21,12 +25,19 @@ import java.net.URI;
 
 @RestController
 @RequestMapping("api/auth")
-@RequiredArgsConstructor
 public class VerificationController {
 
     private static final Logger log = LoggerFactory.getLogger(VerificationController.class);
 
     private final VerificationService verificationService;
+    private final JwtClaimsExtractor jwtClaimsExtractor;
+
+    public VerificationController(
+            VerificationService verificationService,
+            JwtClaimsExtractor jwtClaimsExtractor) {
+        this.verificationService = verificationService;
+        this.jwtClaimsExtractor = jwtClaimsExtractor;
+    }
 
     /**
      * Endpoint hit by Next.js frontend when a user clicks the magic link.

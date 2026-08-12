@@ -2,6 +2,9 @@ package com.mentalhealthforum.mentalhealthforum_backend.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuSubscriberData;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuSubscriberRequest;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.onboarding.OnboardingPolicy;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.notification.NotificationPreferences;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
@@ -202,6 +205,17 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
         return "??";
     }
 
+    @Transient
+    public boolean isOnboarding() {
+        OnboardingPolicy.Result result = checkOnboardingPolicy(this);
+        return !result.isSatisfied();
+    }
+
+    @Transient
+    public OnboardingPolicy.Result getOnboardingPolicyResult(){
+        return checkOnboardingPolicy(this);
+    }
+
     // --- Constructors ---
 
     public AppUserEntity() {
@@ -356,6 +370,22 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
 
         // Optional: Clear sensitive settings
         this.notificationPreferencesJson = null;
+    }
+
+    /**
+     * Converts this AppUserEntity to a Novu subscriber request.
+     * Uses the Keycloak user ID as the subscriber ID.
+     */
+    public NovuSubscriberRequest toNovuSubscriberRequest() {
+        return new NovuSubscriberRequest(
+                this.keycloakId.toString(),
+                this.firstName,
+                this.lastName,
+                this.email,
+                this.avatarUrl,
+                this.language != null? this.language : "en",
+                NovuSubscriberData.forAppUser()
+        );
     }
 
 

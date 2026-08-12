@@ -60,18 +60,13 @@ public class OnboardingController {
     }
 
 
-    @PatchMapping("/{userId}/complete")
+    @PatchMapping("/complete")
     public Mono<ResponseEntity<StandardSuccessResponse<UserResponse>>> completeOnboarding(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID userId,
             @Valid @RequestBody UpdateUserProfileRequest updateUserProfileRequest) {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-
-        // --- Authorization check ---
-        if(viewerContext == null || !viewerContext.getUserId().equals(String.valueOf(userId))){
-            throw new InsufficientPermissionException("Forbidden: Cannot update another user's profile.");
-        }
+        String userId = viewerContext.getUserId();
 
         // Try Keycloak update first
         return Mono.just(updateUserProfileRequest)
@@ -85,21 +80,34 @@ public class OnboardingController {
                 })
                 .flatMap(profileUpdateResult -> {
                     // Keycloak succeeded, now try local DB
-                    return appUserService.updateLocalProfile(String.valueOf(userId), viewerContext, updateUserProfileRequest);
-                })
-                .map(updatedUser -> {
+                    return appUserService.updateLocalProfile(String.valueOf(userId), viewerContext, updateUserProfileRequest)
+                            .map(updatedUser -> {
 
-                    String message = "Onboarding completed successfully.";
-                    if (updatedUser.getPendingEmail() != null) {
-                        message = String.format(
-                                "Onboarding complete. A verification link has been sent to %s. " +
-                                        "Your email will update once verified.",
-                                updateUserProfileRequest.email().toLowerCase()
-                        );
-                    }
+                                String message;
+                                if(profileUpdateResult.pendingEmail() != null){
+                                    if(profileUpdateResult.emailSent()){
+                                        message = String.format(
+                                                "Onboarding complete. A verification link has been sent to %s. " +
+                                                 "Your email will update once verified.",
+                                                updateUserProfileRequest.email().toLowerCase()
+                                        );
+                                    }
+                                    else {
+                                        message = String.format(
+                                                "Onboarding complete, but we're having trouble sending the verification link to %s. " +
+                                                "You can request a new link from your profile settings.",
+                                                updateUserProfileRequest.email().toLowerCase()
+                                        );
+                                    }
+                                }
+                                else {
+                                    message = "Onboarding completed successfully.";
+                                }
 
-                    return ResponseEntity.ok(new StandardSuccessResponse<>(message, updatedUser));
+                                return ResponseEntity.ok(new StandardSuccessResponse<>(message, updatedUser));
+                            });
                 });
+
     }
 
 }

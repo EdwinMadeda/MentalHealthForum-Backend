@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body{font-family:Arial,sans-serif;background:#fdf6f0;margin:0;padding:0}
+    .container{max-width:600px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 12px rgba(230,126,34,0.12);overflow:hidden}
+    .header{background:#E67E22;padding:30px 40px;text-align:center}
+    .header h1{color:#fff;margin:0;font-size:24px;font-weight:600}
+    .header p{color:#FDEBD0;margin:5px 0 0;font-size:14px}
+    .body{padding:40px;color:#2C3E50}
+    .body h2{margin-top:0;font-size:20px}
+    .body p{line-height:1.6;color:#4a5568}
+    .btn{display:inline-block;background:#E67E22;color:#fff;padding:12px 32px;text-decoration:none;border-radius:6px;font-weight:600;margin:20px 0}
+    .btn:hover{background:#D35400}
+    .footer{background:#fdf6f0;padding:20px 40px;text-align:center;border-top:1px solid #f5e6d8;font-size:12px;color:#6c757d}
+    .footer a{color:#E67E22;text-decoration:none}
+    .fallback-text{font-size:14px;color:#6c757d}
+    .fallback-url{font-size:12px;color:#6c757d;word-break:break-all}
+    .signoff{margin-top:30px}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>🌿 Mental Health Forum</h1>
+    <p>Support • Connect • Grow</p>
+  </div>
+  <div class="body">
+    <h2>Welcome, {{firstName}}! 👋</h2>
+    <p>Thank you for joining our community. We're excited to have you on this journey of support and growth.</p>
+    <p>Please verify your email address to get started:</p>
+    <div style="text-align:center;">
+      <a href="{{verificationLink}}" class="btn">Verify Email</a>
+    </div>
+    <p class="fallback-text">If the button doesn't work, copy and paste this link into your browser:</p>
+    <p class="fallback-url">{{verificationLink}}</p>
+    <p class="signoff">With care,<br><strong>The Mental Health Forum Team</strong></p>
+  </div>
+  <div class="footer">
+    <p>You received this email because you registered on Mental Health Forum. If you didn't sign up, please ignore this email.</p>
+  </div>
+</div>
+</body>
+</html>

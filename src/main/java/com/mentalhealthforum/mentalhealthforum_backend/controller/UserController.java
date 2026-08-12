@@ -2,10 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller;
 
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.RegisterUserRequest;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.ResetPasswordRequest;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InsufficientPermissionException;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
@@ -53,14 +50,17 @@ public class UserController {
     // -------------------------------------------------------------------------
 
     @PostMapping("/register")
-        public Mono<ResponseEntity<StandardSuccessResponse<String>>> registerUser(
+        public Mono<ResponseEntity<StandardSuccessResponse<RegistrationResult>>> registerUser(
             @Valid @RequestBody RegisterUserRequest registerUserRequest) {
 
         return userService.createUserInStaging(registerUserRequest)
-                .map(email -> {
-                    String message = "Registration request accepted. Please check your email to complete activation.";
+                .map(result -> {
+                    String message = result.emailSent()
+                            ? "Registration request accepted. Please check your email to complete activation."
+                            : "Registration accepted, but we're having trouble sending the verification email. You can request a new link from the login page.";
+
                     return ResponseEntity.accepted().body(
-                            new StandardSuccessResponse<>(message, email)
+                            new StandardSuccessResponse<>(message, result)
                     );
                 });
     }
@@ -110,53 +110,56 @@ public class UserController {
                 });
     }
 
-    @PatchMapping("/{userId}")
+    @PatchMapping("/profile")
     public Mono<ResponseEntity<StandardSuccessResponse<UserResponse>>> updateUserProfile(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID userId,
             @Valid @RequestBody UpdateUserProfileRequest updateUserProfileRequest) {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-
-        // --- Authorization check ---
-        if(viewerContext == null || !viewerContext.getUserId().equals(String.valueOf(userId))){
-            throw new InsufficientPermissionException("Forbidden: Cannot update another user's profile.");
-        }
+        String userId = viewerContext.getUserId();
 
         // Try Keycloak update first
             return userService.updateUserProfile(String.valueOf(userId), updateUserProfileRequest)
                 .flatMap(profileUpdateResult -> {
                     // Keycloak succeeded, now try local DB
-                    return appUserService.updateLocalProfile(String.valueOf(userId), viewerContext, updateUserProfileRequest);
-                })
-                .map(updatedUser -> {
+                    return appUserService.updateLocalProfile(String.valueOf(userId), viewerContext, updateUserProfileRequest)
+                            .map(updatedUser -> {
 
-                    String message = "Profile updated successfully.";
-                    if (updatedUser.getPendingEmail() != null) {
-                        message = String.format(
-                                "Profile updated. A verification link has been sent to %s. " +
-                                        "Your email will update once verified.",
-                                updateUserProfileRequest.email().toLowerCase()
-                        );
-                    }
+                                String message;
+                                if(profileUpdateResult.pendingEmail() != null){
+                                    if(profileUpdateResult.emailSent()){
+                                        message = String.format(
+                                                "Profile updated. A verification link has been sent to %s. " +
+                                                "Your email will be updated once verified.",
+                                                updateUserProfileRequest.email().toLowerCase()
+                                        );
+                                    }
+                                    else {
+                                        message = String.format(
+                                                "Profile updated, but we're having trouble sending the verification link to %s. " +
+                                                "You can request a new link later.",
+                                                updateUserProfileRequest.email().toLowerCase()
+                                        );
+                                    }
+                                }
+                                else {
+                                    message = "Profile updated successfully.";
+                                }
 
-                    return ResponseEntity.ok(new StandardSuccessResponse<>(message, updatedUser));
+                                return ResponseEntity.ok(new StandardSuccessResponse<>(message, updatedUser));
+                            });
                 });
+
     }
 
 
     @PostMapping("/reset-password")
     public Mono<ResponseEntity<StandardSuccessResponse<Void>>> resetPassword(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam String userId,
             @Valid @RequestBody ResetPasswordRequest resetPasswordRequest) {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-
-        // --- Authorization check ---
-        if(viewerContext == null || !viewerContext.getUserId().equals(userId)){
-            throw new InsufficientPermissionException("Forbidden: Cannot reset another user's password.");
-        }
+        String userId = viewerContext.getUserId();
 
         // userService.resetPassword returns Mono<Void>. We use then() to wait for completion.
         return userService.resetPassword(userId, resetPasswordRequest)
@@ -167,17 +170,12 @@ public class UserController {
                 }));
     }
 
-    @DeleteMapping("/{userId}")
+    @DeleteMapping("/profile")
     public Mono<ResponseEntity<StandardSuccessResponse<Void>>> softDeleteUser(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID userId) {
+            @AuthenticationPrincipal Jwt jwt) {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-
-        // --- Authorization check ---
-        if(viewerContext == null || !viewerContext.getUserId().equals(String.valueOf(userId))){
-            throw new InsufficientPermissionException("Forbidden: Cannot delete another user's profile.");
-        }
+        String userId = viewerContext.getUserId();
 
         Instant scheduledAt = Instant.now().plus(AppConstants.ACCOUNT_DELETION_RETENTION_WINDOW);
         String readableDate = DateTimeUtils.toHumanReadable(
@@ -197,19 +195,14 @@ public class UserController {
                 ));
     }
 
-    @PostMapping("/{userId}/reactivate")
+    @PostMapping("/reactivate")
     public Mono<ResponseEntity<StandardSuccessResponse<Void>>> reactivateAccount(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID userId) {
+            @AuthenticationPrincipal Jwt jwt) {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+        String userId = viewerContext.getUserId();
 
-        // -- Authorization check --
-        if(viewerContext == null || !viewerContext.getUserId().equals(String.valueOf(userId))){
-            throw new InsufficientPermissionException("Forbidden: Cannot reactivate another's account");
-        }
-
-        return userActivityService.reactivateUser(userId)
+        return userActivityService.reactivateUser(UUID.fromString(userId))
                 .thenReturn(ResponseEntity.ok(
                         new StandardSuccessResponse<>("Account reactivated successfully. Welcome back!")
                 ));

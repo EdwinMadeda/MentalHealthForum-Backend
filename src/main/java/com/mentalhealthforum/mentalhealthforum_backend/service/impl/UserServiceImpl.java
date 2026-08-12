@@ -17,6 +17,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.utils.EncryptionUtils;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -71,7 +72,7 @@ public class UserServiceImpl implements UserService {
 
     // ------------------ Public API Methods (Reactive Wrappers) ------------------
     @Override
-    public Mono<String> createUserInStaging(RegisterUserRequest registerUserRequest) {
+    public Mono<RegistrationResult> createUserInStaging(RegisterUserRequest registerUserRequest) {
         String username = registerUserRequest.username().trim();
         String email = registerUserRequest.email().trim().toLowerCase();
 
@@ -113,28 +114,41 @@ public class UserServiceImpl implements UserService {
                                 }))
                 )
                 .flatMap(savedPending ->
-                    // Step 5: Generate Link and Trigger Communication
-                    verificationService.createVerificationLink(
-                            email,
-                            VerificationType.SELF_REG,
-                            GroupPath.MEMBERS_NEW.getPath(),
-                            null
-                    )
-                    .flatMap(verificationLink -> {
-                        SelfRegPayload payload = new SelfRegPayload(
-                                registerUserRequest.firstName(),
-                                verificationLink
-                        );
+                     novuService.upsertSubscriber(savedPending.toNovuSubscriberRequest())
+                         .then( // Step 5: Generate Link and Trigger Communication
+                                 verificationService.createVerificationLink(
+                                         email,
+                                         VerificationType.SELF_REG,
+                                         GroupPath.MEMBERS_NEW.getPath(),
+                                         null
+                                 )
+                                 .flatMap(verificationLink -> {
+                                     SelfRegPayload payload = new SelfRegPayload(
+                                             registerUserRequest.firstName(),
+                                             verificationLink
+                                     );
 
-                        return novuService.triggerEvent(NovuWorkflow.SELF_REG_VERIFICATION, email, email, payload)
-                                .thenReturn(email); // Final Success
-                    })
+                                     return novuService.triggerEvent(
+                                             NovuWorkflow.SELF_REG_VERIFICATION,
+                                                 email,
+                                                 email,
+                                                 payload
+                                             );
+                                 })
+                                 .map(sent -> new RegistrationResult(email, sent)) // Final Success
+                         )
                 );
     }
 
     @Override
     public Mono<KeycloakUserDto> createUserInKeycloak(PendingUserEntity pendingUser, String groupPath) {
         return Mono.fromCallable(()-> {
+            // Check if user already exists in Keycloak
+            Optional<UserRepresentation> existingUser = adminManager.findUserByEmail(pendingUser.email());
+            if(existingUser.isPresent()){
+                return  existingUser.get().getId();
+            }
+
             // Decrypt the password we staged earlier
             String rawPassword = encryptionUtils.decrypt(pendingUser.encryptedPassword());
 
@@ -158,7 +172,13 @@ public class UserServiceImpl implements UserService {
 
             return userId;
         }).subscribeOn(Schedulers.boundedElastic())
-                .flatMap(this::getUser);
+                .flatMap(this::getUser)
+                .flatMap(keycloakUserDto -> {
+                    // Create Novu subscriber once, after user is created
+                    return novuService.deleteSubscriber(pendingUser.email())
+                            .then(novuService.upsertSubscriber(keycloakUserDto.toNovuSubscriberRequest()))
+                            .thenReturn(keycloakUserDto);
+                });
     }
 
     // Define the internal "Assembly Line" package
@@ -199,6 +219,8 @@ public class UserServiceImpl implements UserService {
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(ctx ->{
+                    KeycloakUserDto updatedUserDto = keycloakUserDtoMapper.mapToKeycloakUserDto(ctx.userRep);
+
                     if(ctx.emailChanged){
                         // We do not update email in keycloak yet, We just trigger the "Confirmation" flow
                         return verificationService.createVerificationLink(
@@ -209,11 +231,11 @@ public class UserServiceImpl implements UserService {
                         ).flatMap(verificationLink -> {
                             AppUserVerificationPayload payload = new AppUserVerificationPayload(
                                     ctx.userRep.getFirstName(), verificationLink, false);
-                            return novuService.triggerEvent(NovuWorkflow.APP_USER_VERIFICATION, ctx.userRep.getId(), ctx.newEmail, payload);
-                        })
-                                .thenReturn(new ProfileUpdateResult(keycloakUserDtoMapper.mapToKeycloakUserDto(ctx.userRep), ctx.newEmail));
+                            return novuService.triggerEvent(NovuWorkflow.APP_USER_VERIFICATION, ctx.userRep.getId(), ctx.newEmail, payload)
+                                    .map(sent -> new ProfileUpdateResult(updatedUserDto, ctx.newEmail, sent));
+                        });
                     }
-                    return Mono.just(new ProfileUpdateResult(keycloakUserDtoMapper.mapToKeycloakUserDto(ctx.userRep), null));
+                    return Mono.just(new ProfileUpdateResult(updatedUserDto, null, false));
                 });
 
     }
@@ -246,6 +268,7 @@ public class UserServiceImpl implements UserService {
                     log.info("Successfully deleted user with ID: {}", userId);
                 })
                 .subscribeOn(Schedulers.boundedElastic())
+                .then(novuService.deleteSubscriber(userId))
                 .then();
     }
 

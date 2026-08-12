@@ -19,7 +19,6 @@ public enum NovuWorkflow {
     private final String workflowTrigger;
     private final Class<? extends NovuPayload> payloadClass;
 
-
     NovuWorkflow(String workflowTrigger, Class<? extends NovuPayload> payloadClass) {
         this.workflowTrigger = workflowTrigger;
         this.payloadClass = payloadClass;

@@ -4,6 +4,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.config;
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
@@ -75,7 +76,7 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
                                                         }
 
                                                         // Proceed with accountStatus/onboarding/role checks
-                                                        return checkOnboardingAndRoles(jwtAuthenticationToken, path);
+                                                        return checkOnboardingAndRoles(appUser.isOnboarding(), jwtAuthenticationToken, path);
 
                                                     });
                                         });
@@ -94,20 +95,31 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
         return path.matches(SecurityConstants.REACTIVATION_PATH_REGEX);
     }
 
-    private Mono<AuthorizationDecision> checkOnboardingAndRoles(JwtAuthenticationToken jwtAuthenticationToken, String path) {
+    private Mono<AuthorizationDecision> checkOnboardingAndRoles( boolean isOnboarding, JwtAuthenticationToken jwtAuthenticationToken, String path) {
 
-        boolean isOnboarding = hasRole(jwtAuthenticationToken, "ROLE_ONBOARDING");
+        //boolean isOnboarding = hasRole(jwtAuthenticationToken, "ROLE_ONBOARDING");
 
         // If onboarding, check the path
         if(isOnboarding){
-            // Allow them to update their own profile to satisfy requirements
-            if(path.startsWith("/api/users") ||
-                    path.startsWith("/api/auth") ||
-                    path.startsWith("/api/onboarding")){
+            // Allow self-profile (to satisfy requirements) operations (get, update, reactivate)
+            if(path.matches("/api/users/[a-f0-9-]+") ||  // GET /api/users/{uuid}
+                    path.matches("/api/users/profile") ||      // PATCH/DELETE /api/users/profile
+                    path.matches("/api/users/reactivate") ||   // POST /api/users/reactivate
+                    path.matches("/api/users/reset-password")) { // POST /api/users/reset-password
                 return Mono.just(new AuthorizationDecision(true));
             }
 
-            // Block everything else
+            // Allow onboarding-specific endpoints
+            if(path.startsWith("/api/onboarding")){
+                return Mono.just(new AuthorizationDecision(true));
+            }
+
+            // Allow auth endpoints (login, refresh, logout)
+            if(path.startsWith("/api/auth")){
+                return Mono.just(new AuthorizationDecision(true));
+            }
+
+            // Block everything else (including /api/users)
             return Mono.just(new AuthorizationDecision(false));
         }
 

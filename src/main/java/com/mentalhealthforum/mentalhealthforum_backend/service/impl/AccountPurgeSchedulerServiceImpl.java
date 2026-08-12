@@ -2,16 +2,14 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.NovuService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
-import java.util.List;
 
 @Service
 public class AccountPurgeSchedulerServiceImpl implements AccountPurgeSchedulerService {
@@ -20,13 +18,16 @@ public class AccountPurgeSchedulerServiceImpl implements AccountPurgeSchedulerSe
 
     private final AppUserRepository appUserRepository;
     private final UserService userService;
+    private final NovuService novuService;
 
 
     public AccountPurgeSchedulerServiceImpl(
             AppUserRepository appUserRepository,
-            UserService userService) {
+            UserService userService,
+            NovuService novuService) {
         this.appUserRepository = appUserRepository;
         this.userService = userService;
+        this.novuService = novuService;
     }
 
     /**
@@ -63,7 +64,8 @@ public class AccountPurgeSchedulerServiceImpl implements AccountPurgeSchedulerSe
 
             log.info("Anonymizing user {} after purge", appUser.getKeycloakId());
 
-            return appUserRepository.save(appUser).then();
+            return appUserRepository.save(appUser)
+                    .then();
 
         }
 

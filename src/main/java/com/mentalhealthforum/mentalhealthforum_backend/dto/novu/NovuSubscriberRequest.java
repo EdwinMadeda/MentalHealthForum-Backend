@@ -9,5 +9,5 @@ public record NovuSubscriberRequest(
         String email,
         String avatar,
         String locale,
-        Map<String, Object> data
+        NovuSubscriberData data
 ) {}

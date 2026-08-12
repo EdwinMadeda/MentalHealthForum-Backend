@@ -63,6 +63,7 @@ public class UserResponseMapper {
             response.setProfileVisibility(targetUser.getProfileVisibility());
 
             if(viewerContext.isAdmin()){
+                response.setIsOnboarding(targetUser.isOnboarding());
                 response.setLastLoginAt(targetUser.getLastLoginAt());
                 response.setAccountStatus(targetUser.getAccountStatus());
             }
@@ -105,6 +106,7 @@ public class UserResponseMapper {
         setTimezoneDetails(response, appUser);
         response.setLanguage(appUser.getLanguage());
         response.setPendingEmail(appUser.getPendingEmail());
+        response.setIsOnboarding(appUser.isOnboarding());
         response.setLastLoginAt(appUser.getLastLoginAt());
         response.setAccountStatus(appUser.getAccountStatus());
     }

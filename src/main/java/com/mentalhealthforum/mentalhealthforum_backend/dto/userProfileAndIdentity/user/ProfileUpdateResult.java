@@ -2,5 +2,6 @@ package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdenti
 
 public record ProfileUpdateResult(
         KeycloakUserDto keycloakUserDto,
-        String pendingEmail // Null if no change
+        String pendingEmail, // Null if no change
+        boolean emailSent
 ) {}
