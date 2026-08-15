@@ -27,6 +27,8 @@ public class AdminUserController {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserController.class);
 
+    private static final String MANUAL_FALLBACK_MESSAGE = "Please provide the temporary credentials below to the user manually.";
+
     private final AdminUserService adminUserService;
     private final AppUserService appUserService;
     private final AdminInvitationService adminInvitationService;
@@ -73,10 +75,12 @@ public class AdminUserController {
         return adminUserService.createUserAsAdmin(request, viewerContext)
                 .map(response -> {
                     // Build success response
-                    String message = "User created successfully. %s".formatted(response.emailSent() ?
-                            "Invitation email sent." :
-                            request.sendInvitationEmail() ? "Email failed to send." : "."
-                                    + "Provide temporary credentials to user manually.");
+                    String message = "User created successfully. %s".formatted(
+                            response.emailSent()
+                                ? "An invitation email with temporary credentials has been sent to the user."
+                                : request.sendInvitationEmail()
+                                    ? "The invitation email failed to send. " + MANUAL_FALLBACK_MESSAGE
+                                    : MANUAL_FALLBACK_MESSAGE);
 
                     StandardSuccessResponse<AdminCreateUserResponse> successResponse =
                             new StandardSuccessResponse<>(message, response);
@@ -92,10 +96,12 @@ public class AdminUserController {
             @Valid @RequestBody ReissueInvitationRequest reissueInvitationRequest){
         return adminUserService.reissueAdminInvitation(String.valueOf(userId), reissueInvitationRequest)
                 .map( response -> {
-                    String message = "Invitation reissued successfully. %s".formatted(response.emailSent() ?
-                            "Invitation email sent." :
-                            reissueInvitationRequest.sendInvitationEmail() ? "Email failed to send." : "."
-                                    + "Provide temporary credentials to user manually.");
+                    String message = "Invitation reissued successfully. %s".formatted(
+                            response.emailSent()
+                                    ? "An Invitation email with temporary credentials has been sent to the user."
+                                    : reissueInvitationRequest.sendInvitationEmail() ?
+                                      "The invitation email failed to send. " + MANUAL_FALLBACK_MESSAGE
+                                      : MANUAL_FALLBACK_MESSAGE);
 
                     StandardSuccessResponse<AdminCreateUserResponse> successResponse =
                             new StandardSuccessResponse<>(message, response);
