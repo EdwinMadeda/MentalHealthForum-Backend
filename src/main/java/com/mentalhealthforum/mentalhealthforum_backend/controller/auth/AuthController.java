@@ -104,13 +104,13 @@ public class AuthController {
     }
 
     @PostMapping("/forgot-password/initiate")
-    public Mono<ResponseEntity<StandardSuccessResponse<Object>>> initiateForgotPassword(@Valid @RequestBody ForgotPasswordInitRequest request){
+    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> initiateForgotPassword(@Valid @RequestBody ForgotPasswordInitRequest request){
         return userService.initiateForgotPassword(request.email())
                 .thenReturn(ResponseEntity.ok(new StandardSuccessResponse<>("If an account exists, a reset code has been sent.")));
     }
 
     @PostMapping("/forgot-password/complete")
-    public Mono<ResponseEntity<StandardSuccessResponse<Object>>> completeForgotPassword(@Valid @RequestBody ForgotPasswordRequest request){
+    public Mono<ResponseEntity<StandardSuccessResponse<Void>>> completeForgotPassword(@Valid @RequestBody ForgotPasswordRequest request){
         return userService.completeForgotPassword(request)
                 .thenReturn(ResponseEntity.ok(new StandardSuccessResponse<>("Password reset successfully")));
     }

@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.ForgotPasswordRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AppUserVerificationPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.OtpPayload;
@@ -17,7 +18,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.utils.EncryptionUtils;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -307,11 +307,11 @@ public class UserServiceImpl implements UserService {
                     // If user exists, proceed with OTP generation and Novu
                     if(userOpt.isPresent()){
                         return otpWorker.generateAndSaveOtp(email, OtpPurpose.FORGOT_PASSWORD)
-                                .flatMap(code -> novuService.triggerEvent(
+                                .flatMap(otpResult -> novuService.triggerEvent(
                                         NovuWorkflow.FORGOT_PASSWORD_OTP,
                                         userOpt.get().getId(),
                                         email,
-                                        new OtpPayload(code)
+                                        new OtpPayload(otpResult.code(), otpResult.expiryMinutes())
                                 ))
                                 .then();
                     }

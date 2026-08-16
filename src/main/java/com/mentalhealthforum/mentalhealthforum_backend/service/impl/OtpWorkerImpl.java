@@ -1,5 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.OtpResult;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OtpPurpose;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidTokenException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.TokenExpiredException;
@@ -19,7 +21,7 @@ public class OtpWorkerImpl implements  OtpWorker{
     private final OtpCredentialRepository otpCredentialRepository;
     private final PasswordEncoder passwordEncoder;
     private final SecureRandom secureRandom = new SecureRandom();
-    private static final Duration OTP_EXPIRY = Duration.ofMinutes(10); // OTPs should be short
+    private static final int OTP_EXPIRY_MINUTES = 10; // OTPs should be short
 
 
     public OtpWorkerImpl(
@@ -31,7 +33,7 @@ public class OtpWorkerImpl implements  OtpWorker{
 
 
     @Override
-    public Mono<String> generateAndSaveOtp(String email, OtpPurpose purpose){
+    public Mono<OtpResult> generateAndSaveOtp(String email, OtpPurpose purpose){
         return otpCredentialRepository.findByEmailAndPurpose(email, purpose)
                 .flatMap(existingOtp -> {
                     // If the existing OTP was created LESS than 60 seconds ago, reject
@@ -47,9 +49,9 @@ public class OtpWorkerImpl implements  OtpWorker{
                             email,
                             passwordEncoder.encode(rawCode),
                             purpose,
-                            Instant.now().plus(OTP_EXPIRY)
+                            Instant.now().plus(Duration.ofMinutes(OTP_EXPIRY_MINUTES))
                     );
-                    return otpCredentialRepository.save(newOtp).thenReturn(rawCode);
+                    return otpCredentialRepository.save(newOtp).thenReturn(new OtpResult(rawCode, OTP_EXPIRY_MINUTES));
         }));
     }
 
