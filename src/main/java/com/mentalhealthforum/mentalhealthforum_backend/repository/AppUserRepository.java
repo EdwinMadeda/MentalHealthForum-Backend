@@ -22,6 +22,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
 
     Mono<AppUserEntity> findAppUserByKeycloakId(String keycloakId);
 
+    Mono<AppUserEntity> findAppUserByEmail(String email);
+
     Mono<Boolean> existsByKeycloakId(UUID keycloakId);
 
     /**

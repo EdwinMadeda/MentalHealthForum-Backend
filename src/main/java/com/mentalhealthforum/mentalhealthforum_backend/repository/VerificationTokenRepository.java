@@ -13,11 +13,13 @@ import java.time.Instant;
 @Repository
 public interface VerificationTokenRepository extends R2dbcRepository<VerificationTokenEntity, Long> {
 
+    @Query("SELECT * FROM verification_tokens WHERE email = :email ORDER BY created_at DESC LIMIT 1")
     Mono<VerificationTokenEntity> findByEmail(String email);
 
     // Using a custom query for Safety, or let Spring derive it:
     Mono<VerificationTokenEntity> findByTokenAndEmail(String token, String email);
 
+    @Query("SELECT * FROM verification_tokens WHERE email = :email AND type = :type ORDER BY created_at DESC LIMIT 1")
     Mono<VerificationTokenEntity> findByEmailAndType(String email, VerificationType type);
 
     Mono<Void> deleteByEmail(String email);

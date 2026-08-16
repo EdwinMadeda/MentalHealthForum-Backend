@@ -33,6 +33,11 @@ public enum GroupPath {
         return this.description;
     }
 
+    public static String getFriendlyName(String groupPath){
+        GroupPath group = GroupPath.fromPath(groupPath);
+        return (group != null) ? group.getDisplayName(): "our community";
+    }
+
     public static GroupPath fromPath(String path){
         for(GroupPath group: values()){
             if(group.path.equals(path)){
@@ -41,6 +46,7 @@ public enum GroupPath {
         }
         return null;
     }
+
 
     /**
      * Determines if a group can be manually assigned/changed by an Admin.

@@ -49,7 +49,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             String email,
             String firstName,
             String tempPassword,
-            String groupName,
+            String groupPath,
             boolean sendInvitationEmail
     ){}
 
@@ -139,7 +139,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                             email,
                             firstName,
                             temporaryPassword,
-                            getFriendlyGroupName(request.group().getPath()),
+                            request.group().getPath(),
                             request.sendInvitationEmail()
                     );
                 })
@@ -209,7 +209,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                         user.getEmail(),
                                         user.getFirstName(),
                                         newTempPassword,
-                                        getFriendlyGroupName(groupPath),
+                                        groupPath,
                                         request.sendInvitationEmail()
                                 );
 
@@ -334,7 +334,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * This handles the verification link and the conditional Novu trigger.
      */
     private Mono<AdminCreateUserResponse> handleInvitationFlow(AdminUserContext ctx){
-        return verificationService.createVerificationLink(ctx.email, VerificationType.INVITED, ctx.groupName, null)
+        return verificationService.createVerificationLink(ctx.email, VerificationType.INVITED, ctx.groupPath, null)
                 .flatMap(invitationLink -> {
 
                     // Logic: Only send if the admin requested it
@@ -345,7 +345,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 ctx.firstName,
                                 ctx.tempPassword,
                                 invitationLink,
-                                ctx.groupName
+                                ctx.groupPath
                         );
 
                         return novuService.triggerEvent(NovuWorkflow.ADMIN_ONBOARDING_INVITE, ctx.userId, ctx.email, payload)
@@ -366,13 +366,6 @@ public class AdminUserServiceImpl implements AdminUserService {
                             false
                     ));
                 });
-    }
-
-
-
-    private String getFriendlyGroupName(String groupPath){
-        GroupPath group = GroupPath.fromPath(groupPath);
-        return (group != null) ? group.getDisplayName(): "our community";
     }
 
     private String generateUsername(String firstName, String lastName) {

@@ -14,6 +14,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.exception.error.PendingRe
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserDoesNotExistException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.PendingUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -44,6 +45,7 @@ public class VerificationServiceImpl implements VerificationService {
     private final KeycloakUserDtoMapper keycloakUserDtoMapper;
     private final UserService userService;
     private final AppUserService appUserService;
+    private final AppUserRepository appUserRepository;
     private final AdminInvitationService adminInvitationService;
     private final NovuService novuService;
 
@@ -56,6 +58,7 @@ public class VerificationServiceImpl implements VerificationService {
             KeycloakUserDtoMapper keycloakUserDtoMapper,
             @Lazy UserService userService,
             AppUserService appUserService,
+            AppUserRepository appUserRepository,
             AdminInvitationService adminInvitationService, NovuService novuService) {
         this.adminManager = adminManager;
         this.tokenWorker = tokenWorker;
@@ -65,13 +68,17 @@ public class VerificationServiceImpl implements VerificationService {
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.userService = userService;
         this.appUserService = appUserService;
+        this.appUserRepository = appUserRepository;
         this.adminInvitationService = adminInvitationService;
         this.novuService = novuService;
     }
 
     @Override
     public Mono<String> createVerificationLink(String email, VerificationType type, String groupPath, String newValue) {
-        return tokenWorker.generateToken(email, type, groupPath, newValue)
+
+        String friendlyGroupName = GroupPath.getFriendlyName(groupPath);
+
+        return tokenWorker.generateToken(email, type, friendlyGroupName, newValue)
                 .map(verificationToken ->
                         String.format("%s/auth/verify?token=%s&email=%s",
                                 frontendProperties.getBaseUrl(),
@@ -85,13 +92,16 @@ public class VerificationServiceImpl implements VerificationService {
 
         // Check for Rate Limiting (reusing your existing log.error("Verification mapping failed: {}", e.getMessage());2-minute cooldown logic)
         return tokenWorker.checkRateLimit(normalizedEmail)
+                // Delete old tokens first
+                .then(tokenWorker.removeToken(normalizedEmail))
                 // Try to find a Self-Reg user in staging
                 .then(pendingUserRepository.findByEmail(normalizedEmail))
                 .flatMap(this::triggerSelfRegRenewal)
                 // If not in staging, check if they are an "Invited" user
                 .switchIfEmpty(Mono.defer(()-> adminInvitationRepository.findByEmail(normalizedEmail)
                         .flatMap(this::triggerInviteRenewal)))
-                .switchIfEmpty(Mono.defer(()-> handleAppUserEmailVerification(normalizedEmail) ))
+                .switchIfEmpty(Mono.defer(()-> appUserRepository.findAppUserByEmail(normalizedEmail)
+                        .flatMap(this::handleAppUserEmailVerification)))
                 .then();
     }
 
@@ -123,8 +133,9 @@ public class VerificationServiceImpl implements VerificationService {
                 .then();
     }
 
-    private Mono<Void> handleAppUserEmailVerification(String email){
-        return Mono.fromCallable(()-> adminManager.findUserByEmail(email))
+    private Mono<Void> handleAppUserEmailVerification(AppUserEntity appUser){
+
+        return Mono.fromCallable(()-> adminManager.findUserByEmail(appUser.getEmail()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(userOpt -> {
 
@@ -135,7 +146,7 @@ public class VerificationServiceImpl implements VerificationService {
 
 
                     // Case B: User is verified, but maybe they have a pending change
-                    return tokenWorker.findTokenByEmailAndType(email, VerificationType.APP_USER)
+                    return tokenWorker.findTokenByEmailAndType(appUser.getEmail(), VerificationType.APP_USER)
                             .flatMap(verificationToken -> {
                                 // Resend to the proposed email address
                                 if(verificationToken.getNewValue() != null){
@@ -151,7 +162,6 @@ public class VerificationServiceImpl implements VerificationService {
                                 return Mono.empty();
                             }));
                 })
-
                 .then();
     }
 
