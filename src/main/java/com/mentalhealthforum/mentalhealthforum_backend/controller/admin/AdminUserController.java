@@ -128,7 +128,7 @@ public class AdminUserController {
                 ));
     }
 
-    @PostMapping("/{userId}")
+    @PatchMapping("/{userId}")
     public Mono<ResponseEntity<StandardSuccessResponse<UserResponse>>> updateUserAsAdmin(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
