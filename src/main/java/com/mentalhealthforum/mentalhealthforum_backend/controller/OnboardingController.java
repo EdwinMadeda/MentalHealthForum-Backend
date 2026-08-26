@@ -89,14 +89,14 @@ public class OnboardingController {
                                         message = String.format(
                                                 "Onboarding complete. A verification link has been sent to %s. " +
                                                  "Your email will update once verified.",
-                                                updateUserProfileRequest.email().toLowerCase()
+                                                profileUpdateResult.pendingEmail()
                                         );
                                     }
                                     else {
                                         message = String.format(
                                                 "Onboarding complete, but we're having trouble sending the verification link to %s. " +
                                                 "You can request a new link from your profile settings.",
-                                                updateUserProfileRequest.email().toLowerCase()
+                                                profileUpdateResult.pendingEmail()
                                         );
                                     }
                                 }

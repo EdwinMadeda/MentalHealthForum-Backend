@@ -1,8 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user;
 
-import com.mentalhealthforum.mentalhealthforum_backend.dto.notification.NotificationPreferences;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.SupportRole;
 import com.mentalhealthforum.mentalhealthforum_backend.service.OnboardingProfileData;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.ValidEmail;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.bio.ValidBio;
@@ -11,35 +9,76 @@ import com.mentalhealthforum.mentalhealthforum_backend.validation.firstName.Vali
 import com.mentalhealthforum.mentalhealthforum_backend.validation.lastName.ValidLastName;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.timezone.ValidTimezone;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.url.ValidUrl;
-import jakarta.validation.Valid;
 
-public record UpdateUserProfileRequest(
+import org.openapitools.jackson.nullable.JsonNullable;
 
+@SuppressWarnings({"LombokGetterMayBeUsed", "LombokSetterMayBeUsed"})
+public class UpdateUserProfileRequest implements OnboardingProfileData {
+
+    // Getters and Setters
         @ValidEmail
-        String email,
+        private JsonNullable<String> email = JsonNullable.undefined();
 
         @ValidFirstName
-        String firstName,
+        private JsonNullable<String> firstName = JsonNullable.undefined();;
 
         @ValidLastName
-        String lastName,
+        private JsonNullable<String> lastName = JsonNullable.undefined();;
 
         @ValidBio
-        String bio,
+        private JsonNullable<String> bio = JsonNullable.undefined();;
 
         @ValidDisplayName
-        String displayName,
+        private JsonNullable<String> displayName = JsonNullable.undefined();;
 
         @ValidUrl
-        String avatarUrl,
+        private JsonNullable<String> avatarUrl = JsonNullable.undefined();;
 
         @ValidTimezone(nullable = true)
-        String timezone,
+        private JsonNullable<String> timezone = JsonNullable.undefined();;
 
-        ProfileVisibility profileVisibility
+        private JsonNullable<ProfileVisibility> profileVisibility = JsonNullable.undefined();
 
-        // SupportRole supportRole,
 
-        //  @Valid
-        //  NotificationPreferences notificationPreferences
-) implements OnboardingProfileData {}
+        // Implement OnboardingProfileData interface getters matching your requirements
+        @Override
+        public String displayName() {
+                return this.displayName.isPresent() ? this.displayName.get() : null;
+        }
+
+        @Override
+        public String bio() {
+                return this.bio.isPresent() ? this.bio.get() : null;
+        }
+
+        @Override
+        public String timezone() {
+                return this.timezone.isPresent() ? this.timezone.get() : null;
+        }
+
+        // --- Standard Getters & Setters for Jackson/Service layer ---
+        public JsonNullable<String> getEmail() { return email; }
+        public void setEmail(JsonNullable<String> email) { this.email = email; }
+
+        public JsonNullable<String> getFirstName() { return firstName; }
+        public void setFirstName(JsonNullable<String> firstName) { this.firstName = firstName; }
+
+        public JsonNullable<String> getLastName() { return lastName; }
+        public void setLastName(JsonNullable<String> lastName) { this.lastName = lastName; }
+
+        public JsonNullable<String> getBio() { return bio; }
+        public void setBio(JsonNullable<String> bio) { this.bio = bio; }
+
+        public JsonNullable<String> getDisplayName() { return displayName; }
+        public void setDisplayName(JsonNullable<String> displayName) { this.displayName = displayName; }
+
+        public JsonNullable<String> getAvatarUrl() { return avatarUrl; }
+        public void setAvatarUrl(JsonNullable<String> avatarUrl) { this.avatarUrl = avatarUrl; }
+
+        public JsonNullable<String> getTimezone() { return timezone; }
+        public void setTimezone(JsonNullable<String> timezone) { this.timezone = timezone; }
+
+        public JsonNullable<ProfileVisibility> getProfileVisibility() { return profileVisibility; }
+        public void setProfileVisibility(JsonNullable<ProfileVisibility> profileVisibility) { this.profileVisibility = profileVisibility; }
+
+}

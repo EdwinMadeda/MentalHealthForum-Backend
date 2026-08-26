@@ -34,6 +34,7 @@ dependencies {
     implementation("org.keycloak:keycloak-admin-client:26.0.7")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.8.14")
 
+	implementation("org.openapitools:jackson-databind-nullable:0.2.11")
 
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")

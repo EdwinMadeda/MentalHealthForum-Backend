@@ -66,6 +66,7 @@ public class UserResponseMapper {
                 response.setIsOnboarding(targetUser.isOnboarding());
                 response.setLastLoginAt(targetUser.getLastLoginAt());
                 response.setAccountStatus(targetUser.getAccountStatus());
+                response.setIsEnabled(targetUser.getIsEnabled());
             }
 
             return response;

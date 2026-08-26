@@ -1,18 +1,16 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
-import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.ForgotPasswordRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AppUserVerificationPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.OtpPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.SelfRegPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserDoesNotExistException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserExistsException;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.model.PendingUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.PendingUserRepository;
-import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.EncryptionUtils;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -22,13 +20,9 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
-import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.setIfChangedStrict;
-
+import static com.mentalhealthforum.mentalhealthforum_backend.utils.PatchUtils.*;
 
 @Service
 public class UserServiceImpl implements UserService {
@@ -52,10 +46,10 @@ public class UserServiceImpl implements UserService {
             KeycloakUserDtoMapper keycloakUserDtoMapper,
             EncryptionUtils encryptionUtils,
             PendingUserRepository pendingUserRepository,
-            VerificationTokenRepository verificationTokenRepository,
             VerificationTokenService tokenWorker,
             VerificationService verificationService,
-            AdminInvitationService adminInvitationService, AdminInvitationRepository adminInvitationRepository, UserActivityService userActivityService,
+            AdminInvitationService adminInvitationService,
+            UserActivityService userActivityService,
             OtpWorker otpWorker,
             NovuService novuService) {
         this.adminManager = adminManager;
@@ -189,7 +183,7 @@ public class UserServiceImpl implements UserService {
     ){}
 
     @Override
-    public Mono<ProfileUpdateResult> updateUserProfile(String userId, UpdateUserProfileRequest updateUserProfileRequest){
+    public Mono<ProfileUpdateResult> updateUserProfile(String userId, UpdateUserProfileRequest request){
         return Mono.fromCallable(() -> {
                     // Fetch user from Keycloak
                     UserRepresentation userRep = adminManager.findUserByUserId(userId)
@@ -197,17 +191,34 @@ public class UserServiceImpl implements UserService {
 
                     boolean keycloakNeedsUpdate = false;
 
-                    keycloakNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.firstName(), userRep.getFirstName(), userRep::setFirstName);
-                    keycloakNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.lastName(), userRep.getLastName(), userRep::setLastName);
+                    keycloakNeedsUpdate |= patchStrict(request.getFirstName(), userRep.getFirstName(), userRep::setFirstName);
+                    keycloakNeedsUpdate |= patchStrict(request.getLastName(), userRep.getLastName(), userRep::setLastName);
 
 
                     String oldEmail = userRep.getEmail();
-                    String proposedEmail = updateUserProfileRequest.email() != null ? updateUserProfileRequest.email().trim().toLowerCase() : null;
-                    boolean emailChanged = proposedEmail != null && !proposedEmail.equalsIgnoreCase(oldEmail);
 
-                    Optional<UserRepresentation> existingUserWithNewEmail = adminManager.findUserByEmail(proposedEmail);
-                    if (existingUserWithNewEmail.isPresent() && !existingUserWithNewEmail.get().getId().equals(userId)) {
-                        throw new UserExistsException("An account already exists for this email.");
+                    boolean emailProvided = request.getEmail().isPresent();
+                    boolean emailChanged = false;
+                    String proposedEmail = null;
+
+                    if(emailProvided){
+                        proposedEmail = request.getEmail().get();
+
+                        if(proposedEmail == null || proposedEmail.isBlank()){
+                            throw new ApiException("Email cannot be null or blank.", ErrorCode.VALIDATION_FAILED);
+                        }
+
+                        proposedEmail = proposedEmail.trim().toLowerCase();
+
+                        emailChanged = !proposedEmail.equalsIgnoreCase(oldEmail);
+
+                        if(emailChanged){
+                            Optional<UserRepresentation> existingUserWithNewEmail = adminManager.findUserByEmail(proposedEmail);
+                            if (existingUserWithNewEmail.isPresent() && !existingUserWithNewEmail.get().getId().equals(userId)) {
+                                throw new UserExistsException("An account already exists for this email.");
+                            }
+                        }
+
                     }
 
                     // Perform update only if any changes detected

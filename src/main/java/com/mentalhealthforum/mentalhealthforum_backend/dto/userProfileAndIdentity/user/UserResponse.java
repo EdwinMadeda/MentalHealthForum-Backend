@@ -50,6 +50,7 @@ public class UserResponse {
     private Instant lastLoginAt;
     private AccountStatus accountStatus;
     private Boolean isActive;
+    private Boolean isEnabled;
 
     // --- Cached Keycloak Data (UI Context) ---
     private Set<String> roles;

@@ -22,7 +22,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.UserConnectRep
 import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
-import org.keycloak.representations.idm.UserRepresentation;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
@@ -37,6 +37,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.*;
+import static com.mentalhealthforum.mentalhealthforum_backend.utils.PatchUtils.*;
+
 
 @Service
 public class AppUserServiceImpl implements AppUserService {
@@ -240,7 +242,7 @@ public class AppUserServiceImpl implements AppUserService {
     }
 
     @Override
-    public Mono<UserResponse> updateLocalProfile(String userId, ViewerContext viewerContext, UpdateUserProfileRequest updateUserProfileRequest) {
+    public Mono<UserResponse> updateLocalProfile(String userId, ViewerContext viewerContext, UpdateUserProfileRequest request) {
         return appUserRepository.findAppUserByKeycloakId(userId)
                 .switchIfEmpty(Mono.error(new UserDoesNotExistException()))
                 .flatMap(appUser -> {
@@ -249,21 +251,27 @@ public class AppUserServiceImpl implements AppUserService {
                     }
 
                     boolean localNeedsUpdate = false;
-                    localNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.firstName(), appUser.getFirstName(), appUser::setFirstName);
-                    localNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.lastName(), appUser.getLastName(), appUser::setLastName);
-                    localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.displayName(), appUser.displayName(), appUser::setDisplayName);
-                    localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.bio(), appUser.bio(), appUser::setBio);
-                    localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.avatarUrl(), appUser.getAvatarUrl(), appUser::setAvatarUrl);
-                    localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.timezone(), appUser.timezone(), appUser::setTimezone);
-                    localNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.profileVisibility(), appUser.getProfileVisibility(), appUser::setProfileVisibility);
+
+                    // Strict Identity Updates (Ignore explicit JSON nulls or omitted fields for critical fields)
+                    localNeedsUpdate |= patchStrict(request.getFirstName(), appUser.getFirstName(), appUser::setFirstName);
+                    localNeedsUpdate |= patchStrict(request.getLastName(), appUser.getLastName(), appUser::setLastName);
+
+                    // Permissive Application Updates (Explicit JSON null clears out the DB entry; omitted is skipped)
+                    localNeedsUpdate |= patchAllowNull(request.getDisplayName(), appUser.displayName(), appUser::setDisplayName);
+                    localNeedsUpdate |= patchAllowNull(request.getBio(), appUser.bio(), appUser::setBio);
+                    localNeedsUpdate |= patchAllowNull(request.getAvatarUrl(), appUser.getAvatarUrl(), appUser::setAvatarUrl);
+                    localNeedsUpdate |= patchAllowNull(request.getTimezone(), appUser.timezone(), appUser::setTimezone);
+                    localNeedsUpdate |= patchAllowNull(request.getProfileVisibility(), appUser.getProfileVisibility(), appUser::setProfileVisibility);
 
                     return (localNeedsUpdate ? appUserRepository.save(appUser) : Mono.just(appUser))
                             .flatMap(savedUser -> {
 
                                 boolean novuNeedsUpdate = false;
-                                novuNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.firstName(), appUser.getFirstName(), appUser::setFirstName);
-                                novuNeedsUpdate |= setIfChangedStrict(updateUserProfileRequest.lastName(), appUser.getLastName(), appUser::setLastName);
-                                novuNeedsUpdate |= setIfChangedAllowNull(updateUserProfileRequest.avatarUrl(), appUser.getAvatarUrl(), appUser::setAvatarUrl);
+
+                                // Check downstream notifications syncing targets against the freshly resolved database entity
+                                novuNeedsUpdate |= patchStrict(request.getFirstName(), appUser.getFirstName(), appUser::setFirstName);
+                                novuNeedsUpdate |= patchStrict(request.getLastName(), appUser.getLastName(), appUser::setLastName);
+                                novuNeedsUpdate |= patchAllowNull(request.getAvatarUrl(), appUser.getAvatarUrl(), appUser::setAvatarUrl);
 
                                 Mono<Void> novuUpdate = novuNeedsUpdate
                                         ? novuService.upsertSubscriber(savedUser.toNovuSubscriberRequest())
@@ -300,12 +308,12 @@ public class AppUserServiceImpl implements AppUserService {
                 .defaultIfEmpty(keycloakUserDto.emailVerified());
     }
 
-    private Mono<UpdateUserProfileRequest> validateOnboardingPolicy(UpdateUserProfileRequest updateUserProfileRequest, ViewerContext viewerContext) {
-        OnboardingPolicy.Result result = viewerContext.checkOnboardingPolicy(updateUserProfileRequest);
+    private Mono<UpdateUserProfileRequest> validateOnboardingPolicy(UpdateUserProfileRequest request, ViewerContext viewerContext) {
+        OnboardingPolicy.Result result = viewerContext.checkOnboardingPolicy(request);
         if (!result.isSatisfied()) {
             return Mono.error(new OnboardingPolicyViolationException(result.violations()));
         }
-        return Mono.just(updateUserProfileRequest);
+        return Mono.just(request);
     }
 
     @Deprecated

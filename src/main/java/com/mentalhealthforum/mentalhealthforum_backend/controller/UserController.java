@@ -131,14 +131,14 @@ public class UserController {
                                         message = String.format(
                                                 "Profile updated. A verification link has been sent to %s. " +
                                                 "Your email will be updated once verified.",
-                                                updateUserProfileRequest.email().toLowerCase()
+                                                profileUpdateResult.pendingEmail()
                                         );
                                     }
                                     else {
                                         message = String.format(
                                                 "Profile updated, but we're having trouble sending the verification link to %s. " +
                                                 "You can request a new link later.",
-                                                updateUserProfileRequest.email().toLowerCase()
+                                                profileUpdateResult.pendingEmail()
                                         );
                                     }
                                 }

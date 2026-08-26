@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.setIfChanged;
+import static com.mentalhealthforum.mentalhealthforum_backend.utils.PatchUtils.*;
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUtils.normalizeUnicode;
 
 @Service
@@ -268,21 +268,32 @@ public class AdminUserServiceImpl implements AdminUserService {
                         UserRepresentation userRep = adminManager.findUserByUserId(userId)
                                 .orElseThrow(UserDoesNotExistException::new);
 
-                        boolean isEnabledChanged = setIfChanged(
-                                request.isEnabled(),
+                        boolean isEnabledChanged = patchStrict(
+                                request.getIsEnabled(),
                                 userRep.isEnabled(),
                                 userRep::setEnabled
                         );
 
-                        List<String> currentGroups = adminManager.getUserGroups(userId);
-                        String targetGroupPath = request.group().getPath();
+                        boolean isGroupChanged = false;
 
-                        boolean isGroupChanged = currentGroups.isEmpty()
-                                || !currentGroups.contains(targetGroupPath);
+                        // Only evaluate group changes if the admin explicitly provided a group in the payload
+                        if(request.getGroup() != null && request.getGroup().isPresent()){
+                            GroupPath targetGroupPathEnum = request.getGroup().get();
 
-                        if(isGroupChanged){
-                            adminManager.assignUserToGroup(userId, request.group());
-                            log.info("Updated group for user {} to {}", userId, targetGroupPath);
+                            if(targetGroupPathEnum != null){
+                                String targetGroupPathStr = targetGroupPathEnum.getPath();
+                                List<String> currentGroups = adminManager.getUserGroups(userId);
+
+                                isGroupChanged = currentGroups.isEmpty()
+                                        || !currentGroups.contains(targetGroupPathStr);
+
+                                if(isGroupChanged){
+                                    adminManager.assignUserToGroup(userId, targetGroupPathEnum);
+                                    log.info("Updated group for user {} to {}", userId, targetGroupPathStr);
+                                }
+
+                            }
+
                         }
 
                         if(isEnabledChanged || isGroupChanged){
