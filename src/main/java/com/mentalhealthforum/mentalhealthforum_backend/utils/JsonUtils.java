@@ -7,6 +7,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class JsonUtils {
 
     private static final Logger log = LoggerFactory.getLogger(JsonUtils.class);
@@ -37,6 +40,24 @@ public class JsonUtils {
             throw new IllegalArgumentException("Failed to deserialize JSON: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * Deserializes a JSON string to a List of the specified element type.
+     * This is a convenience method for common use cases like backup codes.
+     */
+    public static <T> List<T> jsonStringToList(String json, Class<T> elementType){
+        if (json == null || json.isBlank()) {
+            return new ArrayList<>();
+        }
+        try {
+            return objectMapper.readValue(json, objectMapper.getTypeFactory().constructCollectionType(List.class, elementType));
+        } catch (Exception e) {
+            log.error("Failed to deserialize JSON string to List<{}>: {}", elementType.getSimpleName(), json, e);
+            return new ArrayList<>();
+        }
+    }
+
+
     /**
      * Serializes an object to its JSON string representation.
      *

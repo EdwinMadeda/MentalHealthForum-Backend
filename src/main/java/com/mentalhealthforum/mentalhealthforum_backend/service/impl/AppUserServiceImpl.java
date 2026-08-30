@@ -112,6 +112,10 @@ public class AppUserServiceImpl implements AppUserService {
                                 localNeedsUpdate |= setIfChanged(userDetails.getRoles(), existingUser.getRoles(), existingUser::setRoles);
                                 localNeedsUpdate |= setIfChanged(userDetails.getGroups(), existingUser.getGroups(), existingUser::setGroups);
 
+                                if(!existingUser.isAdmin()){
+                                    existingUser.disableMfa();
+                                }
+
                                 return localNeedsUpdate ? appUserRepository.save(existingUser) : Mono.just(existingUser);
                             })
                             .switchIfEmpty(Mono.defer(() ->

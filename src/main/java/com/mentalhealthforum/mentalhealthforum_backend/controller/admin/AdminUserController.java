@@ -22,7 +22,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/users")
-@PreAuthorize("hasRole('ADMIN')")
 public class AdminUserController {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserController.class);
@@ -74,7 +73,7 @@ public class AdminUserController {
 
         return adminUserService.createUserAsAdmin(request, viewerContext)
                 .map(response -> {
-                    // Build success response
+                    // Build Success response
                     String message = "User created successfully. %s".formatted(
                             response.emailSent()
                                 ? "An invitation email with temporary credentials has been sent to the user."

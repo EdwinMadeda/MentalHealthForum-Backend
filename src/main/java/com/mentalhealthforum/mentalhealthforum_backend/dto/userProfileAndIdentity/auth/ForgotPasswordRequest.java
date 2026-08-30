@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth;
 
 import com.mentalhealthforum.mentalhealthforum_backend.validation.ValidEmail;
+import com.mentalhealthforum.mentalhealthforum_backend.validation.otp.ValidOtp;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.password.PasswordMatching;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.password.StrongPassword;
 import jakarta.validation.constraints.NotBlank;
@@ -13,6 +14,7 @@ public record ForgotPasswordRequest(
         String email,
 
         @NotBlank(message = "Otp code is required.")
+        @ValidOtp
         String otpCode,
 
         @NotBlank(message = "New password is required.")

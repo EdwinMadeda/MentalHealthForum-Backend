@@ -30,6 +30,7 @@ import java.util.UUID;
 /**
  * Reactive exception handler for 401 (Authentication) and 403 (Authorization) errors.
  * Implements reactive interfaces ServerAuthenticationEntryPoint and ServerAccessDeniedHandler.
+ * Asks "Why was it denied? What status code should we return?"
  */
 @Component
 public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint, ServerAccessDeniedHandler {
@@ -85,6 +86,7 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
                                         scheduledAt,
                                         String.format("within %s days", AppConstants.ACCOUNT_DELETION_RETENTION_WINDOW)
                                 );
+
 
                                 // Block access if account is pending deletion or purged
                                 if(appUser.isPendingDeletion()){
@@ -143,6 +145,15 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
                                                                     });
                                                         }
 
+                                                        if(isAdminPath(exchange) && !appUser.isMfaEnabled()){
+                                                            return writeErrorResponse(
+                                                                    exchange,
+                                                                    HttpStatus.PRECONDITION_REQUIRED,
+                                                                    ErrorCode.MFA_REQUIRED,
+                                                                    "MFA must be enabled before accessing admin resources."
+                                                            );
+                                                        }
+
                                                         // Check onboarding
 //                                                        boolean isOnboarding = jwtAuthenticationToken.getAuthorities().stream()
 //                                                                .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ONBOARDING"));
@@ -179,6 +190,15 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
                 ));
     }
 
+    /**
+     * Check if the request is for an admin path (excluding MFA setup endpoints)
+     * */
+    private boolean isAdminPath(ServerWebExchange exchange) {
+        String path = exchange.getRequest().getPath().value();
+        return path.startsWith("/api/admin") &&
+                !path.startsWith("/api/admin/mfa/setup") &&
+                !path.startsWith("/api/admin/mfa/confirm");
+    }
 
     /**
      * Sets headers, creates the custom DTO, writes JSON to the response body, and completes the Mono.

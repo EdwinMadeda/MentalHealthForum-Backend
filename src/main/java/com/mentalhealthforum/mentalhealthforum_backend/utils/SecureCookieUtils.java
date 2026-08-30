@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.utils;
 
 import org.springframework.http.ResponseCookie;
+import  org.springframework.http.HttpCookie;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
@@ -21,9 +22,14 @@ import java.util.Optional;
 @Component
 public class SecureCookieUtils {
 
+    // Set to 'false' for local development (HTTP) so Postman can see and store the cookies.
+    // Set to 'true' in production (HTTPS) to prevent cookie interception.
+    private static final boolean IS_SECURE = false;
+
     // -- Cookie Names ---
     private static final String ACCESS_TOKEN_NAME = "ACCESS_TOKEN";
     private static final String REFRESH_TOKEN_NAME = "REFRESH_TOKEN";
+    private static final String MFA_STATE_TOKEN_NAME = "MFA_STATE_TOKEN";
 
     /**
      * Sets both ACCESS_TOKEN (plain) and REFRESH_TOKEN (encoded) cookies on the response.
@@ -35,12 +41,11 @@ public class SecureCookieUtils {
             long accessTokenExpirySec,
             long refreshTokenExpirySec
     ){
-        final boolean isSecure = false;
 
         // 1. ACCESS_TOKEN (Short-lived, used in Auth header usually, kept plain in cookie)
         ResponseCookie accessCookie = ResponseCookie.from(ACCESS_TOKEN_NAME, accessToken)
                 .httpOnly(true)
-                .secure(isSecure) // Ensure it's only sent over HTTPS
+                .secure(IS_SECURE) // Ensure it's only sent over HTTPS
                 .path("/")
                 .maxAge(accessTokenExpirySec)
                 .sameSite("Strict")
@@ -52,7 +57,7 @@ public class SecureCookieUtils {
 
         ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_NAME, encodedRefreshToken)
                 .httpOnly(true)
-                .secure(isSecure) // Ensure it's only sent over HTTPS
+                .secure(IS_SECURE) // Ensure it's only sent over HTTPS
                 .path("/")
                 .maxAge(refreshTokenExpirySec)
                 .sameSite("Strict")
@@ -68,12 +73,12 @@ public class SecureCookieUtils {
      * @return Mono<String> containing the decoded refresh token value.
      */
     public Mono<String> getDecodedRefreshToken(ServerHttpRequest request){
-        MultiValueMap<String, org.springframework.http.HttpCookie> cookies = request.getCookies();
+        MultiValueMap<String, HttpCookie> cookies = request.getCookies();
 
-        Optional<org.springframework.http.HttpCookie> cookieOpt = Optional.ofNullable(cookies.getFirst(REFRESH_TOKEN_NAME));
+        Optional<HttpCookie> cookieOpt = Optional.ofNullable(cookies.getFirst(REFRESH_TOKEN_NAME));
 
          return Mono.justOrEmpty(cookieOpt)
-         .map(org.springframework.http.HttpCookie::getValue)
+         .map(HttpCookie::getValue)
          .switchIfEmpty(Mono.error(new IllegalStateException("Refresh token cookie missing.")))
          .map(this::decodeValue);
     }
@@ -87,7 +92,7 @@ public class SecureCookieUtils {
         // 1. ACCESS_TOKEN (Short-lived, used in Auth header usually, kept plain in cookie)
         ResponseCookie accessCookie = ResponseCookie.from(ACCESS_TOKEN_NAME, "")
                 .httpOnly(true)
-                .secure(true) // Ensure it's only sent over HTTPS
+                .secure(IS_SECURE) // Ensure it's only sent over HTTPS
                 .path("/")
                 .maxAge(0)
                 .sameSite("Strict")
@@ -95,7 +100,7 @@ public class SecureCookieUtils {
 
         ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_NAME, "")
                 .httpOnly(true)
-                .secure(true) // Ensure it's only sent over HTTPS
+                .secure(IS_SECURE) // Ensure it's only sent over HTTPS
                 .path("/")
                 .maxAge(0)
                 .sameSite("Strict")
@@ -104,6 +109,53 @@ public class SecureCookieUtils {
         response.addCookie(accessCookie);
         response.addCookie(refreshCookie);
     }
+
+    // ==================== MFA STATE COOKIE ====================
+
+    /**
+     * Set the MFA state token as an HttpOnly cookie.
+     * This is used during the MFA challenge flow.
+     * */
+    public void setMfaStateCookie(ServerHttpResponse response, String stateToken, long expirySeconds){
+        ResponseCookie mfaStateCookie = ResponseCookie.from(MFA_STATE_TOKEN_NAME, stateToken)
+                .httpOnly(true)
+                .secure(IS_SECURE)
+                .path("/")
+                .maxAge(expirySeconds)
+                .sameSite("Strict")
+                .build();
+        response.addCookie(mfaStateCookie);
+    }
+
+    /**
+     * Extracts the MFA state token from the cookie
+     * */
+    public Mono<String> getMfaStateToken(ServerHttpRequest request){
+        MultiValueMap<String, HttpCookie> cookies = request.getCookies();
+        Optional<HttpCookie> cookieOpt = Optional.ofNullable(cookies.getFirst(MFA_STATE_TOKEN_NAME));
+
+        return Mono.justOrEmpty(cookieOpt)
+                .map(HttpCookie::getValue);
+        
+    }
+
+    /**
+     * Clears the MFA state cookie.
+     */
+    public void clearMfaStateTokenCookie(
+            ServerHttpResponse response
+    ){
+        ResponseCookie mfaStateCookie = ResponseCookie.from(MFA_STATE_TOKEN_NAME, "")
+                .httpOnly(true)
+                .secure(IS_SECURE) // Ensure it's only sent over HTTPS
+                .path("/")
+                .maxAge(0)
+                .sameSite("Strict")
+                .build();
+
+        response.addCookie(mfaStateCookie);
+    }
+
 
     // --- Internal Encoding/Decoding Logic ---
 

@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.ForgotPasswordInitResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.ForgotPasswordRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
 import com.mentalhealthforum.mentalhealthforum_backend.model.PendingUserEntity;
@@ -53,7 +54,7 @@ public interface UserService {
     Mono<ProfileUpdateResult> updateUserProfile(String userId, UpdateUserProfileRequest updateUserProfileRequest);
 
 
-    Mono<Void> initiateForgotPassword(String email);
+    Mono<ForgotPasswordInitResponse> initiateForgotPassword(String email);
 
     Mono<Void> completeForgotPassword(ForgotPasswordRequest request);
 

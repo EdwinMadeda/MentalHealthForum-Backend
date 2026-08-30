@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
+//import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.NovuSubscriberData;
@@ -21,6 +22,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.validation.lastName.Valid
 import com.mentalhealthforum.mentalhealthforum_backend.validation.url.ValidUrl;
 import com.mentalhealthforum.mentalhealthforum_backend.validation.username.ValidUsername;
 import jakarta.validation.constraints.*;
+
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
@@ -28,11 +30,10 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * R2DBC Entity representing the internal application user profile.
@@ -180,6 +181,21 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     @Column("purged_at")
     private Instant purgedAt;
 
+    // --- Multi-Factor Authentication ---
+
+    @Column("mfa_enabled")
+    private Boolean mfaEnabled = false;
+
+    @Column("mfa_secret") // Enabled TOTP secret (for future TOTP support)
+    private String mfaSecret;
+
+    @Column("mfa_hashed_backup_codes") // JSON array of hashed backup codes
+    private String mfaHashedBackupCodes;
+
+    @Column("mfa_enabled_at")
+    private Instant mfaEnabledAt;
+
+
     // --- Transient / helper fields ---
     @Transient
     private Boolean isSelf = false;
@@ -214,6 +230,40 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     @Transient
     public OnboardingPolicy.Result getOnboardingPolicyResult(){
         return checkOnboardingPolicy(this);
+    }
+
+    @Transient
+    public boolean isMfaEnabled() {
+        return Boolean.TRUE.equals(mfaEnabled);
+    }
+
+    @Transient
+    private List<String> rawMfaBackupCodes;
+
+    /**
+     * Gets the backup codes as a List of Strings.
+     * Deserializes from the JSON string stored in the database.
+     */
+    @Transient
+    public List<String> getMfaHashedBackupCodesList() {
+        if(mfaHashedBackupCodes == null || mfaHashedBackupCodes.isBlank()){
+            return new ArrayList<>();
+        }
+       return JsonUtils.jsonStringToList(mfaHashedBackupCodes, String.class);
+    }
+
+    /**
+     * Sets the backup codes from a List of Strings.
+     * Serializes the list to a JSON string for database storage.
+     */
+    @Transient
+    public void setMfaHashedBackupCodesList(List<String> backupCodes){
+        if(backupCodes == null || backupCodes.isEmpty()) {
+            this.mfaHashedBackupCodes = null;
+        }
+        else {
+            this.mfaHashedBackupCodes = JsonUtils.objectToJsonString(backupCodes);
+        }
     }
 
     // --- Constructors ---
@@ -388,5 +438,30 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
         );
     }
 
+    /**
+     * Enables MFA and generates backup codes.
+     */
+    public void enableMfa(List<String> hashedBackupCodes) {
+        this.mfaEnabled = true;
+        this.mfaEnabledAt = Instant.now();
+        setMfaHashedBackupCodesList(hashedBackupCodes);
+    }
+
+    /**
+     * Disables MFA and clears all MFA-related fields.
+     */
+    public void disableMfa() {
+        this.mfaEnabled = false;
+        this.mfaHashedBackupCodes = null;
+        this.mfaEnabledAt = null;
+    }
+
+    /**
+     * Set the raw unhashed backup codes.
+     * Remains purely transient.
+     */
+    public void setRawBackupCodes(List<String> rawBackupCodes){
+        this.rawMfaBackupCodes = rawBackupCodes;
+    }
 
 }

@@ -72,6 +72,7 @@ public enum ErrorCode {
 
     // --- Action Required Error ---
     USER_ACTION_REQUIRED(HttpStatus.FORBIDDEN, "User authentication succeeded but requires further action."),
+    MFA_REQUIRED(HttpStatus.PRECONDITION_REQUIRED, "MFA required."),
 
     // --- Generic Fallback ---
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected internal server error occurred."),

@@ -1,13 +1,10 @@
 package com.mentalhealthforum.mentalhealthforum_backend.config;
 
 
-import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserModerationService;
-import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.ReactiveAuthorizationManager;
 import org.springframework.security.core.Authentication;
@@ -16,11 +13,12 @@ import org.springframework.security.web.server.authorization.AuthorizationContex
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-import java.nio.file.AccessDeniedException;
-import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Asks "Should this request be allowed?"
+ * */
 @Component
 public class AccessAuthorizationManager implements ReactiveAuthorizationManager<AuthorizationContext> {
 
@@ -76,7 +74,7 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
                                                         }
 
                                                         // Proceed with accountStatus/onboarding/role checks
-                                                        return checkOnboardingAndRoles(appUser.isOnboarding(), jwtAuthenticationToken, path);
+                                                        return checkMfaOnboardingAndRoles(appUser, jwtAuthenticationToken, path);
 
                                                     });
                                         });
@@ -95,17 +93,27 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
         return path.matches(SecurityConstants.REACTIVATION_PATH_REGEX);
     }
 
-    private Mono<AuthorizationDecision> checkOnboardingAndRoles( boolean isOnboarding, JwtAuthenticationToken jwtAuthenticationToken, String path) {
+    private Mono<AuthorizationDecision> checkMfaOnboardingAndRoles( AppUserEntity appUser, JwtAuthenticationToken jwtAuthenticationToken, String path) {
 
         //boolean isOnboarding = hasRole(jwtAuthenticationToken, "ROLE_ONBOARDING");
+        boolean isAdmin = hasRole(jwtAuthenticationToken, "ROLE_ADMIN");
+
+        if(path.startsWith("/api/admin")){
+            // Allow MFA setup endpoints without MFA (so admin can enable it)
+            if(isMfaSetupPath(path)){
+                return Mono.just(new AuthorizationDecision(isAdmin));
+            }
+
+            // MFA must be enabled for all other admin endpoints
+            if(isAdmin && !appUser.isMfaEnabled()){
+                return Mono.just(new AuthorizationDecision(false));
+            }
+        }
 
         // If onboarding, check the path
-        if(isOnboarding){
+        if(appUser.isOnboarding()){
             // Allow self-profile (to satisfy requirements) operations (get, update, reactivate)
-            if(path.matches("/api/users/[a-f0-9-]+") ||  // GET /api/users/{uuid}
-                    path.matches("/api/users/profile") ||      // PATCH/DELETE /api/users/profile
-                    path.matches("/api/users/reactivate") ||   // POST /api/users/reactivate
-                    path.matches("/api/users/reset-password")) { // POST /api/users/reset-password
+            if(isOnboardingPath(path)) {
                 return Mono.just(new AuthorizationDecision(true));
             }
 
@@ -125,7 +133,6 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
 
         // For admin paths, check ADMIN role
         if(path.startsWith("/api/admin")){
-            boolean isAdmin = hasRole(jwtAuthenticationToken, "ROLE_ADMIN");
             return Mono.just(new AuthorizationDecision(isAdmin));
         }
 
@@ -146,7 +153,19 @@ public class AccessAuthorizationManager implements ReactiveAuthorizationManager<
     }
 
     // Helper methods
-    private boolean hasRole(JwtAuthenticationToken jwtAuthenticationToken, String role){
+    private boolean isMfaSetupPath(String path){
+        return path.startsWith("/api/admin/mfa/setup") ||
+               path.startsWith("/api/admin/mfa/confirm");
+    }
+
+    private boolean isOnboardingPath(String path){
+        return path.matches("/api/users/[a-f0-9-]+") ||  // GET /api/users/{uuid}
+                path.matches("/api/users/profile") ||      // PATCH/DELETE /api/users/profile
+                path.matches("/api/users/reactivate") ||   // POST /api/users/reactivate
+                path.matches("/api/users/reset-password"); // POST /api/users/reset-password
+    }
+
+    private boolean hasRole(JwtAuthenticationToken jwtAuthenticationToken, String role) {
         return jwtAuthenticationToken.getAuthorities().stream()
                 .anyMatch(grantedAuthority ->
                         grantedAuthority.getAuthority().equals(role));

@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.ForgotPasswordInitResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.ForgotPasswordRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AppUserVerificationPayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.OtpPayload;
@@ -310,7 +311,7 @@ public class UserServiceImpl implements UserService {
 
 
     @Override
-    public Mono<Void> initiateForgotPassword(String email){
+    public Mono<ForgotPasswordInitResponse> initiateForgotPassword(String email){
         // Start the reactive chain
         return Mono.fromCallable(()-> adminManager.findUserByEmail(email))
                 .subscribeOn(Schedulers.boundedElastic())
@@ -324,17 +325,18 @@ public class UserServiceImpl implements UserService {
                                         email,
                                         new OtpPayload(otpResult.code(), otpResult.expiryMinutes())
                                 ))
-                                .then();
+                                .thenReturn(ForgotPasswordInitResponse.forEmail(email));
                     }
                     // If user DOES NOT exist, log it internally but do nothing
+                    // Return a lookalike success payload
                     log.warn("Forgot password requested for non-existent email: {}", email);
-                    return Mono.empty();
+                    return Mono.just(ForgotPasswordInitResponse.forEmail(email));
                 })
                 .onErrorResume(e -> {
-                    log.error("Silent error during forgot password intitiation: ", e);
-                    return Mono.empty();
-                })
-                .then();
+                    // System fallback: Still hide the failure from the client using a lookalike response
+                    log.error("Silent error during forgot password initiation: ", e);
+                    return Mono.just(ForgotPasswordInitResponse.forEmail(email));
+                });
     }
 
     @Override
@@ -354,6 +356,10 @@ public class UserServiceImpl implements UserService {
                 // If they're in the lobby, move them to the next stage
                 .flatMap(adminInvitationService::processPasswordResetSuccess)
                 .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(UserDoesNotExistException.class, e -> {
+                    log.warn("Password reset completion attempted for non-existent email: {}", forgotPasswordRequest.email());
+                    return Mono.empty();
+                })
                 .doOnSuccess(unused -> log.info("Password successfully reset via OTP for new user: {}", forgotPasswordRequest.email()))
                 .then();
     }

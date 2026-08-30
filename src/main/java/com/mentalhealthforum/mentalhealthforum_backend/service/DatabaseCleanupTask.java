@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.MfaStateCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,6 +22,7 @@ public class DatabaseCleanupTask {
     private final ThreadRepository threadRepository;
     private final UserConnectRepository userConnectRepository;
     private final AccountPurgeSchedulerService accountPurgeSchedulerService;
+    private final MfaStateCache mfaStateCache;
 
     public DatabaseCleanupTask(
             OtpCredentialRepository otpCredentialRepository,
@@ -29,7 +31,7 @@ public class DatabaseCleanupTask {
             CategoryService categoryService,
             ThreadRepository threadRepository,
             UserConnectRepository userConnectRepository,
-            AccountPurgeSchedulerService accountPurgeSchedulerService) {
+            AccountPurgeSchedulerService accountPurgeSchedulerService, MfaStateCache mfaStateCache) {
         this.otpCredentialRepository = otpCredentialRepository;
         this.verificationTokenRepository = verificationTokenRepository;
         this.pendingUserRepository = pendingUserRepository;
@@ -37,6 +39,7 @@ public class DatabaseCleanupTask {
         this.threadRepository = threadRepository;
         this.userConnectRepository = userConnectRepository;
         this.accountPurgeSchedulerService = accountPurgeSchedulerService;
+        this.mfaStateCache = mfaStateCache;
     }
 
     // Runs at 3:00 AM every day
@@ -60,7 +63,7 @@ public class DatabaseCleanupTask {
         // Delete expired tokens first
         verificationTokenRepository.deleteAllExpired(Instant.now())
                 .doOnSuccess(count -> {
-                    if(count > 0){ log.info("Cron success: Removed {} expired verification tokens.", count);}
+                    if(count > 0){ log.info("Cron Success: Removed {} expired verification tokens.", count);}
                     else { log.debug("Cron Success: No expired verification tokens found to clean up.");}
                 })
                 .doOnError(e -> log.debug("Cron Failure: Failed to executed expired verification token cleanup task: Reason: {}", e.getMessage()))
@@ -121,5 +124,10 @@ public class DatabaseCleanupTask {
 
     }
 
+    // Runs every 5 minutes
+    public void cleanUpExpiredMfaSession() {
+        log.debug("Starting cleanup of expired MFA states");
+        mfaStateCache.cleanup();
+    }
 
 }

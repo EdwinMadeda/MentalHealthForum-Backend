@@ -38,3 +38,6 @@ out/
 
 ### DB
 /src/main/resources/db/*
+
+### Project temp files ###
+TODO*.md

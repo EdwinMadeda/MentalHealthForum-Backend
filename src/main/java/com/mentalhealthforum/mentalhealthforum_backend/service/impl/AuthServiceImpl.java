@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.AuthResult;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.JwtResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.auth.LoginRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
@@ -12,7 +13,9 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.AuthenticationFailedException;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidTokenException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserActionRequiredException;
+import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
@@ -34,6 +37,10 @@ import reactor.core.scheduler.Schedulers;
 import java.util.Map;
 import java.util.UUID;
 
+import static com.mentalhealthforum.mentalhealthforum_backend.contants.OtpConstants.OTP_EXPIRY_SECONDS;
+import static com.mentalhealthforum.mentalhealthforum_backend.contants.OtpConstants.OTP_LENGTH;
+import static com.mentalhealthforum.mentalhealthforum_backend.utils.MaskEmailUtils.maskEmail;
+
 /**
  * Implementation of the AuthService using WebClient to interact with Keycloak
  * for manual authentication (ROPC Grant) and token refreshing.
@@ -52,10 +59,13 @@ public class AuthServiceImpl implements AuthService {
     private final AdminInvitationRepository adminInvitationRepository;
     private final AppUserService appUserService;
     private final UserActivityService userActivityService;
+    private final MfaService mfaService;
+    private final AppUserRepository appUserRepository;
     private final KeycloakAdminManager adminManager;
     private final KeycloakUserDtoMapper keycloakUserDtoMapper;
     private final JwtClaimsExtractor jwtClaimsExtractor;
     private final JwtUtils jwtUtils;
+    private final MfaStateCache mfaStateCache;
 
     private final WebClient webClient;
     private final String clientId;
@@ -65,21 +75,24 @@ public class AuthServiceImpl implements AuthService {
     public AuthServiceImpl(
             AdminInvitationRepository adminInvitationRepository,
             AppUserService appUserService,
-            AppUserRepository appUserRepository,
             UserActivityService userActivityService,
+            MfaService mfaService, AppUserRepository appUserRepository,
             KeycloakAdminManager adminManager,
             KeycloakUserDtoMapper keycloakUserDtoMapper,
             JwtClaimsExtractor jwtClaimsExtractor,
-            JwtUtils jwtUtils,
+            JwtUtils jwtUtils, MfaStateCache mfaStateCache,
             WebClient.Builder webClientBuilder,
             KeycloakProperties properties) {
         this.adminInvitationRepository = adminInvitationRepository;
         this.appUserService = appUserService;
         this.userActivityService = userActivityService;
+        this.mfaService = mfaService;
+        this.appUserRepository = appUserRepository;
         this.adminManager = adminManager;
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
         this.jwtUtils = jwtUtils;
+        this.mfaStateCache = mfaStateCache;
 
         String authServerUrl = properties.getAuthServerUrl();
         String realm = properties.getRealm();
@@ -99,11 +112,12 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * Authenticates a user against Keycloak using ROPC (Resource Owner Password Credentials) Grant.
+     *
      * @param request LoginRequest containing username and password.
      * @return Mono<JwtResponse> containing the access and refresh tokens.
      */
     @Override
-    public Mono<JwtResponse> authenticate(LoginRequest request){
+    public Mono<AuthResult> authenticate(LoginRequest request, String ipAddress, String userAgent){
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
 
         // 1. OAuth2 Grant Type and Client Credentials
@@ -167,43 +181,16 @@ public class AuthServiceImpl implements AuthService {
                     Jwt jwt = jwtUtils.createJwtFromToken(jwtResponse.accessToken());
                     UUID keycloakId = UUID.fromString(jwt.getSubject());
 
-                   return  adminInvitationRepository.findByKeycloakId(keycloakId)
-                           .flatMap(adminInvitation -> {
-                               boolean isRestrictedStage =
-                                       adminInvitation.getCurrentStage() == OnboardingStage.AWAITING_VERIFICATION ||
-                                       adminInvitation.getCurrentStage() == OnboardingStage.AWAITING_PASSWORD_RESET;
-
-                               // If the one-time pass was already invalidated, block entry
-                               if(isRestrictedStage && Boolean.FALSE.equals(adminInvitation.getIsInitialLogin())){
-                                   log.warn("Access denied: One time pass for user {} has already been used", keycloakId);
-//                                   log.warn("Access denied: Temporary credentials for user {} already used or expired.", keycloakId);
-                                   return Mono.error(
-                                           new AuthenticationFailedException("Your temporary password has expired. Please use 'Forgot Password' to set a new one.")
-                                   );
-                               }
-                               // First time? Invalidate the pass and let them through
-                               return adminInvitationRepository.invalidateOneTimePass(keycloakId)
-                                       .thenReturn(jwtResponse);
-                           })
-                           // No Lobby record? They are a regular user, let them through
-                           .defaultIfEmpty(jwtResponse);
-                })
-                .flatMap(jwtResponse -> {
-                    Jwt jwt = jwtUtils.createJwtFromToken(jwtResponse.accessToken());
-                    UUID keycloakId = UUID.fromString(jwt.getSubject());
-
-                    // Critical path: Database updates
-                    Mono<Void> activityUpdates = userActivityService.recordLoginActivity(keycloakId);
-
-                    // Fire-and-forget: Sync in the background
-                    syncUserAfterAuth(jwtResponse.accessToken())
-                            .subscribeOn(Schedulers.boundedElastic())
-                            .doOnSuccess(v -> log.debug("On Login: Background sync completed for user {}", keycloakId))
-                            .doOnError(e -> log.error("On Login: Background sync failed for user {}", keycloakId, e))
-                            .subscribe();
-
-                    // Return immediately after activity updates
-                    return activityUpdates.thenReturn(jwtResponse);
+                    // Check if MFA is enabled for user
+                    return appUserRepository.findAppUserByKeycloakId(keycloakId.toString())
+                            .flatMap(appUser -> {
+                                // MFA is enabled — challenge the admin
+                                if(appUser.isMfaEnabled()){
+                                    // Don't issue tokens yet — hold them for MFA verification
+                                    return handleMfaChallenge(appUser, jwtResponse, ipAddress, userAgent);
+                                }
+                                return proceedWithLogin(jwtResponse, keycloakId);
+                            });
 
                 })
                 .onErrorResume(WebClientRequestException.class, e -> {
@@ -308,6 +295,130 @@ public class AuthServiceImpl implements AuthService {
                         })
                 .bodyToMono(Void.class)
                 .doOnError(e -> log.error("Unexpected error during Keycloak logout: {}", e.getMessage()));
+    }
+
+    @Override
+    public Mono<JwtResponse> issueFullTokens(String stateToken){
+
+        return mfaStateCache.getState(stateToken)
+                .switchIfEmpty(Mono.error(new InvalidTokenException("Invalid or expired MFA state")))
+                .flatMap(mfaState -> {
+                    MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+
+                    // 1. Correct Grant Type and Client Credentials
+                    formData.add("grant_type", "refresh_token");
+                    formData.add("client_id", clientId);
+                    formData.add("client_secret", clientSecret);
+
+                    // 2. The token to be refreshed
+                    formData.add("refresh_token", mfaState.refreshToken());
+
+                    return webClient.post()
+                            .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                            .body(BodyInserters.fromFormData(formData))
+                            .retrieve()
+                            .onStatus(
+                                    // Intercept only 4xx errors (Invalid Token)
+                                    HttpStatusCode::is4xxClientError,
+                                    response ->  {
+                                        return response.bodyToMono(String.class)
+                                                .doOnNext(body -> log.error("Keycloak Issue Full Token Failed (4xx) : {}", body))
+                                                .flatMap(body -> {
+                                                    return Mono.error(new AuthenticationFailedException(
+                                                            "Full Token issue failed. The refresh token is invalid or expired."
+                                                    ));
+                                                });
+                                    })
+                            .bodyToMono(JwtResponse.class)
+                            .flatMap(jwtResponse -> {
+                                Jwt jwt = jwtUtils.createJwtFromToken(jwtResponse.accessToken());
+                                UUID keycloakId = UUID.fromString(jwt.getSubject());
+
+                                // Critical path: Database updates
+                                Mono<Void> activityUpdates = userActivityService.trackActivity(keycloakId);
+
+                                // Fire-and-forget: Sync in the background
+                                syncUserAfterAuth(jwtResponse.accessToken())
+                                        .subscribeOn(Schedulers.boundedElastic())
+                                        .doOnSuccess(v -> log.debug("On Full Token Reissue: Background sync completed for user {}", keycloakId))
+                                        .doOnError(e -> log.error("On Full Token Reissue: Background sync failed for user {}", keycloakId, e))
+                                        .subscribe();
+
+                                // Return immediately after activity updates
+                                return activityUpdates.thenReturn(jwtResponse);
+
+                            });
+                });
+
+    }
+
+
+    // ==================== PRIVATE HELPERS ====================
+
+    /**
+     * Handles MFA challenge flow for users with MFA enabled.
+     * Generates a state token, sends OTP, and returns MFA challenge response.
+     */
+    private Mono<AuthResult> handleMfaChallenge(AppUserEntity appUser, JwtResponse jwtResponse, String ipAddress, String userAgent) {
+        // Don't issue tokens yet — we'll issue them after MFA verification
+        // The tokens are held temporarily in memory (or we could store them in the state)
+
+        return mfaService.initiateMfaChallenge(appUser, ipAddress, userAgent, jwtResponse.accessToken(), jwtResponse.refreshToken())
+                .flatMap(mfaState -> {
+                    // Return MFA challenge response instead of tokens
+                    // The frontend should show the MFA input screen
+                    return Mono.just(new AuthResult.MfaRequired(
+                            mfaState.stateToken(),
+                            maskEmail(appUser.getEmail()),
+                            OTP_LENGTH,
+                            OTP_EXPIRY_SECONDS
+                    ));
+                });
+
+    }
+
+    /**
+     * Proceed with normal login flow (MFA not enabled)
+     * */
+    private Mono<AuthResult> proceedWithLogin(JwtResponse jwtResponse, UUID keycloakId) {
+        // Existing login flow logic
+        return  adminInvitationRepository.findByKeycloakId(keycloakId)
+                .flatMap(adminInvitation -> {
+                    boolean isRestrictedStage =
+                            adminInvitation.getCurrentStage() == OnboardingStage.AWAITING_VERIFICATION ||
+                                    adminInvitation.getCurrentStage() == OnboardingStage.AWAITING_PASSWORD_RESET;
+
+                    // If the one-time pass was already invalidated, block entry
+                    if(isRestrictedStage && Boolean.FALSE.equals(adminInvitation.getIsInitialLogin())){
+                        log.warn("Access denied: One time pass for user {} has already been used", keycloakId);
+//                                   log.warn("Access denied: Temporary credentials for user {} already used or expired.", keycloakId);
+                        return Mono.error(
+                                new AuthenticationFailedException("Your temporary password has expired. Please use 'Forgot Password' to set a new one.")
+                        );
+                    }
+                    // First time? Invalidate the pass and let them through
+                    return adminInvitationRepository.invalidateOneTimePass(keycloakId)
+                            .thenReturn(jwtResponse);
+                })
+                // No Lobby record? They are a regular user, let them through
+                .defaultIfEmpty(jwtResponse)
+                .flatMap(response -> {
+
+                    // Critical path: Database updates
+                    Mono<Void> activityUpdates = userActivityService.recordLoginActivity(keycloakId);
+
+                    // Fire-and-forget: Sync in the background
+                    syncUserAfterAuth(jwtResponse.accessToken())
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .doOnSuccess(v -> log.debug("On Login: Background sync completed for user {}", keycloakId))
+                            .doOnError(e -> log.error("On Login: Background sync failed for user {}", keycloakId, e))
+                            .subscribe();
+
+                    // Return immediately after activity updates
+                    return activityUpdates.thenReturn(new AuthResult.Success(jwtResponse));
+
+                });
+
     }
 
     private Mono<Void> syncUserAfterAuth(String accessToken){

@@ -14,7 +14,9 @@ public enum NovuWorkflow {
     RENEW_INVITATION_LINK("renew-invitation-link", InvitationLinkRenewalPayload.class),
     APP_USER_VERIFICATION("app-user-verification", AppUserVerificationPayload.class),
 
-    MANUAL_TRIGGER_TEST("manual-trigger-test", ManualTriggerTestPayload.class);
+    MANUAL_TRIGGER_TEST("manual-trigger-test", ManualTriggerTestPayload.class),
+
+    ADMIN_MFA_OTP("admin-mfa-otp", AdminMfaOtpPayload.class);
 
     private final String workflowTrigger;
     private final Class<? extends NovuPayload> payloadClass;
