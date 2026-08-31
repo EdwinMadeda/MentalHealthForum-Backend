@@ -190,7 +190,12 @@ public class AuthServiceImpl implements AuthService {
                                     return handleMfaChallenge(appUser, jwtResponse, ipAddress, userAgent);
                                 }
                                 return proceedWithLogin(jwtResponse, keycloakId);
-                            });
+                            })
+                            .switchIfEmpty(Mono.defer(() -> {
+                                // User doesn't exist in DB yet - proceed with normal login
+                                log.info("User not yet synced, proceed with login : {}", keycloakId);
+                                return proceedWithLogin(jwtResponse, keycloakId);
+                            }));
 
                 })
                 .onErrorResume(WebClientRequestException.class, e -> {
