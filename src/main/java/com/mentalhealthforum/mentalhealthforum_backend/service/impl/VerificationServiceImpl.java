@@ -1,7 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.FrontendProperties;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.verification.VerificationDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AppUserVerificationPayload;
@@ -168,10 +167,11 @@ public class VerificationServiceImpl implements VerificationService {
     private Mono<Void> sendAppUserEmail(String userId, String anchorEmail, String newValue, String firstname){
         return createVerificationLink(anchorEmail, VerificationType.APP_USER, null, newValue)
                 .flatMap(verificationLink -> {
+
                     AppUserVerificationPayload payload = new AppUserVerificationPayload(
                             firstname,
                             verificationLink,
-                            newValue == null
+                            newValue != null
                     );
                     // Send newValue if it exists, otherwise anchorEmail
                     String targetRecipient = (newValue != null)? newValue: anchorEmail;

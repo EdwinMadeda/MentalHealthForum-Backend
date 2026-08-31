@@ -11,8 +11,8 @@ public record SelfRegPayload(
     @Override
     public Map<String, Object> toPayloadMap() {
         return Map.of(
-                "firstName", firstName,
-                "verificationLink", verificationLink
+                "first_name", firstName,
+                "verification_link", verificationLink
         );
     }
 }

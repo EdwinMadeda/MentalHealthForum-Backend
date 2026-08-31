@@ -7,14 +7,14 @@ import java.util.Map;
 public record AppUserVerificationPayload(
         String firstName,
         String verificationLink,
-        boolean isNew
+        boolean isEmailChange
 ) implements NovuPayload {
     @Override
     public Map<String, Object> toPayloadMap() {
         return Map.of(
-                "firstName", firstName,
-                "verificationLink", verificationLink,
-                "isNewUser", isNew
+                "first_name", firstName,
+                "verification_link", verificationLink,
+                "is_email_change", isEmailChange
         );
     }
 }

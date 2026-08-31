@@ -4,13 +4,13 @@ import com.mentalhealthforum.mentalhealthforum_backend.service.NovuPayload;
 
 import java.util.Map;
 
-public record AdminMfaOtpPayload(String firstName, String code, int expiryMinutes) implements NovuPayload {
+public record AdminMfaOtpPayload(String firstName, String code, long expiryMinutes) implements NovuPayload {
     @Override
     public Map<String, Object> toPayloadMap() {
         return Map.of(
-                    "firstName", firstName,
-                "otpCode", code,
-                "expiryMinutes", expiryMinutes
+                "first_name", firstName,
+                "otp_code", code,
+                "expiry_minutes", expiryMinutes
         );
     }
 }

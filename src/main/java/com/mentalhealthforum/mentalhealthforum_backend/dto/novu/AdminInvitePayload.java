@@ -17,10 +17,10 @@ public record AdminInvitePayload(
         String friendlyGroupName = GroupPath.getFriendlyName(groupPath);
 
         return Map.of(
-                "firstName", firstName,
-                "temporaryPassword", temporaryPassword,
-                "invitationLink", invitationLink,
-                "groupName", friendlyGroupName
+                "first_name", firstName,
+                "temporary_password", temporaryPassword,
+                "invitation_link", invitationLink,
+                "friendly_group_name", friendlyGroupName
         );
     }
 }

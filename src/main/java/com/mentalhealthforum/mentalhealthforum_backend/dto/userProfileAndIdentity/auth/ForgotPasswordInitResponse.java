@@ -8,7 +8,7 @@ public record ForgotPasswordInitResponse(
     boolean otpSent,
     String email,
     int otpLength,
-    int expirySeconds
+    long expirySeconds
 ) {
     public static ForgotPasswordInitResponse forEmail(String email){
         return new ForgotPasswordInitResponse(

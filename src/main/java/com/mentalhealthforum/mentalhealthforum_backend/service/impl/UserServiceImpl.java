@@ -241,8 +241,12 @@ public class UserServiceImpl implements UserService {
                                 null,
                                 ctx.newEmail
                         ).flatMap(verificationLink -> {
+
                             AppUserVerificationPayload payload = new AppUserVerificationPayload(
-                                    ctx.userRep.getFirstName(), verificationLink, false);
+                                    ctx.userRep.getFirstName(),
+                                    verificationLink,
+                                    true);
+
                             return novuService.triggerEvent(NovuWorkflow.APP_USER_VERIFICATION, ctx.userRep.getId(), ctx.newEmail, payload)
                                     .map(sent -> new ProfileUpdateResult(updatedUserDto, ctx.newEmail, sent));
                         });

@@ -70,7 +70,7 @@ public class AuthController {
                         return ResponseEntity.ok(new StandardSuccessResponse<>("Login successful."));
                     }
                     else if(result instanceof AuthResult.MfaRequired(
-                            String stateToken, String email, int otpLength, int expirySeconds
+                            String stateToken, String email, int otpLength, long expirySeconds
                     )){
                         cookieUtils.setMfaStateCookie(
                                 httpResponse,

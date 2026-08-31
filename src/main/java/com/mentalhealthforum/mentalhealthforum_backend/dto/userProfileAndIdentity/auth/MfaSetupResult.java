@@ -5,7 +5,7 @@ public record MfaSetupResult(
         String stateToken,
         String email,
         int otpLength,
-        int expirySeconds
+        long expirySeconds
 ) {
     public MfaSetupResponse toResponse(){
         return new MfaSetupResponse(

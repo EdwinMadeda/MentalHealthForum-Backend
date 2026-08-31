@@ -4,6 +4,6 @@ public sealed interface AuthResult {
 
     record Success(JwtResponse jwtResponse) implements AuthResult {}
 
-    record MfaRequired(String stateToken, String email, int otpLength, int expirySeconds) implements AuthResult {}
+    record MfaRequired(String stateToken, String email, int otpLength, long expirySeconds) implements AuthResult {}
 
 }

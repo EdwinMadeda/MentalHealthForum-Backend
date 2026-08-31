@@ -4,5 +4,5 @@ public record MfaSetupResponse(
         boolean setupRequired,
         String email,
         int otpLength,
-        int expirySeconds
+        long expirySeconds
 ) {}

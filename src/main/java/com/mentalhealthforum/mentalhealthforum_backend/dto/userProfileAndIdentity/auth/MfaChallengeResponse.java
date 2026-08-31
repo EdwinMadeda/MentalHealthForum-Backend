@@ -4,5 +4,5 @@ public record MfaChallengeResponse(
         boolean mfaRequired,
         String email,
         int otpLength,
-        int expirySeconds
+        long expirySeconds
 ) {}
