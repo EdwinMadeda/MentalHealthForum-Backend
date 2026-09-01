@@ -13,7 +13,7 @@ import java.util.UUID;
 public interface AdminInvitationService {
     Mono<AdminInvitationEntity> createInvitation(KeycloakUserDto keycloakUserDto, String invitedById);
 
-    Mono<AdminInvitationEntity> updateInvitation(KeycloakUserDto keycloakUserDto);
+    Mono<PendingAdminInviteDto> updateInvitation(KeycloakUserDto keycloakUserDto);
 
     Mono<Void> processVerificationSuccess(String userId);
 

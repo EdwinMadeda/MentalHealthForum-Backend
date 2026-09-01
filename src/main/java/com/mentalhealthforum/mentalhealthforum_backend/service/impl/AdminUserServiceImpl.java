@@ -1,10 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.AdminCreateUserRequest;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.AdminCreateUserResponse;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.AdminUpdateUserRequest;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.ReissueInvitationRequest;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AdminInvitePayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
@@ -13,6 +10,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitatio
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -238,6 +236,43 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     @Override
+    public Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request){
+        UUID userUUID = UUID.fromString(userId);
+
+        return appUserRepository.existsByKeycloakId(userUUID)
+                .flatMap(inAppUsers -> {
+                    // If user is already synced we shouldn't use this endpoint
+                    if (inAppUsers) {
+                        return Mono.error(
+                                new ApiException("User is already synced: Use 'Update Synced User' instead",
+                                        ErrorCode.VALIDATION_FAILED
+                                ));
+
+                    }
+
+                    // Check if they're in the lobby
+                    return adminInvitationRepository.findByKeycloakId(userUUID)
+                            .switchIfEmpty(Mono.error(new UserDoesNotExistException(
+                                    "User not found in pending invitations."
+                            )))
+                            .flatMap(invitation -> {
+                                
+                                OnboardingStage stage = invitation.getCurrentStage();
+                                if(invitation.getCurrentStage() == OnboardingStage.AWAITING_VERIFICATION){
+                                    return Mono.error(new UserNotReadyException(
+                                            "User hasn't verified email yet. Use 'Reissue Invite' to send a new invitation."
+                                    ));
+                                }
+
+                                // Proceed with keycloak update
+                                return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled());
+                            })
+                            .flatMap(adminInvitationService::updateInvitation);
+
+                });
+    }
+
+    @Override
     public Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request) {
         UUID userUUID = UUID.fromString(userId);
 
@@ -263,48 +298,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     }
 
                     // Proceed with keycloak update
-                    return Mono.fromCallable(()-> {
-                        // Fetch user from Keycloak
-                        UserRepresentation userRep = adminManager.findUserByUserId(userId)
-                                .orElseThrow(UserDoesNotExistException::new);
-
-                        boolean isEnabledChanged = patchStrict(
-                                request.getIsEnabled(),
-                                userRep.isEnabled(),
-                                userRep::setEnabled
-                        );
-
-                        boolean isGroupChanged = false;
-
-                        // Only evaluate group changes if the admin explicitly provided a group in the payload
-                        if(request.getGroup() != null && request.getGroup().isPresent()){
-                            GroupPath targetGroupPathEnum = request.getGroup().get();
-
-                            if(targetGroupPathEnum != null){
-                                String targetGroupPathStr = targetGroupPathEnum.getPath();
-                                List<String> currentGroups = adminManager.getUserGroups(userId);
-
-                                isGroupChanged = currentGroups.isEmpty()
-                                        || !currentGroups.contains(targetGroupPathStr);
-
-                                if(isGroupChanged){
-                                    adminManager.assignUserToGroup(userId, targetGroupPathEnum);
-                                    log.info("Updated group for user {} to {}", userId, targetGroupPathStr);
-                                }
-
-                            }
-
-                        }
-
-                        if(isEnabledChanged || isGroupChanged){
-                            adminManager.updateUser(userRep);
-                            log.info("Successfully updated profile for user ID: {}", userId);
-                        } else {
-                            log.debug("No profile changes detected for user ID: {}", userId);
-                        }
-
-                        return keycloakUserDtoMapper.mapToKeycloakUserDto(userRep);
-                    }).subscribeOn(Schedulers.boundedElastic());
+                    return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled());
                 });
     }
 
@@ -464,6 +458,54 @@ public class AdminUserServiceImpl implements AdminUserService {
 //        }
 
         return actions.stream().map(Enum::name).toList();
+    }
+
+    private Mono<KeycloakUserDto> updateUserInKeycloak(String userId, JsonNullable<GroupPath> group, JsonNullable<Boolean> isEnabled){
+        UUID userUUID = UUID.fromString(userId);
+
+        // Proceed with keycloak update
+        return Mono.fromCallable(()-> {
+            // Fetch user from Keycloak
+            UserRepresentation userRep = adminManager.findUserByUserId(userId)
+                    .orElseThrow(UserDoesNotExistException::new);
+
+            boolean isEnabledChanged = patchStrict(
+                    isEnabled,
+                    userRep.isEnabled(),
+                    userRep::setEnabled
+            );
+
+            boolean isGroupChanged = false;
+
+            // Only evaluate group changes if the admin explicitly provided a group in the payload
+            if(group != null && group.isPresent()){
+                GroupPath targetGroupPathEnum = group.get();
+
+                if(targetGroupPathEnum != null){
+                    String targetGroupPathStr = targetGroupPathEnum.getPath();
+                    List<String> currentGroups = adminManager.getUserGroups(userId);
+
+                    isGroupChanged = currentGroups.isEmpty()
+                            || !currentGroups.contains(targetGroupPathStr);
+
+                    if(isGroupChanged){
+                        adminManager.assignUserToGroup(userId, targetGroupPathEnum);
+                        log.info("Updated group for user {} to {}", userId, targetGroupPathStr);
+                    }
+
+                }
+
+            }
+
+            if(isEnabledChanged || isGroupChanged){
+                adminManager.updateUser(userRep);
+                log.info("Successfully updated profile for user ID: {}", userId);
+            } else {
+                log.debug("No profile changes detected for user ID: {}", userId);
+            }
+
+            return keycloakUserDtoMapper.mapToKeycloakUserDto(userRep);
+        }).subscribeOn(Schedulers.boundedElastic());
     }
 
 }

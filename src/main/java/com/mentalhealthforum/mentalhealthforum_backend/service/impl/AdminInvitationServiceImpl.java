@@ -9,14 +9,15 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PendingInviteSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AdminInvitationEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AdminInvitationService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.KeycloakAdminManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.r2dbc.core.DatabaseClient;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -37,17 +38,17 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
     private final KeycloakAdminManager adminManager;
     private final AdminInvitationRepository adminInvitationRepository;
     private final VerificationTokenRepository verificationTokenRepository;
-    private final DatabaseClient databaseClient;
+    private final AppUserRepository appUserRepository;
 
     public AdminInvitationServiceImpl(
             KeycloakAdminManager adminManager,
             AdminInvitationRepository adminInvitationRepository,
             VerificationTokenRepository verificationTokenRepository,
-            DatabaseClient databaseClient) {
+            AppUserRepository appUserRepository) {
         this.adminManager = adminManager;
         this.adminInvitationRepository = adminInvitationRepository;
         this.verificationTokenRepository = verificationTokenRepository;
-        this.databaseClient = databaseClient;
+        this.appUserRepository = appUserRepository;
     }
 
     @Override
@@ -68,7 +69,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
     }
 
     @Override
-    public Mono<AdminInvitationEntity> updateInvitation(KeycloakUserDto keycloakUserDto){
+    public Mono<PendingAdminInviteDto> updateInvitation(KeycloakUserDto keycloakUserDto){
         List<String> groups = adminManager.getUserGroups(keycloakUserDto.userId());
         return adminInvitationRepository.findByKeycloakId(UUID.fromString(keycloakUserDto.userId()))
                 .flatMap(existing -> {
@@ -82,7 +83,8 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                     existing.setUpdatedAt(Instant.now());
                     existing.setGroups(new HashSet<>(groups));
 
-                    return adminInvitationRepository.save(existing);
+                    return adminInvitationRepository.save(existing)
+                            .flatMap(this::toPendingInviteDto);
                 })
                 // If they aren't in the lobby, we just return empty so the chain continues
                 .switchIfEmpty(Mono.empty());
@@ -193,6 +195,41 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 .map(PendingInviteSortField::toSortOption)
                 .toList();
     }
+
+    public Mono<PendingAdminInviteDto> toPendingInviteDto(AdminInvitationEntity entity) {
+        if (entity == null) {
+            return Mono.empty();
+        }
+
+        return appUserRepository.findAppUserByKeycloakId(entity.getInvitedBy().toString())
+                .map(AppUserEntity::toUserDetails)
+                .map(userDetails -> {
+                    String invitedByDisplayName = userDetails.getDisplayName();
+                    String invitedByAvatarUrl = userDetails.getAvatarUrl();
+
+                    return new PendingAdminInviteDto(
+                            entity.getKeycloakId(),
+                            entity.getUsername(),
+                            entity.getFirstName(),
+                            entity.getLastName(),
+                            entity.getEmail(),
+
+                            entity.getGroups() != null ? entity.getGroups().toArray(new String[0]) : new String[0],
+                            entity.getIsEnabled() != null ? entity.getIsEnabled() : false,
+                            entity.getIsEmailVerified() != null ? entity.getIsEmailVerified() : false,
+
+                            entity.getInvitedBy(),
+                            invitedByDisplayName,
+                            invitedByAvatarUrl,
+
+                            entity.getDateCreated(),
+                            entity.getUpdatedAt(),
+                            entity.getCurrentStage()
+                    );
+                });
+    }
+
+
 }
 
 

@@ -127,6 +127,16 @@ public class AdminUserController {
                 ));
     }
 
+    @PatchMapping("/pending-invites/{userId}")
+    public Mono<ResponseEntity<StandardSuccessResponse<PendingAdminInviteDto>>> updatePendingInvite(
+            @PathVariable UUID userId,
+            @Valid @RequestBody UpdatePendingAdminInviteRequest updatePendingAdminInviteRequest){
+
+        return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest)
+                .map(pendingAdminInvite ->
+                        ResponseEntity.ok(new StandardSuccessResponse<>("Pending admin Invite updated successfully", pendingAdminInvite)));
+    }
+
     @PatchMapping("/{userId}")
     public Mono<ResponseEntity<StandardSuccessResponse<UserResponse>>> updateUserAsAdmin(
             @AuthenticationPrincipal Jwt jwt,
