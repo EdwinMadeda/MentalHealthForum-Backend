@@ -8,7 +8,8 @@ public enum RealmRole {
     TRUSTED_MEMBER("trusted_member", "Trusted community member with additional privileges"),
     PEER_SUPPORTER("peer_supporter", "Can provide peer support"),
     MODERATOR("moderator", "Content moderation capabilities"),
-    ADMIN("admin", "Full administrative access");
+    ADMIN("admin", "Full administrative access"),
+    SUPER_ADMIN("super_admin", "Super administrator with system management privileges");
 
     private final String roleName;
     private final String roleDescription;

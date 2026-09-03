@@ -114,6 +114,12 @@ public enum ModerationAction {
     }
 
     public boolean isAllowedFor(ViewerContext viewerContext){
+        //  Superadmins bypass all group checks
+        if(viewerContext.isSuperAdmin()){
+            return true;
+        }
+
+        // Regular admins/moderators need to be in the required group
         return viewerContext.isInGroup(requiredGroup);
     }
 

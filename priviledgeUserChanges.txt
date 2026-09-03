@@ -1,0 +1,380 @@
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/controller/admin/AdminUserController.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/controller/admin/AdminUserController.java
+index 2e42dd6..b65f3c5 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/controller/admin/AdminUserController.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/controller/admin/AdminUserController.java
+@@ -3,6 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller.admin;
+ import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
+ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
+ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
++import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
+ import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
+ import com.mentalhealthforum.mentalhealthforum_backend.service.*;
+ import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
+@@ -12,12 +13,12 @@ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import org.springframework.http.HttpStatus;
+ import org.springframework.http.ResponseEntity;
+-import org.springframework.security.access.prepost.PreAuthorize;
+ import org.springframework.security.core.annotation.AuthenticationPrincipal;
+ import org.springframework.security.oauth2.jwt.Jwt;
+ import org.springframework.web.bind.annotation.*;
+ import reactor.core.publisher.Mono;
+ 
++import java.util.List;
+ import java.util.UUID;
+ 
+ @RestController
+@@ -91,9 +92,13 @@ public class AdminUserController {
+ 
+     @PostMapping("/{userId}/reissue-invite")
+     public Mono<ResponseEntity<StandardSuccessResponse<AdminCreateUserResponse>>> reissueInvitation(
++            @AuthenticationPrincipal Jwt jwt,
+             @PathVariable UUID userId,
+             @Valid @RequestBody ReissueInvitationRequest reissueInvitationRequest){
+-        return adminUserService.reissueAdminInvitation(String.valueOf(userId), reissueInvitationRequest)
++
++        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
++
++        return adminUserService.reissueAdminInvitation(String.valueOf(userId), reissueInvitationRequest, viewerContext)
+                 .map( response -> {
+                     String message = "Invitation reissued successfully. %s".formatted(
+                             response.emailSent()
+@@ -129,10 +134,13 @@ public class AdminUserController {
+ 
+     @PatchMapping("/pending-invites/{userId}")
+     public Mono<ResponseEntity<StandardSuccessResponse<PendingAdminInviteDto>>> updatePendingInvite(
++            @AuthenticationPrincipal Jwt jwt,
+             @PathVariable UUID userId,
+             @Valid @RequestBody UpdatePendingAdminInviteRequest updatePendingAdminInviteRequest){
+ 
+-        return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest)
++        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
++
++        return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest, viewerContext)
+                 .map(pendingAdminInvite ->
+                         ResponseEntity.ok(new StandardSuccessResponse<>("Pending admin Invite updated successfully", pendingAdminInvite)));
+     }
+@@ -144,7 +152,8 @@ public class AdminUserController {
+             @Valid @RequestBody AdminUpdateUserRequest adminUpdateUserRequest){
+ 
+         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+-        return adminUserService.updateUserAsAdmin(String.valueOf(userId), adminUpdateUserRequest)
++
++        return adminUserService.updateUserAsAdmin(String.valueOf(userId), adminUpdateUserRequest, viewerContext)
+                 .flatMap(keycloakUserDto -> appUserService.syncUserViaAdminClient(keycloakUserDto, viewerContext)
+                 .map(user -> {
+                     String message = "User details updated successfully";
+@@ -199,4 +208,20 @@ public class AdminUserController {
+                     return ResponseEntity.ok(response);
+                 });
+     }
++
++    @GetMapping("/groups/assignable")
++    public Mono<ResponseEntity<StandardSuccessResponse<List<AvailableGroup>>>> getAssignableGroups(
++            @AuthenticationPrincipal Jwt jwt) {
++
++        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
++
++        List<AvailableGroup> groups = GroupPath.getAssignableGroupsForViewer(viewerContext).stream()
++                .map(AvailableGroup::new)
++                .toList();
++
++
++        return Mono.just(ResponseEntity.ok(
++                new StandardSuccessResponse<>("Available groups retrieved successfully", groups)
++        ));
++    }
+ }
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/GroupPath.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/GroupPath.java
+index 98f0b85..036a154 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/GroupPath.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/GroupPath.java
+@@ -1,9 +1,14 @@
+ package com.mentalhealthforum.mentalhealthforum_backend.enums;
+ 
++import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
++import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.AvailableGroup;
++import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
++import com.mentalhealthforum.mentalhealthforum_backend.service.PrivilegedUser;
+ import lombok.Getter;
+ 
+ import java.util.Arrays;
+ import java.util.List;
++import java.util.Set;
+ 
+ @Getter
+ public enum GroupPath {
+@@ -11,6 +16,7 @@ public enum GroupPath {
+     MEMBERS("/members", "General members"),
+     MODERATORS("/moderators", "Content moderators"),
+     ADMINISTRATORS("/administrators", "Administrators"),
++    SUPER_ADMINISTRATORS("/super_administrators", "Super Administrators"),
+ 
+     // Subgroups - Members
+     MEMBERS_NEW("/members/new", "New members"),
+@@ -47,24 +53,6 @@ public enum GroupPath {
+         return null;
+     }
+ 
+-
+-    /**
+-     * Determines if a group can be manually assigned/changed by an Admin.
+-     * Excludes reputation-based groups (Active, Trusted) and high-level
+-     * system roles (Administrators) to prevent escalation.
+-     */
+-    public boolean isManuallyAssignable(){
+-        return switch(this){
+-            case MEMBERS_NEW,
+-                 MODERATORS_PEER,
+-                 MODERATORS_PROFESSIONAL -> true;
+-            // System handles these (ACTIVE, TRUSTED)
+-            // OR higher security handles these (ADMINISTRATORS)
+-            default -> false;
+-        };
+-    }
+-
+-
+     public static boolean isInGroup(String userGroupPath, GroupPath targetGroup){
+         if(userGroupPath == null || targetGroup == null) return false;
+ 
+@@ -113,7 +101,10 @@ public enum GroupPath {
+             case MODERATORS_PROFESSIONAL -> List.of(RealmRole.FORUM_MEMBER, RealmRole.PEER_SUPPORTER, RealmRole.MODERATOR);
+ 
+             // Administrator group
+-            case ADMINISTRATORS -> List.of(RealmRole.ADMIN);
++            case ADMINISTRATORS -> List.of(RealmRole.ADMIN, RealmRole.SUPER_ADMIN);
++
++            // Super-administrator group
++            case SUPER_ADMINISTRATORS -> List.of(RealmRole.ADMIN, RealmRole.SUPER_ADMIN);
+ 
+             // Parent groups grant NO roles - this is intentional
+             case MEMBERS, MODERATORS -> List.of();
+@@ -155,6 +146,25 @@ public enum GroupPath {
+                 .toList();
+     }
+ 
++
++    public static List<GroupPath> getAssignableGroupsForViewer(PrivilegedUser viewer){
++        Set<GroupPath> superAdminOnlyGroups = Set.of(
++                ADMINISTRATORS,
++                SUPER_ADMINISTRATORS
++        );
++        return getAssignableGroups().stream()
++                .filter(group -> {
++
++                    if(superAdminOnlyGroups.contains(group)){
++                       viewer.isSuperAdmin();
++                    }
++                    
++                    return true;
++                })
++                .toList();
++    }
++
++
+     /**
+      * Validates if a group path string represents an assignable group.
+      *
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/RealmRole.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/RealmRole.java
+index d23bf5d..a869470 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/RealmRole.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/enums/RealmRole.java
+@@ -8,7 +8,8 @@ public enum RealmRole {
+     TRUSTED_MEMBER("trusted_member", "Trusted community member with additional privileges"),
+     PEER_SUPPORTER("peer_supporter", "Can provide peer support"),
+     MODERATOR("moderator", "Content moderation capabilities"),
+-    ADMIN("admin", "Full administrative access");
++    ADMIN("admin", "Full administrative access"),
++    SUPER_ADMIN("super_admin", "Super administrator with system management privileges");
+ 
+     private final String roleName;
+     private final String roleDescription;
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/model/AppUserEntity.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/model/AppUserEntity.java
+index 3641b38..b0d076b 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/model/AppUserEntity.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/model/AppUserEntity.java
+@@ -195,7 +195,6 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
+     @Column("mfa_enabled_at")
+     private Instant mfaEnabledAt;
+ 
+-
+     // --- Transient / helper fields ---
+     @Transient
+     private Boolean isSelf = false;
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/AdminUserService.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/AdminUserService.java
+index 59263f9..880fd4c 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/AdminUserService.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/AdminUserService.java
+@@ -8,11 +8,11 @@ import reactor.core.publisher.Mono;
+ public interface AdminUserService {
+     Mono<AdminCreateUserResponse> createUserAsAdmin(AdminCreateUserRequest request, ViewerContext viewerContext);
+ 
+-    Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request);
++    Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext);
+ 
+-    Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request);
++    Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext);
+ 
+-    Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request);
++    Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext);
+ 
+     Mono<Void> revokeInvitation(String userId);
+ }
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/PrivilegedUser.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/PrivilegedUser.java
+index 784fd8b..15bb4b4 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/PrivilegedUser.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/PrivilegedUser.java
+@@ -54,6 +54,8 @@ public interface PrivilegedUser {
+     }
+ 
+     // --- Custom Computed Property Getters ---
++    default boolean isSuperAdmin(){ return hasRole(RealmRole.SUPER_ADMIN) || isInGroup(GroupPath.SUPER_ADMINISTRATORS);}
++
+     default boolean isAdmin(){ return hasRole(RealmRole.ADMIN) || isInGroup(GroupPath.ADMINISTRATORS);}
+ 
+     default boolean isModerator(){
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/impl/AdminUserServiceImpl.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/impl/AdminUserServiceImpl.java
+index 376bb64..dadf780 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/impl/AdminUserServiceImpl.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/service/impl/AdminUserServiceImpl.java
+@@ -156,7 +156,7 @@ public class AdminUserServiceImpl implements AdminUserService {
+     }
+ 
+     @Override
+-    public Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request){
++    public Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext){
+         UUID userUUID = UUID.fromString(userId);
+         String email = request.email().trim().toLowerCase();
+ 
+@@ -236,7 +236,7 @@ public class AdminUserServiceImpl implements AdminUserService {
+     }
+ 
+     @Override
+-    public Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request){
++    public Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext){
+         UUID userUUID = UUID.fromString(userId);
+ 
+         return appUserRepository.existsByKeycloakId(userUUID)
+@@ -265,7 +265,7 @@ public class AdminUserServiceImpl implements AdminUserService {
+                                 }
+ 
+                                 // Proceed with keycloak update
+-                                return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled());
++                                return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled(), viewerContext);
+                             })
+                             .flatMap(adminInvitationService::updateInvitation);
+ 
+@@ -273,7 +273,7 @@ public class AdminUserServiceImpl implements AdminUserService {
+     }
+ 
+     @Override
+-    public Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request) {
++    public Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext) {
+         UUID userUUID = UUID.fromString(userId);
+ 
+         return appUserRepository.existsByKeycloakId(userUUID)
+@@ -298,7 +298,7 @@ public class AdminUserServiceImpl implements AdminUserService {
+                     }
+ 
+                     // Proceed with keycloak update
+-                    return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled());
++                    return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled(), viewerContext);
+                 });
+     }
+ 
+@@ -460,7 +460,7 @@ public class AdminUserServiceImpl implements AdminUserService {
+         return actions.stream().map(Enum::name).toList();
+     }
+ 
+-    private Mono<KeycloakUserDto> updateUserInKeycloak(String userId, JsonNullable<GroupPath> group, JsonNullable<Boolean> isEnabled){
++    private Mono<KeycloakUserDto> updateUserInKeycloak(String userId, JsonNullable<GroupPath> group, JsonNullable<Boolean> isEnabled, ViewerContext viewerContext){
+         UUID userUUID = UUID.fromString(userId);
+ 
+         // Proceed with keycloak update
+@@ -469,27 +469,54 @@ public class AdminUserServiceImpl implements AdminUserService {
+             UserRepresentation userRep = adminManager.findUserByUserId(userId)
+                     .orElseThrow(UserDoesNotExistException::new);
+ 
++            // Get the target user's current groups
++            List<String> currentGroups = adminManager.getUserGroups(userId);
++
++            // Check if target user is a superadmin
++            boolean isTargetSuperAdmin = currentGroups.stream().anyMatch(
++                groupPath -> GroupPath.SUPER_ADMINISTRATORS.getPath().equals(groupPath)
++            );
++
++            // Regular admin cannot modify
++            if(isTargetSuperAdmin && !viewerContext.isSuperAdmin()){
++                throw new InsufficientPermissionException(
++                        "Only superadmin can modify a superadmin user"
++                );
++            }
++
++            // Process isEnabled change
+             boolean isEnabledChanged = patchStrict(
+                     isEnabled,
+                     userRep.isEnabled(),
+                     userRep::setEnabled
+             );
+ 
++            // Process group change
+             boolean isGroupChanged = false;
+ 
+             // Only evaluate group changes if the admin explicitly provided a group in the payload
+             if(group != null && group.isPresent()){
+-                GroupPath targetGroupPathEnum = group.get();
++                GroupPath targetGroupPath = group.get();
++
++                // Superadmin-only group restrictions
++                boolean isSuperAdminOnlyGroup = targetGroupPath == GroupPath.SUPER_ADMINISTRATORS;
++
++                if(isSuperAdminOnlyGroup && !viewerContext.isSuperAdmin()){
++                    throw new InsufficientPermissionException(
++                            String.format("Only superadmins can assign the '%s' group.",
++                                    targetGroupPath.getDisplayName())
++                    );
++                }
+ 
+-                if(targetGroupPathEnum != null){
+-                    String targetGroupPathStr = targetGroupPathEnum.getPath();
+-                    List<String> currentGroups = adminManager.getUserGroups(userId);
++                // Assign the group
++                if(targetGroupPath != null){
++                    String targetGroupPathStr = targetGroupPath.getPath();
+ 
+                     isGroupChanged = currentGroups.isEmpty()
+                             || !currentGroups.contains(targetGroupPathStr);
+ 
+                     if(isGroupChanged){
+-                        adminManager.assignUserToGroup(userId, targetGroupPathEnum);
++                        adminManager.assignUserToGroup(userId, targetGroupPath);
+                         log.info("Updated group for user {} to {}", userId, targetGroupPathStr);
+                     }
+ 
+diff --git a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/validation/group/AssignableGroupValidator.java b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/validation/group/AssignableGroupValidator.java
+index 046b2cd..de10f6e 100644
+--- a/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/validation/group/AssignableGroupValidator.java
++++ b/src/main/java/com/mentalhealthforum/mentalhealthforum_backend/validation/group/AssignableGroupValidator.java
+@@ -10,7 +10,7 @@ public class AssignableGroupValidator implements ConstraintValidator<ValidAssign
+     public boolean isValid(GroupPath group, ConstraintValidatorContext context) {
+         if(group == null) return true; // @NotNull handles null
+ 
+-        // 1. Technical Check: Is it a leaf group that grants roles?
++        //  Technical Check: Is it a leaf group that grants roles?
+         if(!group.isAssignable()){
+             buildViolation(context, String.format(
+                     "Group '%s' is not assignable. Please select a subgroup like 'MEMBERS_NEW', 'MEMBERS_TRUSTED', etc.", group.getPath()
+@@ -18,13 +18,6 @@ public class AssignableGroupValidator implements ConstraintValidator<ValidAssign
+             return false;
+         }
+ 
+-        // 2. Business Check: Is it a group an Admin is allowed to manually assign?
+-        if(!group.isManuallyAssignable()){
+-            buildViolation(context, String.format(
+-                    "Group '%s' is managed by the system reputation logic and cannot be assigned manually.", group.getDisplayName()
+-            ));
+-            return false;
+-        }
+         return true;
+     }
+ 

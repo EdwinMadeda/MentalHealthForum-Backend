@@ -54,7 +54,12 @@ public interface PrivilegedUser {
     }
 
     // --- Custom Computed Property Getters ---
-    default boolean isAdmin(){ return hasRole(RealmRole.ADMIN) || isInGroup(GroupPath.ADMINISTRATORS);}
+    default boolean isSuperAdmin(){ return hasRole(RealmRole.SUPER_ADMIN) || isInGroup(GroupPath.SUPER_ADMINISTRATORS);}
+
+    default boolean isAdmin(){
+        return hasRole(RealmRole.ADMIN) || isInGroup(GroupPath.ADMINISTRATORS) ||
+               hasRole(RealmRole.SUPER_ADMIN) || isInGroup(GroupPath.SUPER_ADMINISTRATORS);
+    }
 
     default boolean isModerator(){
         return hasRole(RealmRole.MODERATOR) || isInGroup(GroupPath.MODERATORS);

@@ -8,11 +8,11 @@ import reactor.core.publisher.Mono;
 public interface AdminUserService {
     Mono<AdminCreateUserResponse> createUserAsAdmin(AdminCreateUserRequest request, ViewerContext viewerContext);
 
-    Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request);
+    Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext);
 
-    Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request);
+    Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext);
 
-    Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request);
+    Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext);
 
     Mono<Void> revokeInvitation(String userId);
 }

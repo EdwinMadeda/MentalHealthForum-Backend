@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.*;
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.PatchUtils.*;
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUtils.normalizeUnicode;
 
@@ -107,6 +108,9 @@ public class AdminUserServiceImpl implements AdminUserService {
                         username = "%s.%d".formatted(username, ThreadLocalRandom.current().nextInt(100, 199));
                     }
 
+                    // Superadmin-only group restrictions
+                    validateGroupAssignmentPermission(request.group(), viewerContext);
+
                     var passwordCred = adminManager.createPasswordCredential(temporaryPassword);
 
                     // Create user with PENDING ACTIONS
@@ -121,7 +125,6 @@ public class AdminUserServiceImpl implements AdminUserService {
                     // Set pending actions
                     userRep.setEmailVerified(false); // Admin-created users need to verify
                     userRep.setRequiredActions(determineRequiredActions(request.group()));
-
 
                     // Create user in Keycloak
                     String userId = adminManager.createUser(userRep);
@@ -156,87 +159,103 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     @Override
-    public Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request){
+    public Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext){
         UUID userUUID = UUID.fromString(userId);
         String email = request.email().trim().toLowerCase();
 
-        return appUserRepository.existsByKeycloakId(userUUID)
-                .flatMap(inAppUsers -> {
-                    // 5. Generate a new verification invitation
-                    return Mono.fromCallable(()-> {
-                                // 1. Find user in Keycloak (Blocking call)
-                                UserRepresentation user = adminManager.findUserByUserId(userId)
-                                        .orElseThrow(UserDoesNotExistException::new);
+        return Mono.fromCallable(()-> {
+                    // 1. Find user in Keycloak (Blocking call)
+                    UserRepresentation userRep = adminManager.findUserByUserId(userId)
+                            .orElseThrow(UserDoesNotExistException::new);
 
-                                // 2. Security Check: Don't resend if they are already synced (active)
+                    return userRep;
+                }).subscribeOn(Schedulers.boundedElastic())
+                .zipWith(appUserRepository.existsByKeycloakId(userUUID))
+                .flatMap(tuple -> {
+                    UserRepresentation userRep = tuple.getT1();
+                    boolean inAppUsers = tuple.getT2();
 
-                                if(inAppUsers){
-                                    throw new UserAlreadyActiveException();
-                                }
+                    // 2. Security Check: Don't resend if they are already synced (active)
+                    if(inAppUsers){
+                        throw new UserAlreadyActiveException();
+                    }
 
-                                // 3. Security Check: Don't resend if they are already verified
-                                if(Boolean.TRUE.equals(user.isEmailVerified())){
-                                    throw new InvitationAlreadyVerifiedException();
-                                }
+                    // 3. Security Check: Don't resend if they are already verified
+                    if(Boolean.TRUE.equals(userRep.isEmailVerified())){
+                        throw new InvitationAlreadyVerifiedException();
+                    }
 
-                                if(!user.getEmail().equalsIgnoreCase(email)){
-                                    user.setEmail(email);
-                                    adminManager.updateUser(user);
-                                }
+                    return validateTargetUserModification(userId, viewerContext, "reissue invite for")
+                            .thenReturn(userRep);
+                })
+                .flatMap(userRep -> Mono.fromCallable(() -> {
 
-                                // 4. Generate a fresh temporary password
-                                String newTempPassword = generateTemporaryPassword();
-                                var passwordCred = adminManager.createPasswordCredential(newTempPassword);
+                    // Process is email change
+                    boolean isEmailChanged = setIfChangedStrict(
+                            email,
+                            userRep.getEmail(),
+                            userRep::setEmail
+                    );
 
-                                // 5. Update Keycloak (Resetting the temp password)
-                                adminManager.resetPassword(user.getId(), newTempPassword);
+                    if(request.group() != null){
+                        // Superadmin-only group restrictions
+                        validateGroupAssignmentPermission(request.group(), viewerContext);
+                    }
 
-                                // Note: We'd need to know the groupPath. If we don't store it,
-                                // we can fetch the user's current groups from Keycloak.
-                                // Fetch group path while still in the blocking thread pool
-                                if(request.group() != null){
-                                    adminManager.assignUserToGroup(userId, request.group());
-                                }
+                    if(isEmailChanged) {
+                        adminManager.updateUser(userRep);
+                    }
 
-                                String groupPath = adminManager.getUserPrimaryGroupPath(user.getId());
+                    // 4. Generate a fresh temporary password
+                    String newTempPassword = generateTemporaryPassword();
 
-                                // Wrap in the Record instead of a Map
-                                return new AdminUserContext(
-                                        user.getId(),
-                                        user.getUsername(),
-                                        user.getEmail(),
-                                        user.getFirstName(),
-                                        newTempPassword,
-                                        groupPath,
-                                        request.sendInvitationEmail()
-                                );
+                    // 5. Update Keycloak (Resetting the temp password)
+                    adminManager.resetPassword(userRep.getId(), newTempPassword);
 
-                            }).subscribeOn(Schedulers.boundedElastic())
-                            // --- SURGICAL INJECTION START ---
-                            .flatMap(ctx ->{
-                                return Mono.fromCallable(() -> adminManager.findUserByUserId(ctx.userId)
-                                                .map(keycloakUserDtoMapper::mapToKeycloakUserDto)
-                                                .orElseThrow(() -> new UserDoesNotExistException("Failed to retrieve user")))
-                                        .subscribeOn(Schedulers.boundedElastic())
-                                        .flatMap(adminInvitationService::updateInvitation)
-                                        .thenReturn(ctx); // Return the co
-                            })
-                            .flatMap(ctx -> {
-                                return adminInvitationRepository.findByKeycloakId(UUID.fromString(ctx.userId))
-                                        .flatMap(adminInvitation -> {
-                                            // RESET the flags so the new temp password actually works
-                                            adminInvitation.setIsInitialLogin(true);
-                                            adminInvitation.setCurrentStage(OnboardingStage.AWAITING_VERIFICATION);
-                                            return adminInvitationRepository.save(adminInvitation);
-                                        })
-                                        .thenReturn(ctx);
-                            })
-                            .flatMap(this::handleInvitationFlow);
-                });
+                    // Note: We'd need to know the groupPath. If we don't store it,
+                    // we can fetch the user's current groups from Keycloak.
+                    // Fetch group path while still in the blocking thread pool
+                    if(request.group() != null){
+                        adminManager.assignUserToGroup(userId, request.group());
+                    }
+
+                    String groupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
+
+                    // Wrap in the Record instead of a Map
+                    return new AdminUserContext(
+                            userRep.getId(),
+                            userRep.getUsername(),
+                            userRep.getEmail(),
+                            userRep.getFirstName(),
+                            newTempPassword,
+                            groupPath,
+                            request.sendInvitationEmail()
+                    );
+
+                }).subscribeOn(Schedulers.boundedElastic()))
+                // --- SURGICAL INJECTION START ---
+                .flatMap(ctx ->{
+                    return Mono.fromCallable(() -> adminManager.findUserByUserId(ctx.userId)
+                                    .map(keycloakUserDtoMapper::mapToKeycloakUserDto)
+                                    .orElseThrow(() -> new UserDoesNotExistException("Failed to retrieve user")))
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .flatMap(adminInvitationService::updateInvitation)
+                            .thenReturn(ctx); // Return the co
+                })
+                .flatMap(ctx ->
+                        adminInvitationRepository.findByKeycloakId(UUID.fromString(ctx.userId))
+                                .flatMap(adminInvitation -> {
+                                    // RESET the flags so the new temp password actually works
+                                    adminInvitation.setIsInitialLogin(true);
+                                    adminInvitation.setCurrentStage(OnboardingStage.AWAITING_VERIFICATION);
+                                    return adminInvitationRepository.save(adminInvitation);
+                                })
+                                .thenReturn(ctx))
+                .flatMap(this::handleInvitationFlow);
     }
 
     @Override
-    public Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request){
+    public Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext){
         UUID userUUID = UUID.fromString(userId);
 
         return appUserRepository.existsByKeycloakId(userUUID)
@@ -265,7 +284,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 }
 
                                 // Proceed with keycloak update
-                                return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled());
+                                return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled(), viewerContext);
                             })
                             .flatMap(adminInvitationService::updateInvitation);
 
@@ -273,7 +292,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     @Override
-    public Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request) {
+    public Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
 
         return appUserRepository.existsByKeycloakId(userUUID)
@@ -298,7 +317,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     }
 
                     // Proceed with keycloak update
-                    return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled());
+                    return updateUserInKeycloak(userId, request.getGroup(), request.getIsEnabled(), viewerContext);
                 });
     }
 
@@ -460,7 +479,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         return actions.stream().map(Enum::name).toList();
     }
 
-    private Mono<KeycloakUserDto> updateUserInKeycloak(String userId, JsonNullable<GroupPath> group, JsonNullable<Boolean> isEnabled){
+    private Mono<KeycloakUserDto> updateUserInKeycloak(String userId, JsonNullable<GroupPath> group, JsonNullable<Boolean> isEnabled, ViewerContext viewerContext){
         UUID userUUID = UUID.fromString(userId);
 
         // Proceed with keycloak update
@@ -469,43 +488,121 @@ public class AdminUserServiceImpl implements AdminUserService {
             UserRepresentation userRep = adminManager.findUserByUserId(userId)
                     .orElseThrow(UserDoesNotExistException::new);
 
-            boolean isEnabledChanged = patchStrict(
-                    isEnabled,
-                    userRep.isEnabled(),
-                    userRep::setEnabled
-            );
+            return userRep;
+        }).subscribeOn(Schedulers.boundedElastic())
+                .flatMap(userRep ->
+                        validateTargetUserModification(userId, viewerContext, "modify")
+                                .flatMap(currentGroups -> Mono.fromCallable(()-> {
 
-            boolean isGroupChanged = false;
+                    // Process isEnabled change
+                    boolean isEnabledChanged = patchStrict(
+                            isEnabled,
+                            userRep.isEnabled(),
+                            userRep::setEnabled
+                    );
 
-            // Only evaluate group changes if the admin explicitly provided a group in the payload
-            if(group != null && group.isPresent()){
-                GroupPath targetGroupPathEnum = group.get();
+                    // Process group change
+                    boolean isGroupChanged = false;
 
-                if(targetGroupPathEnum != null){
-                    String targetGroupPathStr = targetGroupPathEnum.getPath();
-                    List<String> currentGroups = adminManager.getUserGroups(userId);
+                    // Only evaluate group changes if the admin explicitly provided a group in the payload
+                    if(group != null && group.isPresent()){
+                        GroupPath targetGroupPath = group.get();
 
-                    isGroupChanged = currentGroups.isEmpty()
-                            || !currentGroups.contains(targetGroupPathStr);
+                        // Superadmin-only group restrictions
+                        validateGroupAssignmentPermission(targetGroupPath, viewerContext);
 
-                    if(isGroupChanged){
-                        adminManager.assignUserToGroup(userId, targetGroupPathEnum);
-                        log.info("Updated group for user {} to {}", userId, targetGroupPathStr);
+                        // Assign the group
+                        if(targetGroupPath != null){
+                            String targetGroupPathStr = targetGroupPath.getPath();
+
+                            isGroupChanged = currentGroups.isEmpty()
+                                    || !currentGroups.contains(targetGroupPathStr);
+
+                            if(isGroupChanged){
+                                adminManager.assignUserToGroup(userId, targetGroupPath);
+                                log.info("Updated group for user {} to {}", userId, targetGroupPathStr);
+                            }
+
+                        }
+
                     }
 
-                }
+                    if(isEnabledChanged || isGroupChanged){
+                        adminManager.updateUser(userRep);
+                        log.info("Successfully updated profile for user ID: {}", userId);
+                    } else {
+                        log.debug("No profile changes detected for user ID: {}", userId);
+                    }
 
+                    return keycloakUserDtoMapper.mapToKeycloakUserDto(userRep);
+                })));
+    }
+
+    /**
+     * Validates that the viewer has permission to modify the target user.
+     *
+     * Rules:
+     * - Only superadmin can modify a user in SUPER_ADMINISTRATORS
+     * - Only superadmin can modify a user in ADMINISTRATORS
+     * - Regular admins can modify regular users (MEMBERS, MODERATORS, etc.)
+     *
+     * @param targetUserId The user being modified
+     * @param viewerContext The user making the request
+     * @param action The action being performed (for error messages)
+     * @throws InsufficientPermissionException if the viewer lacks permission
+     */
+    private Mono<List<String>> validateTargetUserModification(String targetUserId, ViewerContext viewerContext, String action){
+        return Mono.fromCallable(() -> {
+
+            // Get the target user's current groups
+            List<String> currentGroups = adminManager.getUserGroups(targetUserId);
+
+            // Check if target user is a superadmin
+            boolean isTargetSuperAdmin = currentGroups.stream().anyMatch(
+                    groupPath -> GroupPath.SUPER_ADMINISTRATORS.getPath().equals(groupPath)
+            );
+
+            boolean isTargetAdmin = currentGroups.stream().anyMatch(
+                    groupPath -> GroupPath.ADMINISTRATORS.getPath().equals(groupPath) ||
+                            GroupPath.SUPER_ADMINISTRATORS.getPath().equals(groupPath)
+            );
+
+            // Regular admin cannot modify superadmin
+            if(isTargetSuperAdmin && !viewerContext.isSuperAdmin()){
+                throw new InsufficientPermissionException(
+                      String.format( "Only superadmin can %s a superadmin user", action)
+                );
             }
 
-            if(isEnabledChanged || isGroupChanged){
-                adminManager.updateUser(userRep);
-                log.info("Successfully updated profile for user ID: {}", userId);
-            } else {
-                log.debug("No profile changes detected for user ID: {}", userId);
+            // Regular admin cannot modify admin
+            if(isTargetAdmin && !viewerContext.isAdmin()){
+                throw new InsufficientPermissionException(
+                       String.format("Only superadmin can %s an admin user", action)
+                );
             }
 
-            return keycloakUserDtoMapper.mapToKeycloakUserDto(userRep);
+            return currentGroups;
         }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * Validates that the viewer has permission to assign a user to the specified group.
+     * Rules:
+     * - Only superadmins can assign users to SUPER_ADMINISTRATORS group
+     * - Only superadmins can assign users to ADMINISTRATORS group
+     * - Any admin can assign users to MEMBERS, MODERATORS, etc.
+     *
+     * @param targetGroupPath The group being assigned
+     * @param viewerContext The user making the request
+     * @throws InsufficientPermissionException if the viewer lacks permission
+     */
+    private void validateGroupAssignmentPermission(GroupPath targetGroupPath, ViewerContext viewerContext){
+        if(!GroupPath.isSuperAdminOnlyGroup(targetGroupPath, viewerContext)){
+            throw new InsufficientPermissionException(
+                    String.format("Only superadmins can assign the '%s' group.",
+                            targetGroupPath.getDisplayName())
+            );
+        }
     }
 
 }

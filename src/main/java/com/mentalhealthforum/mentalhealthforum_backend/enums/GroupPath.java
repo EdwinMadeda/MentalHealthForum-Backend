@@ -1,16 +1,50 @@
 package com.mentalhealthforum.mentalhealthforum_backend.enums;
 
+import com.mentalhealthforum.mentalhealthforum_backend.service.PrivilegedUser;
 import lombok.Getter;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
+/**
+ * GroupPath defines all user groups in the system along with their role mappings.
+
+ * ============================================================
+ * GROUP ASSIGNMENT RULES (Security Model)
+ * ============================================================
+
+ * 1. Superadmin-Only Groups (can only be assigned by SUPER_ADMIN):
+ *    - ADMINISTRATORS
+ *    - SUPER_ADMINISTRATORS
+
+ * 2. Regular Admin Groups (can be assigned by any admin):
+ *    - MEMBERS_NEW, MEMBERS_ACTIVE, MEMBERS_TRUSTED
+ *    - MODERATORS_PEER, MODERATORS_PROFESSIONAL
+
+ * 3. Superadmin Protection:
+ *    - Regular admins CANNOT modify any user who is in SUPER_ADMINISTRATORS
+ *    - Only superadmins can modify superadmin users
+
+ * 4. Visibility:
+ *    - Regular admins CANNOT see SUPER_ADMINISTRATORS in dropdowns
+ *    - Superadmins CAN see all groups in dropdowns
+
+ * These rules are enforced in:
+ * - GroupPath.isSuperAdminOnlyGroup()      → Core rule logic
+ * - GroupPath.getAssignableGroupsForViewer() → Dropdown visibility
+ * - AdminUserServiceImpl.updateUserInKeycloak() → Assignment enforcement
+ * - AdminUserServiceImpl.createUserAsAdmin() → Creation enforcement
+ * - AdminUserServiceImpl.reissueAdminInvitation() → Reissue enforcement
+ * ============================================================
+ */
 @Getter
 public enum GroupPath {
     // Root Groups
     MEMBERS("/members", "General members"),
     MODERATORS("/moderators", "Content moderators"),
     ADMINISTRATORS("/administrators", "Administrators"),
+    SUPER_ADMINISTRATORS("/super_administrators", "Super Administrators"),
 
     // Subgroups - Members
     MEMBERS_NEW("/members/new", "New members"),
@@ -46,24 +80,6 @@ public enum GroupPath {
         }
         return null;
     }
-
-
-    /**
-     * Determines if a group can be manually assigned/changed by an Admin.
-     * Excludes reputation-based groups (Active, Trusted) and high-level
-     * system roles (Administrators) to prevent escalation.
-     */
-    public boolean isManuallyAssignable(){
-        return switch(this){
-            case MEMBERS_NEW,
-                 MODERATORS_PEER,
-                 MODERATORS_PROFESSIONAL -> true;
-            // System handles these (ACTIVE, TRUSTED)
-            // OR higher security handles these (ADMINISTRATORS)
-            default -> false;
-        };
-    }
-
 
     public static boolean isInGroup(String userGroupPath, GroupPath targetGroup){
         if(userGroupPath == null || targetGroup == null) return false;
@@ -113,7 +129,10 @@ public enum GroupPath {
             case MODERATORS_PROFESSIONAL -> List.of(RealmRole.FORUM_MEMBER, RealmRole.PEER_SUPPORTER, RealmRole.MODERATOR);
 
             // Administrator group
-            case ADMINISTRATORS -> List.of(RealmRole.ADMIN);
+            case ADMINISTRATORS -> List.of(RealmRole.ADMIN, RealmRole.SUPER_ADMIN);
+
+            // Super-administrator group
+            case SUPER_ADMINISTRATORS -> List.of(RealmRole.ADMIN, RealmRole.SUPER_ADMIN);
 
             // Parent groups grant NO roles - this is intentional
             case MEMBERS, MODERATORS -> List.of();
@@ -155,6 +174,25 @@ public enum GroupPath {
                 .toList();
     }
 
+    public static boolean isSuperAdminOnlyGroup(GroupPath groupPath, PrivilegedUser viewer){
+        Set<GroupPath> superAdminOnlyGroups = Set.of(
+                ADMINISTRATORS,
+                SUPER_ADMINISTRATORS
+        );
+
+        if(superAdminOnlyGroups.contains(groupPath)){
+            return viewer != null && viewer.isSuperAdmin();
+        }
+        return true;
+    }
+
+    public static List<GroupPath> getAssignableGroupsForViewer(PrivilegedUser viewer){
+        return getAssignableGroups().stream()
+                .filter(group -> isSuperAdminOnlyGroup(group, viewer))
+                .toList();
+    }
+
+
     /**
      * Validates if a group path string represents an assignable group.
      *
@@ -168,6 +206,7 @@ public enum GroupPath {
         GroupPath group = fromPath(path);
         return group != null && group.isAssignable();
     }
+    
 }
 
 

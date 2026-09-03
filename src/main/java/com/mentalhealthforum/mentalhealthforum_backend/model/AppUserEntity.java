@@ -195,7 +195,6 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     @Column("mfa_enabled_at")
     private Instant mfaEnabledAt;
 
-
     // --- Transient / helper fields ---
     @Transient
     private Boolean isSelf = false;
