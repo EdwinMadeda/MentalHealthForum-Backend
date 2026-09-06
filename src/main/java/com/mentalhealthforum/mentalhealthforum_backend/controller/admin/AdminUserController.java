@@ -3,6 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller.admin;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
@@ -12,12 +13,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -89,11 +90,15 @@ public class AdminUserController {
                 });
     }
 
-    @PostMapping("/{userId}/reissue-invite")
+    @PostMapping("/pending-invites/{userId}/reissue-invite")
     public Mono<ResponseEntity<StandardSuccessResponse<AdminCreateUserResponse>>> reissueInvitation(
+            @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
             @Valid @RequestBody ReissueInvitationRequest reissueInvitationRequest){
-        return adminUserService.reissueAdminInvitation(String.valueOf(userId), reissueInvitationRequest)
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return adminUserService.reissueAdminInvitation(String.valueOf(userId), reissueInvitationRequest, viewerContext)
                 .map( response -> {
                     String message = "Invitation reissued successfully. %s".formatted(
                             response.emailSent()
@@ -129,10 +134,13 @@ public class AdminUserController {
 
     @PatchMapping("/pending-invites/{userId}")
     public Mono<ResponseEntity<StandardSuccessResponse<PendingAdminInviteDto>>> updatePendingInvite(
+            @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
             @Valid @RequestBody UpdatePendingAdminInviteRequest updatePendingAdminInviteRequest){
 
-        return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest)
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest, viewerContext)
                 .map(pendingAdminInvite ->
                         ResponseEntity.ok(new StandardSuccessResponse<>("Pending admin Invite updated successfully", pendingAdminInvite)));
     }
@@ -144,7 +152,8 @@ public class AdminUserController {
             @Valid @RequestBody AdminUpdateUserRequest adminUpdateUserRequest){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-        return adminUserService.updateUserAsAdmin(String.valueOf(userId), adminUpdateUserRequest)
+
+        return adminUserService.updateUserAsAdmin(String.valueOf(userId), adminUpdateUserRequest, viewerContext)
                 .flatMap(keycloakUserDto -> appUserService.syncUserViaAdminClient(keycloakUserDto, viewerContext)
                 .map(user -> {
                     String message = "User details updated successfully";
@@ -153,7 +162,7 @@ public class AdminUserController {
                 }));
     }
 
-    @DeleteMapping("/invites/{userId}")
+    @DeleteMapping("/pending-invites/{userId}")
     public Mono<ResponseEntity<StandardSuccessResponse<Void>>> revokeInvitation(
             @PathVariable UUID userId){
             log.info("Admin revoking invitation for user ID: {}", userId);
@@ -198,5 +207,21 @@ public class AdminUserController {
                     StandardSuccessResponse<PaginatedResponse<UserResponse>> response = new StandardSuccessResponse<>(message, paginatedUsers);
                     return ResponseEntity.ok(response);
                 });
+    }
+
+    @GetMapping("/groups/assignable")
+    public Mono<ResponseEntity<StandardSuccessResponse<List<AvailableGroup>>>> getAssignableGroups(
+            @AuthenticationPrincipal Jwt jwt) {
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        List<AvailableGroup> groups = GroupPath.getAssignableGroupsForViewer(viewerContext).stream()
+                .map(AvailableGroup::new)
+                .toList();
+
+
+        return Mono.just(ResponseEntity.ok(
+                new StandardSuccessResponse<>("Available groups retrieved successfully", groups)
+        ));
     }
 }

@@ -25,7 +25,6 @@ public enum ErrorCode {
     // --- Rate Limiting / Security Errors ---
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "Rate limit exceeded. Please wait before requesting a new code."),
 
-
     // --- Keycloak Sync Errors ---
     KEYCLOAK_SYNC_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "An error occurred while syncing user data."),
 
@@ -45,6 +44,8 @@ public enum ErrorCode {
     // --- Password/Policy Errors ---
     PASSWORD_POLICY_VIOLATION(HttpStatus.BAD_REQUEST, "Password does not meet required complexity standards."),
     PASSWORD_CONFIRM_MISMATCH(HttpStatus.BAD_REQUEST, "Password and Confirmation do not match."),
+
+    SYSTEM_INTEGRITY_VIOLATION(HttpStatus.CONFLICT, "System integrity violation"),
 
 
     // - ForumCategories Hierarchical & Tagged

@@ -45,6 +45,8 @@ public interface KeycloakAdminManager {
 
     // --- Credential and Role Helpers ---
 
+    List<UserRepresentation> getUsersInGroups(GroupPath group);
+
     // --- Role, Groups and Credential Helpers (Now managed here) ---
     List<String> getUserRealmRolesFromGroups(String userId);
 

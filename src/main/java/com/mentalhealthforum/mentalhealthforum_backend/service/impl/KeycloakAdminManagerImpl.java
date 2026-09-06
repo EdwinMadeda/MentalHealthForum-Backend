@@ -1,7 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
-import com.mentalhealthforum.mentalhealthforum_backend.contants.KeycloakAttributes;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.InternalRole;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.RealmRole;
@@ -168,6 +167,49 @@ public class KeycloakAdminManagerImpl implements KeycloakAdminManager {
             throw new InvalidPasswordException("Password reset failed due to an unexpected server error.");
         }
     }
+
+
+      // Returns all users who are members of the specified group.
+    @Override
+    public List<UserRepresentation> getUsersInGroups(GroupPath group){
+        try {
+            // Get group ID (from cache or keycloak)
+            String groupId = getGroupId(group);
+
+            // Fetch members of that group
+            return getRealmResource()
+                    .groups()
+                    .group(groupId)
+                    .members();
+        }
+        catch (InvalidGroupAssignmentException e){
+            log.warn("Group not found {}", group.getPath(), e);
+            return Collections.emptyList();
+        }
+        catch (Exception e){
+            log.error("Failed to fetch users in group {}", group.getPath(), e);
+            return Collections.emptyList();
+        }
+    }
+
+    // Gets the group ID for a GroupPath, using cache or fetching from Keycloak.
+    private String getGroupId(GroupPath group) {
+        String cacheId = groupCache.get(group.getPath());
+        if(cacheId != null){
+            return cacheId;
+        }
+
+        // Cache miss: find the group recursively
+        List<GroupRepresentation> allGroups = getRealmResource().groups().groups();
+        String groupId = findGroupIdByPath(allGroups, group.getPath());
+
+        if(groupId != null){
+            groupCache.put(group.getPath(), groupId);
+            return groupId;
+        }
+        throw new InvalidGroupAssignmentException("Group not found: %s".formatted(group.getPath()));
+    }
+
 
     // --- Role, Groups and Credential Helpers (Now managed here) ---
     @Override
