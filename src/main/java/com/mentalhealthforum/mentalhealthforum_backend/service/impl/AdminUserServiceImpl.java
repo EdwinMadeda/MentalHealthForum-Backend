@@ -42,18 +42,20 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUti
  *        This allows organizations to quickly onboard professional moderators.
 
  * 2. SELF-MODIFICATION RESTRICTIONS (SYNCED USERS ONLY)
- *    2.1 Superadmins: Completely blocked from modifying their own account.
- *    2.2 Regular Admins: Completely blocked from modifying their own account.
+ *    2.1 Superadmins: Cannot promote or disable themselves. Can demote themselves
+ *        (subject to system integrity rule 4.1 — last superadmin cannot be removed).
+ *    2.2 Regular Admins: Cannot promote or disable themselves. Can demote themselves.
  *    2.3 Moderators: Self-modification rules deferred. (currently retain default capabilities).
 
  * 3. PEER PROTECTION (SYNCED USERS ONLY)
- *    3.1 Superadmins cannot modify other superadmins.
- *    3.2 Admins cannot modify other admins.
+ *    3.1 Superadmins cannot modify other superadmins (self-demotion is exempt).
+ *    3.2 Admins cannot modify other admins (self-demotion is exempt).
  *    3.3 Moderators: Peer modification limits deferred (currently lack admin permissions).
 
  * 4. SYSTEM INTEGRITY (SYNCED USERS ONLY)
  *    4.1 At least one active superadmin must exist at all times.
- *    4.2 Last remaining superadmin becomes completely immutable.
+ *    4.2 Last remaining superadmin becomes completely immutable — cannot be demoted
+ *        (even by self-demotion) or disabled. This is enforced by the last-user safeguard.
 
  * 5. CREATION & INVITE MANAGEMENT (PENDING USERS ONLY)
  *    5.1 New users only: MEMBERS_NEW or MODERATORS_PROFESSIONAL.
@@ -62,8 +64,8 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUti
  *    5.4 Correction: Admin/Superadmin can correct improperly assigned admin tiers back to allowed pending groups.
 
  * 6. DEFERRED BEHAVIORS
- *    6.1 First-user auto-promotion to superadmin is disabled.
- 
+ *    6.1 First-user auto-promotion to superadmin is deferred.
+
  * 7. GROUP ASSIGNMENT PERMISSIONS
  *    7.1 Only superadmins can directly assign MODERATORS_PROFESSIONAL during creation, reissue,
  *        or pending updates.
@@ -75,9 +77,9 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUti
  * RULE MAPPINGS BY OPERATION
  * ============================================================
 
- * CREATE USER           → Rules 5.1, 5.3, 7.1
+ * CREATE USER           → Rules 5.1, 7.1
  * REISSUE INVITATION    → Rules 5.2, 5.3, 5.4, 7.1
- * UPDATE PENDING INVITE → Rules 5.2, 5.3, 5.4, 7.1
+ * UPDATE PENDING INVITE → Rules 5.3, 5.4, 7.1
  * UPDATE SYNCED USER    → Rules 1.1, 1.2, 1.3, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 7.2, 7.3
  * REVOKE INVITATION     → State checks only
 
@@ -85,12 +87,13 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUti
  * VALIDATION FLOW
  * ============================================================
  * All modifications go through validateTargetUserModification() which enforces:
- *   1. Self-modification checks (Rules 2.1, 2.2)
+ *   1. Self-modification checks (Rules 2.1, 2.2) — self-promotion blocked,
+ *      self-demotion allowed, self-disable blocked
  *   2. Same-level protection (Rules 3.1, 3.2)
  *   3. Superadmin protection
  *   4. Hierarchy progression (Rules 1.1, 1.2, 1.3)
  *   5. Group assignment permissions (Rules 7.2, 7.3)
- *   6. System integrity (Rules 4.1, 4.2)
+ *   6. System integrity (Rules 4.1, 4.2) — last superadmin safeguard
  */
 
 @Service
@@ -710,8 +713,8 @@ public class AdminUserServiceImpl implements AdminUserService {
                     // 1. Self-modification Protection (Rules 2.1, 2.2)
                     validateSelfModification(targetUserId, targetCurrentGroup, targetGroup, isEnabled, viewerContext);
 
-                    // 2. Same-level Protection (Rules 3.1, 3.2)
-                    validateSameLevelProtection(targetCurrentGroup, viewerGroup);
+                    // 2. Same-level Protection (Rules 3.1, 3.2) — SKIP for self-modification
+                    validateSameLevelProtection(targetUserId, targetCurrentGroup, viewerGroup, viewerContext);
 
                     // 3. Superadmin Protection
                     validateSuperAdminProtection(targetCurrentGroups,  viewerContext);
@@ -770,20 +773,20 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (targetGroup != null && targetGroup.isPresent()) {
             GroupPath newGroup = targetGroup.get();
 
-            if (GroupPath.isDemotion(targetCurrentGroup, newGroup)) {
-                throw new InsufficientPermissionException(
-                        String.format("You cannot demote yourself from '%s' to '%s'.",
-                                targetCurrentGroup.getDisplayName(),
-                                newGroup.getDisplayName())
-                );
-            }
-
             if (GroupPath.isPromotion(targetCurrentGroup, newGroup)) {
                 throw new InsufficientPermissionException(
                         String.format("You cannot promote yourself from '%s' to '%s'. Promotions require superadmin approval.",
                                 targetCurrentGroup.getDisplayName(),
                                 newGroup.getDisplayName())
                 );
+            }
+
+            // Self-demotion is allowed! The last-user safeguard will prevent removing the last super-admin
+            if (GroupPath.isDemotion(targetCurrentGroup, newGroup)) {
+                log.info("User {} is demoting themselves from {} to {}",
+                        viewerContext.getUserId(),
+                        targetCurrentGroup.getDisplayName(),
+                        newGroup.getDisplayName());
             }
         }
 
@@ -796,7 +799,18 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     // Superadmins cannot modify other superadmins. Admins cannot modify other admins.
-    private void validateSameLevelProtection(GroupPath targetCurrentGroup, GroupPath viewerGroup) {
+    private void validateSameLevelProtection(
+            String targetUserId,
+            GroupPath targetCurrentGroup,
+            GroupPath viewerGroup,
+            ViewerContext viewerContext) {
+
+        // If it's self-modification, skip same-level protection
+        // This allows admins and superadmins to demote themselve
+        if (isSelfModification(targetUserId, viewerContext)) {
+            return;
+        }
+
         // Superadmin peer protection
         if (targetCurrentGroup == GroupPath.SUPER_ADMINISTRATORS && viewerGroup == GroupPath.SUPER_ADMINISTRATORS) {
             throw new InsufficientPermissionException(
