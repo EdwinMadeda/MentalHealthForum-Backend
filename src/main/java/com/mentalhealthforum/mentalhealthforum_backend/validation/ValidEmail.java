@@ -15,10 +15,7 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Constraint(validatedBy = {})
 @Size(max = 100, message = "Email cannot exceed 100 characters.")
-//@Email(message = "Email must be a valid email format.")
-// Additional pattern for stricter validation
-@Pattern(regexp = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-        message = "Email must be a valid email format.")
+@Email(message = "Email must be a valid email format.")
 public @interface ValidEmail {
     String message() default "Invalid email";
     Class<?>[] groups() default {};
