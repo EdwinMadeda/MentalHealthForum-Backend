@@ -260,19 +260,15 @@ public enum GroupPath {
         return getHierarchyLevel(newGroup) < getHierarchyLevel(currentGroup);
     }
 
-
     /**
      * Checks if moving from currentGroup to newGroup is a valid transition.
+
      * Rules:
-     * - Same level: ALLOWED (useful for updates without changes)
-     * - One level up: ALLOWED (promotion)
-     * - Two+ levels up: BLOCKED (skip levels not allowed)
-     * - One level down: ALLOWED for superadmins only (handled in validation)
-     * - Two+ levels down: BLOCKED (even for superadmins to prevent abuse)
-     * - Special cases:
-     *   - MODERATORS_PROFESSIONAL: Direct assignment allowed (explicit exception)
-     *   - ADMINISTRATORS: Special handling (superadmin only)
-     *   - SUPER_ADMINISTRATORS: Special handling (superadmin only)
+     * - Same group: ALLOWED (updates without changes)
+     * - One level up: ALLOWED (promotion) - Rule 1.2
+     * - One level down: ALLOWED (demotion) - Rule 1.2
+     * - Demotion to MODERATORS_PROFESSIONAL: BLOCKED (handled in validation)
+     * - ADMINISTRATORS → MODERATORS_PEER: ALLOWED (special case - skip MOD_PRO)
      */
     public static boolean isValidTransition(GroupPath currentGroup, GroupPath newGroup){
         if(currentGroup == null || newGroup == null){
@@ -284,13 +280,14 @@ public enum GroupPath {
             return true;
         }
 
-        // Special case: MODERATOR_PROFESSIONAL can be assigned directly
+        // Special case: MODERATORS_PROFESSIONAL can be assigned directly (Rule 1.3)
         if(newGroup == MODERATORS_PROFESSIONAL) {
             return true;
         }
 
-        // Special case: ADMINISTRATORS AND SUPER_ADMINISTRATORS are handled by superadmin checks
-        if(newGroup == ADMINISTRATORS || newGroup == SUPER_ADMINISTRATORS){
+
+        // Special case: Admin can demote directly to Moderators Peer (skipping Professional)
+        if(currentGroup == ADMINISTRATORS && newGroup == MODERATORS_PEER){
             return true;
         }
 
@@ -302,15 +299,7 @@ public enum GroupPath {
         return Math.abs(newLevel - currentLevel) == 1;
     }
 
-    /**
-     * Checks if a user can be assigned to a group creation or reissue
-     * Only MEMBERS_NEW and MODERATORS_PROFESSIONAL are allowed for new invitations.
-     * */
-    public static boolean isAllowedForCreationOrReissue(GroupPath group){
-        return group == MEMBERS_NEW || group == MODERATORS_PROFESSIONAL;
-    }
 
-    
 }
 
 

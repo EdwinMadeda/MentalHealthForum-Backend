@@ -4,6 +4,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AdminInvitePayload;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
@@ -38,8 +39,16 @@ import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUti
  *                          ADMINISTRATORS → SUPER_ADMINISTRATORS
  *    1.2 Single-Step Only: Promotions AND demotions must move exactly one level at a time.
  *    1.3 Professional Exception: Direct assignment to MODERATORS_PROFESSIONAL is allowed
- *        from ANY lower tier (MEMBERS_NEW, MEMBERS_ACTIVE, MEMBERS_TRUSTED, or MODERATORS_PEER).
- *        This allows organizations to quickly onboard professional moderators.
+ *        from ANY LOWER tier (PROMOTION ONLY). Demotion to MODERATORS_PROFESSIONAL
+ *        from higher tiers (ADMINISTRATORS, SUPER_ADMINISTRATORS) is NOT allowed.
+
+ *    1.4 Admin to Moderator Peer Demotion Exception: Administrators CAN demote directly
+ *        to MODERATORS_PEER, skipping MODERATORS_PROFESSIONAL. This is because
+ *        MODERATORS_PROFESSIONAL is a special professional/external credential role,
+ *        not part of the natural progression path for administrators.
+
+ *        SUPER_ADMINISTRATORS can only demote one level at a time (no skipping).
+ *        They must go through ADMINISTRATORS first.
 
  * 2. SELF-MODIFICATION RESTRICTIONS (SYNCED USERS ONLY)
  *    2.1 Superadmins: Cannot promote or disable themselves. Can demote themselves
@@ -108,6 +117,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     private final AdminInvitationService adminInvitationService;
     private final AdminInvitationRepository adminInvitationRepository;
     private final AppUserRepository appUserRepository;
+    private final AppUserService appUserService;
 
     // Internal context carrier for the admin user assembly line.
     // Used to pass data through the reactive pipeline without losing context.
@@ -128,7 +138,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             NovuService novuService,
             AdminInvitationService adminInvitationService,
             AdminInvitationRepository adminInvitationRepository,
-            AppUserRepository appUserRepository) {
+            AppUserRepository appUserRepository, AppUserService appUserService) {
         this.adminManager = adminManager;
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.verificationService = verificationService;
@@ -136,11 +146,12 @@ public class AdminUserServiceImpl implements AdminUserService {
         this.adminInvitationService = adminInvitationService;
         this.adminInvitationRepository = adminInvitationRepository;
         this.appUserRepository = appUserRepository;
+        this.appUserService = appUserService;
     }
 
     /**
      * Creates a new user as an administrator.
-
+     * <p>
      * Different from self-registration:
      * - Auto-generates password (admin doesn't know user's password)
      * - Sets pending actions for onboarding (email verification, password reset, etc.)
@@ -151,7 +162,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * <p>Allowed groups: MEMBERS_NEW or MODERATORS_PROFESSIONAL
      */
     @Override
-    public Mono<AdminCreateUserResponse> createUserAsAdmin(
+    public Mono<OperationResponse<AdminCreateUserResponse>> createUserAsAdmin(
             AdminCreateUserRequest request,
             ViewerContext viewerContext) {
         return Mono.fromCallable(() -> {
@@ -222,7 +233,16 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 adminInvitationService.createInvitation(keycloakUserDto, viewerContext.getUserId()))
                         .thenReturn(ctx))
                 // Handle email invitation flow
-                .flatMap(this::handleInvitationFlow);
+                .flatMap(this::handleInvitationFlow)
+                .flatMap(adminCreateUserResponse ->
+                                getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
+                                .map(availableGroups -> new OperationResponse<AdminCreateUserResponse>(
+                                        adminCreateUserResponse,
+                                        availableGroups,
+                                        GroupContext.REISSUE,
+                                        "User created and pending. Once they verify their email, you can update their pending status."
+                                ))
+                );
     }
 
     /**
@@ -233,7 +253,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * - The admin wants to resend the invite with another email
      */
     @Override
-    public Mono<AdminCreateUserResponse> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext) {
+    public Mono<OperationResponse<AdminCreateUserResponse>> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
         String email = request.email().trim().toLowerCase();
 
@@ -271,7 +291,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     }
 
                     // Security check: RULES 5.2, 5.3, 5.4, 7.1: Validate pending group transition
-                    return  validatePendingInviteGroupTransition(userId, JsonNullable.of(request.group()),  viewerContext)
+                    return  validatePendingInviteGroupTransition(userId, JsonNullable.of(request.group()),  viewerContext, GroupContext.REISSUE)
                             .thenReturn(userRep);
                 })
                 .flatMap(userRep -> Mono.fromCallable(() -> {
@@ -325,7 +345,18 @@ public class AdminUserServiceImpl implements AdminUserService {
                         })
                         .thenReturn(ctx))
                 // Send invitation email
-                .flatMap(this::handleInvitationFlow);
+                .flatMap(this::handleInvitationFlow)
+                .flatMap(adminCreateUserResponse ->
+                        getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
+                                .map( availableGroups ->
+                                        new OperationResponse<>(
+                                                adminCreateUserResponse,
+                                                availableGroups,
+                                                GroupContext.REISSUE,
+                                                "Invitation reissued. Once the user verifies their email, you can update their pending status."
+                                        )
+                                )
+                );
     }
 
     /**
@@ -333,7 +364,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * Used for users still in the onboarding lobby (not yet synced to app_users).
      */
     @Override
-    public Mono<PendingAdminInviteDto> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext) {
+    public Mono<OperationResponse<PendingAdminInviteDto>> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
 
         return appUserRepository.existsByKeycloakId(userUUID)
@@ -364,11 +395,23 @@ public class AdminUserServiceImpl implements AdminUserService {
                                                 .orElseThrow(UserDoesNotExistException::new))
                                         .subscribeOn(Schedulers.boundedElastic())
                                         .flatMap(userRep ->
-                                                validatePendingInviteGroupTransition(userId, request.getGroup(), viewerContext)
+                                                validatePendingInviteGroupTransition(userId, request.getGroup(), viewerContext, GroupContext.PENDING)
                                                         .flatMap(currentGroups -> applyUserUpdatesInKeycloak(userId, request.getGroup(), request.getIsEnabled(), userRep, currentGroups))
                                         );
                             })
-                            .flatMap(adminInvitationService::updateInvitation);
+                            .flatMap(adminInvitationService::updateInvitation)
+                            .flatMap(pendingAdminInviteDto ->
+                                    getAvailableGroups(GroupContext.PENDING, pendingAdminInviteDto.user_id().toString(), viewerContext)
+                                            .map(availableGroups ->
+                                                    new OperationResponse<>(
+                                                            pendingAdminInviteDto,
+                                                            availableGroups,
+                                                            GroupContext.PENDING,
+                                                            "Pending user updated. Continue managing their pending status."
+                                                    )
+                                            )
+
+                            );
                 });
     }
 
@@ -377,7 +420,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * Used for fully onboarded users who are already synced to app_users.
      */
     @Override
-    public Mono<KeycloakUserDto> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext) {
+    public Mono<OperationResponse<UserResponse>> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
 
         return appUserRepository.existsByKeycloakId(userUUID)
@@ -406,6 +449,20 @@ public class AdminUserServiceImpl implements AdminUserService {
                             .flatMap(userRep ->
                                     validateSyncedUserModification(userId, request.getGroup(), request.getIsEnabled(), viewerContext)
                                             .flatMap(currentGroups -> applyUserUpdatesInKeycloak(userId, request.getGroup(), request.getIsEnabled(), userRep, currentGroups))
+                            )
+                            .flatMap(keycloakUserDto ->
+                                    appUserService.syncUserViaAdminClient(keycloakUserDto, viewerContext)
+                                            .flatMap(userResponse ->
+                                                    getAvailableGroups(GroupContext.SYNCED, userResponse.getUserId().toString(), viewerContext)
+                                                            .map(availableGroups ->
+                                                                    new OperationResponse<>(
+                                                                            userResponse,
+                                                                            availableGroups,
+                                                                            GroupContext.SYNCED,
+                                                                            "User updated. You can continue managing their profile or group assignments."
+                                                                    )
+                                                            )
+                                            )
                             );
                 });
     }
@@ -441,6 +498,240 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 .subscribeOn(Schedulers.boundedElastic())
                                 .flatMap(id -> adminInvitationService.completeInvitation(UUID.fromString(id)))
                 );
+    }
+
+
+    /**
+     * Returns available groups for a given operation context.
+     * This is the single source of truth for dropdown options.
+     */
+    @Override
+    public Mono<List<AvailableGroup>> getAvailableGroups(GroupContext context, String userId, ViewerContext viewerContext){
+        return switch (context){
+            case CREATE -> getGroupsForCreate(viewerContext);
+            case REISSUE -> getGroupsForReissue(userId, viewerContext);
+            case PENDING -> getGroupsForPendingUpdate(userId, viewerContext);
+            case SYNCED ->  getGroupsForSyncedUpdate(userId, viewerContext);
+        };
+    }
+
+
+    /**
+     * Groups available for CREATE USER operation.
+     * Rule 5.1: Only MEMBERS_NEW or MODERATORS_PROFESSIONAL
+     * Rule 7.1: MODERATORS_PROFESSIONAL requires superadmin
+     */
+    private Mono<List<AvailableGroup>> getGroupsForCreate(ViewerContext viewerContext) {
+
+        List<AvailableGroup> result = new ArrayList<>();
+
+        // 1. MEMBERS_NEW - always available
+        result.add(new AvailableGroup(
+                GroupPath.MEMBERS_NEW,
+                false,
+                ActionType.SAME,
+                null
+        ));
+
+        // 2. MODERATORS_PROFESSIONAL - only if superadmin. Rule 7.1
+        if(viewerContext.isSuperAdmin()){
+            result.add(new AvailableGroup(
+                    GroupPath.MODERATORS_PROFESSIONAL,
+                    false,
+                    ActionType.SAME,
+                    null
+            ));
+        }
+
+        // Sort by hierarchy level (highest first)
+        result.sort((a, b) -> Integer.compare(
+                GroupPath.getHierarchyLevel(GroupPath.fromPath(b.path())),
+                GroupPath.getHierarchyLevel(GroupPath.fromPath(a.path()))
+        ));
+
+        return Mono.just(result);
+
+    }
+
+    /**
+     * Groups available for REISSUE INVITATION operation.
+     * Rule 5.2: Can freely move between MEMBERS_NEW and MODERATORS_PROFESSIONAL
+     * Rule 5.3: No admin tiers
+     * Rule 7.1: MODERATORS_PROFESSIONAL requires superadmin
+     */
+    private Mono<List<AvailableGroup>> getGroupsForReissue(String userId, ViewerContext viewerContext) {
+        if(userId == null){
+            throw new ApiException("userId required for reissue context", ErrorCode.VALIDATION_FAILED);
+        }
+
+        return Mono.fromCallable(()-> {
+
+            UserRepresentation userRep = adminManager.findUserByUserId(userId)
+                    .orElseThrow(UserDoesNotExistException::new);
+
+            String currentGroupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
+            GroupPath currentGroup = GroupPath.fromPath(currentGroupPath);
+
+            List<AvailableGroup> result = new ArrayList<>();
+
+            // Correction flow: If currently in an admin tier, allow correction
+            boolean needsCorrection =  currentGroup  == GroupPath.ADMINISTRATORS ||
+                                       currentGroup == GroupPath.SUPER_ADMINISTRATORS;
+
+            // 1. If user is in admin tier, show it as CORRECT with warning
+            if(needsCorrection){
+                log.warn("User {} is in admin tier '{}' but is pending. Correction available.",
+                        userId, currentGroup.getDisplayName());
+
+                result.add(new AvailableGroup(
+                        currentGroup,
+                        true,
+                        ActionType.CORRECT,
+                        "⚠️ User is pending but assigned to '" + currentGroup.getDisplayName() +
+                                ". Please correct to " +
+                                (viewerContext.isSuperAdmin()? "'New members' or 'Professional moderators'." : "'New members'.")
+                ));
+            }
+
+            // 2. MEMBERS_NEW - always available
+            result.add(new AvailableGroup(
+                    GroupPath.MEMBERS_NEW,
+                    GroupPath.MEMBERS_NEW == currentGroup,
+                    ActionType.SAME,
+                    null
+            ));
+
+            // 3. MODERATORS_PROFESSIONAL - only if superadmin. Rule 7.1
+            if(viewerContext.isSuperAdmin()){
+                result.add(new AvailableGroup(
+                        GroupPath.MODERATORS_PROFESSIONAL,
+                        GroupPath.MODERATORS_PROFESSIONAL == currentGroup,
+                        ActionType.SAME,
+                        null
+                ));
+            }
+
+            // Sort by hierarchy level (highest first)
+            result.sort((a, b) -> Integer.compare(
+                    GroupPath.getHierarchyLevel(GroupPath.fromPath(b.path())),
+                    GroupPath.getHierarchyLevel(GroupPath.fromPath(a.path()))
+            ));
+
+            return result;
+
+        }).subscribeOn(Schedulers.boundedElastic());
+
+    }
+
+    /**
+     * Groups available for UPDATE PENDING INVITE operation.
+     * Same as reissue - pending users can only be assigned pending groups.
+     */
+    private Mono<List<AvailableGroup>> getGroupsForPendingUpdate(String userId, ViewerContext viewerContext) {
+        return getGroupsForReissue(userId, viewerContext);
+    }
+
+    /**
+     * Groups available for UPDATE SYNCED USER operation.
+     * Rule 1.1, 1.2, 1.3: Full hierarchy based on current user's group
+     * Rule 7.2: Regular admins can promote to MODERATORS_PROFESSIONAL
+     * Rule 7.3: Only superadmins can assign admin tiers
+     */
+    private Mono<List<AvailableGroup>> getGroupsForSyncedUpdate(String userId, ViewerContext viewerContext){
+        if(userId == null){
+            throw new ApiException("userId required for synced context", ErrorCode.VALIDATION_FAILED);
+        }
+
+        return Mono.fromCallable(()->{
+
+            // Get current user's group (blocking call)
+            UserRepresentation userRep = adminManager.findUserByUserId(userId)
+                    .orElseThrow(UserDoesNotExistException::new);
+
+            String currentGroupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
+            GroupPath currentGroup = GroupPath.fromPath(currentGroupPath);
+            GroupPath viewerGroup = getPrimaryGroup(viewerContext.getGroups());
+
+            boolean isSelfModification = isSelfModification(userId, viewerContext);
+
+            List<GroupPath> groups = new ArrayList<>();
+
+            // Add all other groups from hierarchy (excluding admin tiers if not superadmin)
+            for(GroupPath group : GroupPath.getHierarchy()){
+
+                // 1. Skip ADMINISTRATORS and SUPER_ADMINISTRATORS if not superadmin (Rule 7.3)
+                // But allow the current group (for self-modification)
+                if ((group == GroupPath.ADMINISTRATORS || group == GroupPath.SUPER_ADMINISTRATORS)
+                        && !viewerContext.isSuperAdmin() && !(isSelfModification && group == currentGroup)) {
+                    continue;
+                }
+
+                // 2. Same-level protection (Rule 3.1, 3.2) - Skip if self-modification
+                if(!isSelfModification){
+                    // Superadmin cannot modify other superadmin
+                    if(currentGroup == GroupPath.SUPER_ADMINISTRATORS && viewerGroup == GroupPath.SUPER_ADMINISTRATORS){
+                        continue;
+                    }
+
+                    // Admin cannot modify other admin
+                    if(currentGroup == GroupPath.ADMINISTRATORS && viewerGroup == GroupPath.ADMINISTRATORS){
+                        continue;
+                    }
+
+                }
+
+                // 3. Self-modification: block self-promotion (Rule 2.1, 2.2)
+                if(isSelfModification){
+                    // Self-promotion is blocked (can't move to higher level
+                    if(GroupPath.isPromotion(currentGroup, group)){
+                        continue;
+                    }
+
+                    // Self-demotion is allowed (shown in dropdown)
+                }
+
+                // 4. Only show groups that are reachable (one step up/down or via Rule 1.3)
+                if(group == currentGroup || GroupPath.isValidTransition(currentGroup, group)){
+                    // 5. Rule 1.3: Professional Exception - Direct to MODERATORS_PROFESSIONAL from ANY LOWER tier
+
+                    // Block demotion to MODERATORS_PROFESSIONAL from higher tiers
+                    if(group == GroupPath.MODERATORS_PROFESSIONAL && GroupPath.isDemotion(currentGroup, group)){
+                        continue; // Skip demotion to MODERATORS_PROFESSIONAL
+                    }
+                    groups.add(group);
+                }
+
+
+            }
+
+            return groups.stream().distinct()
+                    // Reverse order : highest level first (promotion at the top)
+                    .sorted((a, b) -> Integer.compare(
+                            GroupPath.getHierarchyLevel(b),
+                            GroupPath.getHierarchyLevel(a)
+                    ))
+                    .map(group -> {
+                        // Determine action type
+                        ActionType action = null;
+
+                        if(group == currentGroup) {
+                            action = ActionType.SAME;
+                        }
+
+                        else if(GroupPath.isPromotion(currentGroup, group)) {
+                            action = ActionType.PROMOTE;
+                        }
+
+                        else if(GroupPath.isDemotion(currentGroup, group)) {
+                            action = ActionType.DEMOTE;
+                        }
+
+                        return new AvailableGroup(group, group.equals(currentGroup), action, null);
+                    })
+                    .toList();
+
+        }).subscribeOn(Schedulers.boundedElastic());
+
     }
 
     // ==================== PRIVATE HELPERS ====================
@@ -628,12 +919,15 @@ public class AdminUserServiceImpl implements AdminUserService {
     private Mono<List<String>> validatePendingInviteGroupTransition(
             String targetUserId,
             JsonNullable<GroupPath> targetGroup,
-            ViewerContext viewerContext
+            ViewerContext viewerContext,
+            GroupContext operationContext // "REISSUE" or "UPDATE_PENDING"
     ) {
         return Mono.fromCallable(() -> {
                     // Get target user's current groups
                     List<String> currentGroups = adminManager.getUserGroups(targetUserId);
                     GroupPath currentGroup = getPrimaryGroup(currentGroups);
+
+                     String errorPrefix = operationContext == GroupContext.REISSUE ? "Reissue" : "Pending Users";
 
                     if(targetGroup != null && targetGroup.isPresent()){
                         GroupPath newGroup = targetGroup.get();
@@ -642,7 +936,8 @@ public class AdminUserServiceImpl implements AdminUserService {
                         if(newGroup == GroupPath.ADMINISTRATORS || newGroup == GroupPath.SUPER_ADMINISTRATORS){
                             throw new InsufficientPermissionException(
                                     String.format(
-                                            "Reissue invite cannot assign administrative tier '%s'. Only '%s' or '%s' are allowed",
+                                            "%s invite cannot assign administrative tier '%s'. Only '%s' or '%s' are allowed",
+                                            errorPrefix,
                                             newGroup.getDisplayName(),
                                             GroupPath.MEMBERS_NEW.getDisplayName(),
                                             GroupPath.MODERATORS_PROFESSIONAL.getDisplayName()
@@ -653,7 +948,8 @@ public class AdminUserServiceImpl implements AdminUserService {
                         // Rules 5.2, 5.4: Allow free movement between MEMBERS_NEW and MODERATORS_PROFESSIONAL
                         if(newGroup != GroupPath.MEMBERS_NEW && newGroup != GroupPath.MODERATORS_PROFESSIONAL){
                             throw new InsufficientPermissionException(
-                                    String.format("Reissue can only be assigned to '%s' or '%s'. Received: '%s'",
+                                    String.format("%s can only be assigned to '%s' or '%s'. Received: '%s'",
+                                            errorPrefix,
                                             GroupPath.MEMBERS_NEW.getDisplayName(),
                                             GroupPath.MODERATORS_PROFESSIONAL.getDisplayName(),
                                             newGroup.getDisplayName())
@@ -723,7 +1019,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     validateHierarchyProgression(targetGroup, targetCurrentGroup);
 
                     // 5. Only superadmins can assign admin-level groups
-                    validateGroupAssignmentPermission(targetGroup, viewerContext);
+                    validateGroupAssignmentPermission(targetGroup, targetCurrentGroup, viewerContext);
 
                     return targetCurrentGroups;
                 }).subscribeOn(Schedulers.boundedElastic())
@@ -799,6 +1095,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     // Superadmins cannot modify other superadmins. Admins cannot modify other admins.
+    // Self-modification is exempt (self-demotion is allowed).
     private void validateSameLevelProtection(
             String targetUserId,
             GroupPath targetCurrentGroup,
@@ -806,7 +1103,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             ViewerContext viewerContext) {
 
         // If it's self-modification, skip same-level protection
-        // This allows admins and superadmins to demote themselve
+        // This allows admins and superadmins to demote themselves
         if (isSelfModification(targetUserId, viewerContext)) {
             return;
         }
@@ -872,8 +1169,10 @@ public class AdminUserServiceImpl implements AdminUserService {
             return;
         }
 
-        // Enforce single-step transitions
+
+        // Enforce single-step transitions (includes Rule 1.3)
         if (!GroupPath.isValidTransition(targetCurrentGroup, newGroup)) {
+
             throw new InsufficientPermissionException(
                     String.format(
                             "Cannot move from '%s' to '%s'. Users can only progress one level at a time.",
@@ -883,13 +1182,36 @@ public class AdminUserServiceImpl implements AdminUserService {
             );
         }
 
+
+        // Rule 1.3: Professional Exception only applies for PROMOTION to MODERATORS_PROFESSIONAL
+        // Block demotion to MODERATORS_PROFESSIONAL from higher tiers
+        boolean isDemotionToProfessionalModerator = newGroup == GroupPath.MODERATORS_PROFESSIONAL && GroupPath.isDemotion(targetCurrentGroup, newGroup);
+
+
+
+        if (isDemotionToProfessionalModerator) {
+            throw new InsufficientPermissionException(
+                    String.format(
+                            "Cannot demote from '%s' to '%s'. Professional moderators can only be assigned as a promotion from lower tiers.",
+                            targetCurrentGroup.getDisplayName(),
+                            newGroup.getDisplayName()
+                    )
+            );
+        }
+
+
     }
 
     // Only superadmins can assign ADMINISTRATORS or SUPER_ADMINISTRATORS.
-    private void validateGroupAssignmentPermission(JsonNullable<GroupPath> targetGroup, ViewerContext viewerContext) {
+    private void validateGroupAssignmentPermission(JsonNullable<GroupPath> targetGroup,  GroupPath targetCurrentGroup, ViewerContext viewerContext) {
 
         if (targetGroup != null && targetGroup.isPresent()) {
             GroupPath newGroup = targetGroup.get();
+
+            // Skip validation if no actual group change (self-update with same group)
+            if(newGroup == targetCurrentGroup){
+                return;
+            }
 
             if (!GroupPath.isSuperAdminOnlyGroup(newGroup, viewerContext)) {
                 throw new InsufficientPermissionException(

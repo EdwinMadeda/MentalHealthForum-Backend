@@ -3,7 +3,6 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller.admin;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
@@ -64,7 +63,7 @@ public class AdminUserController {
      * @return Created user response with temporary credentials
      */
     @PostMapping("/create")
-    public Mono<ResponseEntity<StandardSuccessResponse<AdminCreateUserResponse>>> createUserAsAdmin(
+    public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<AdminCreateUserResponse>>>> createUserAsAdmin(
             @AuthenticationPrincipal Jwt jwt,
             @Valid @RequestBody AdminCreateUserRequest request){
 
@@ -73,17 +72,19 @@ public class AdminUserController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
         return adminUserService.createUserAsAdmin(request, viewerContext)
-                .map(response -> {
+                .map(operationResponse -> {
+
                     // Build Success response
                     String message = "User created successfully. %s".formatted(
-                            response.emailSent()
-                                ? "An invitation email with temporary credentials has been sent to the user."
-                                : request.sendInvitationEmail()
-                                    ? "The invitation email failed to send. " + MANUAL_FALLBACK_MESSAGE
-                                    : MANUAL_FALLBACK_MESSAGE);
+                            operationResponse.result().emailSent()
+                                    ? "An invitation email with temporary credentials has been sent to the user."
+                                    : request.sendInvitationEmail()
+                                      ? "The invitation email failed to send. " + MANUAL_FALLBACK_MESSAGE
+                                      : MANUAL_FALLBACK_MESSAGE);
 
-                    StandardSuccessResponse<AdminCreateUserResponse> successResponse =
-                            new StandardSuccessResponse<>(message, response);
+
+                    StandardSuccessResponse<OperationResponse<AdminCreateUserResponse>> successResponse =
+                            new StandardSuccessResponse<>(message, operationResponse);
 
                     // Return 201 Created with response body
                     return ResponseEntity.status(HttpStatus.CREATED).body(successResponse);
@@ -91,7 +92,7 @@ public class AdminUserController {
     }
 
     @PostMapping("/pending-invites/{userId}/reissue-invite")
-    public Mono<ResponseEntity<StandardSuccessResponse<AdminCreateUserResponse>>> reissueInvitation(
+    public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<AdminCreateUserResponse>>>> reissueInvitation(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
             @Valid @RequestBody ReissueInvitationRequest reissueInvitationRequest){
@@ -99,18 +100,18 @@ public class AdminUserController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
         return adminUserService.reissueAdminInvitation(String.valueOf(userId), reissueInvitationRequest, viewerContext)
-                .map( response -> {
+                .map( operationResponse -> {
+
                     String message = "Invitation reissued successfully. %s".formatted(
-                            response.emailSent()
+                            operationResponse.result().emailSent()
                                     ? "An Invitation email with temporary credentials has been sent to the user."
                                     : reissueInvitationRequest.sendInvitationEmail() ?
                                       "The invitation email failed to send. " + MANUAL_FALLBACK_MESSAGE
                                       : MANUAL_FALLBACK_MESSAGE);
 
-                    StandardSuccessResponse<AdminCreateUserResponse> successResponse =
-                            new StandardSuccessResponse<>(message, response);
 
-                    return ResponseEntity.ok(successResponse);
+                    return ResponseEntity.ok(new StandardSuccessResponse<>(message, operationResponse));
+
                 });
     }
 
@@ -133,7 +134,7 @@ public class AdminUserController {
     }
 
     @PatchMapping("/pending-invites/{userId}")
-    public Mono<ResponseEntity<StandardSuccessResponse<PendingAdminInviteDto>>> updatePendingInvite(
+    public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<PendingAdminInviteDto>>>> updatePendingInvite(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
             @Valid @RequestBody UpdatePendingAdminInviteRequest updatePendingAdminInviteRequest){
@@ -141,12 +142,18 @@ public class AdminUserController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
         return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest, viewerContext)
-                .map(pendingAdminInvite ->
-                        ResponseEntity.ok(new StandardSuccessResponse<>("Pending admin Invite updated successfully", pendingAdminInvite)));
+                .map(operationResponse -> {
+
+                    StandardSuccessResponse<OperationResponse<PendingAdminInviteDto>> successResponse =
+                            new StandardSuccessResponse<>("Pending admin Invite updated successfully", operationResponse);
+
+                    return ResponseEntity.ok(successResponse);
+
+                });
     }
 
     @PatchMapping("/{userId}")
-    public Mono<ResponseEntity<StandardSuccessResponse<UserResponse>>> updateUserAsAdmin(
+    public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<UserResponse>>>> updateUserAsAdmin(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
             @Valid @RequestBody AdminUpdateUserRequest adminUpdateUserRequest){
@@ -154,12 +161,15 @@ public class AdminUserController {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
         return adminUserService.updateUserAsAdmin(String.valueOf(userId), adminUpdateUserRequest, viewerContext)
-                .flatMap(keycloakUserDto -> appUserService.syncUserViaAdminClient(keycloakUserDto, viewerContext)
-                .map(user -> {
-                    String message = "User details updated successfully";
-                    StandardSuccessResponse<UserResponse> response = new StandardSuccessResponse<>(message, user);
-                    return ResponseEntity.ok(response);
-                }));
+                .map(operationResponse -> {
+
+                    StandardSuccessResponse<OperationResponse<UserResponse>> successResponse =
+                            new StandardSuccessResponse<>("User details updated successfully", operationResponse);
+
+                    return ResponseEntity.ok(successResponse);
+
+                });
+
     }
 
     @DeleteMapping("/pending-invites/{userId}")
@@ -209,19 +219,25 @@ public class AdminUserController {
                 });
     }
 
+    /**
+     * Returns available groups for a given operation context.
+     * This endpoint provides context-aware dropdown options for the frontend.
+     */
     @GetMapping("/groups/assignable")
     public Mono<ResponseEntity<StandardSuccessResponse<List<AvailableGroup>>>> getAssignableGroups(
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam GroupContext groupContext,
+            @RequestParam(required = false) String userId
+            ) {
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
-        List<AvailableGroup> groups = GroupPath.getAssignableGroupsForViewer(viewerContext).stream()
-                .map(AvailableGroup::new)
-                .toList();
-
-
-        return Mono.just(ResponseEntity.ok(
-                new StandardSuccessResponse<>("Available groups retrieved successfully", groups)
-        ));
+        return adminUserService.getAvailableGroups(groupContext, userId, viewerContext)
+                .map(availableGroups -> ResponseEntity.ok(
+                            new StandardSuccessResponse<>("Available groups retrieved successfully", availableGroups)
+                    )
+                );
     }
+
+
 }
