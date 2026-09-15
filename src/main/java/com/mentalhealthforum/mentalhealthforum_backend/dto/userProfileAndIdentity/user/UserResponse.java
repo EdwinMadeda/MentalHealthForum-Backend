@@ -16,7 +16,6 @@ import java.util.UUID;
  */
 @Setter
 @Getter
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public class UserResponse {
 
     // -- Core Identity ---

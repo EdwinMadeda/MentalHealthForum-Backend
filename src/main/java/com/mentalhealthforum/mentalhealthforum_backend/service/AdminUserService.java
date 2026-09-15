@@ -7,6 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface AdminUserService {
 
@@ -18,7 +19,11 @@ public interface AdminUserService {
 
     Mono<OperationResponse<UserResponse>> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext);
 
-    Mono<Void> revokeInvitation(String userId);
+    Mono<Void> revokeInvitation(String userId, ViewerContext viewerContext);
 
     Mono<List<AvailableGroup>> getAvailableGroups(GroupContext context, String userId, ViewerContext viewerContext);
+
+    Mono<AdminUserDetailsDto<UserResponse>> getAdminUserDetails(String s, ViewerContext viewerContext);
+
+    Mono<AdminUserDetailsDto<PendingAdminInviteDto>> getPendingInviteDetails(String s, ViewerContext viewerContext);
 }

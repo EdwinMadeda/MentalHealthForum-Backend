@@ -22,6 +22,8 @@ public interface AdminInvitationService {
     Mono<Void> updateOnboardingStage(String userId, OnboardingStage onboardingStage);
 
 
+    Mono<PendingAdminInviteDto> getPendingInvite(String userId);
+
     Mono<PaginatedResponse<PendingAdminInviteDto>> getPendingInvites(
             int page,
             int size,

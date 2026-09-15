@@ -23,7 +23,6 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonInclude(JsonInclude.Include.NON_NULL)
 @Table("forum_categories")
 public class CategoryEntity {
     @Id

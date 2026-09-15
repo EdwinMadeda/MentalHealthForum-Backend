@@ -40,6 +40,9 @@ spring:
     init:
       enabled: false
 
+#  jackson:
+#    default-property-inclusion: non_null
+
 keycloak:
   auth-server-url: http://localhost:9080
   realm: mentalhealthforum

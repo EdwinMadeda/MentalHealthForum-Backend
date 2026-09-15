@@ -10,10 +10,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserInfoDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.InternalRole;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.ModerationAction;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.VerificationType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.AppUserSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
@@ -52,6 +49,7 @@ public class AppUserServiceImpl implements AppUserService {
     private final UserConnectRepository userConnectRepository;
     private final AdminInvitationService adminInvitationService;
     private final AdminInvitationRepository adminInvitationRepository;
+    private final AdminAuditService adminAuditService;
     private final VerificationTokenRepository verificationTokenRepository;
     private final WebClient webClient;
     private final String userInfoUri;
@@ -68,6 +66,7 @@ public class AppUserServiceImpl implements AppUserService {
             UserConnectRepository userConnectRepository,
             AdminInvitationService adminInvitationService,
             AdminInvitationRepository adminInvitationRepository,
+            AdminAuditService adminAuditService,
             VerificationTokenRepository verificationTokenRepository) {
         this.appUserRepository = appUserRepository;
         this.adminManager = adminManager;
@@ -76,6 +75,7 @@ public class AppUserServiceImpl implements AppUserService {
         this.userConnectRepository = userConnectRepository;
         this.adminInvitationService = adminInvitationService;
         this.adminInvitationRepository = adminInvitationRepository;
+        this.adminAuditService = adminAuditService;
         this.verificationTokenRepository = verificationTokenRepository;
 
         String authServerUrl = keycloakProperties.getAuthServerUrl();
@@ -126,8 +126,18 @@ public class AppUserServiceImpl implements AppUserService {
                                                     return Mono.empty();
                                                 }
                                                 log.info("User {} transitioning to AppUserEntity", keycloakUserDto.userId());
+
+                                                // Save user first
                                                 return adminInvitationService.completeInvitation(UUID.fromString(keycloakUserDto.userId()))
-                                                        .then(appUserRepository.save(userDetails));
+                                                        .then(appUserRepository.save(userDetails))
+                                                        // Then log sync (after save)
+                                                        .flatMap(savedUser ->
+                                                            adminAuditService.logSynced(
+                                                                    savedUser.getKeycloakId(),
+                                                                    GroupPath.getPrimaryGroup(savedUser.getGroups()),
+                                                                    null // performedBy = null (system action)
+                                                            ).thenReturn(savedUser)
+                                                        );
                                             })
                             ));
                 })

@@ -8,6 +8,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PendingInviteSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserDoesNotExistException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AdminInvitationEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
@@ -117,6 +118,15 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
     }
 
     @Override
+    public Mono<PendingAdminInviteDto> getPendingInvite(String userId){
+        return adminInvitationRepository.findByKeycloakId(UUID.fromString(userId))
+                .switchIfEmpty(Mono.error(new UserDoesNotExistException(
+                        "User not found in pending invitations"
+                )))
+                .flatMap(this::toPendingInviteDto);
+    }
+
+    @Override
     public Mono<PaginatedResponse<PendingAdminInviteDto>> getPendingInvites(
             int page,
             int size,
@@ -196,7 +206,8 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 .toList();
     }
 
-    public Mono<PendingAdminInviteDto> toPendingInviteDto(AdminInvitationEntity entity) {
+
+    private Mono<PendingAdminInviteDto> toPendingInviteDto(AdminInvitationEntity entity) {
         if (entity == null) {
             return Mono.empty();
         }

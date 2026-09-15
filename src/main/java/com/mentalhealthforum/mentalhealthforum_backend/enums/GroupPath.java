@@ -5,6 +5,7 @@ import lombok.Getter;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -297,6 +298,24 @@ public enum GroupPath {
         // Can only move up ONE level up OR ONE level down
         // But down might be restricted by superadmin checks
         return Math.abs(newLevel - currentLevel) == 1;
+    }
+
+    // Gets the user's primary group from a list of groups, defaulting to MEMBERS_NEW
+    public static GroupPath getPrimaryGroup(List<String> groups) {
+        return groups.stream()
+                .map(GroupPath::fromPath)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(GroupPath.MEMBERS_NEW);
+    }
+
+    // Gets the user's primary group from a set of groups, defaulting to MEMBERS_NEW
+    public static GroupPath getPrimaryGroup(Set<String> groups) {
+        return groups.stream()
+                .map(GroupPath::fromPath)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(GroupPath.MEMBERS_NEW);
     }
 
 

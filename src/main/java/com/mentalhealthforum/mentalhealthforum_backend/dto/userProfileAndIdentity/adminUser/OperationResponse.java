@@ -16,5 +16,6 @@ public record OperationResponse<T>(
    T result,
    List<AvailableGroup> availableGroups,
    GroupContext context,
-   String guidelines
+   String guidelines,
+   List<UserHistoryEntry> recentHistory
 ) {}

@@ -4,8 +4,10 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AdminAuditService;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -18,7 +20,11 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
+
+import static com.fasterxml.jackson.databind.type.LogicalType.Map;
 
 @RestController
 @RequestMapping("/api/admin/users")
@@ -31,6 +37,7 @@ public class AdminUserController {
     private final AdminUserService adminUserService;
     private final AppUserService appUserService;
     private final AdminInvitationService adminInvitationService;
+    private final AdminAuditService adminAuditService;
     private final AccountPurgeSchedulerService accountPurgeSchedulerService;
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
@@ -38,11 +45,13 @@ public class AdminUserController {
             AdminUserService adminUserService,
             AppUserService appUserService,
             AdminInvitationService adminInvitationService,
+            AdminAuditService adminAuditService,
             AccountPurgeSchedulerService accountPurgeSchedulerService,
             JwtClaimsExtractor jwtClaimsExtractor) {
         this.adminUserService = adminUserService;
         this.appUserService = appUserService;
         this.adminInvitationService = adminInvitationService;
+        this.adminAuditService = adminAuditService;
         this.accountPurgeSchedulerService = accountPurgeSchedulerService;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
@@ -133,6 +142,19 @@ public class AdminUserController {
                 ));
     }
 
+    @GetMapping("/pending-invites/{userId}")
+    public Mono<ResponseEntity<StandardSuccessResponse<AdminUserDetailsDto<PendingAdminInviteDto>>>> getPendingInviteDetails(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID userId){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return adminUserService.getPendingInviteDetails(String.valueOf(userId), viewerContext)
+                .map(pendingInviteDetails -> ResponseEntity.ok(
+                        new StandardSuccessResponse<>("Pending invite details retrieved", pendingInviteDetails)
+                ));
+    }
+
     @PatchMapping("/pending-invites/{userId}")
     public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<PendingAdminInviteDto>>>> updatePendingInvite(
             @AuthenticationPrincipal Jwt jwt,
@@ -174,10 +196,13 @@ public class AdminUserController {
 
     @DeleteMapping("/pending-invites/{userId}")
     public Mono<ResponseEntity<StandardSuccessResponse<Void>>> revokeInvitation(
+            @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId){
             log.info("Admin revoking invitation for user ID: {}", userId);
 
-            return adminUserService.revokeInvitation(String.valueOf(userId))
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return adminUserService.revokeInvitation(String.valueOf(userId), viewerContext)
                     .thenReturn(ResponseEntity.ok(
                             new StandardSuccessResponse<>("Invitation revoked and user deleted successfully.", null)
                     ));
@@ -219,6 +244,19 @@ public class AdminUserController {
                 });
     }
 
+    @GetMapping("/{userId}")
+    public Mono<ResponseEntity<StandardSuccessResponse<AdminUserDetailsDto<UserResponse>>>> getUserDetails(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID userId){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return adminUserService.getAdminUserDetails(String.valueOf(userId), viewerContext)
+                .map(adminUserDetails -> ResponseEntity.ok(
+                        new StandardSuccessResponse<>("User details details retrieved", adminUserDetails)
+                ));
+    }
+
     /**
      * Returns available groups for a given operation context.
      * This endpoint provides context-aware dropdown options for the frontend.
@@ -239,5 +277,25 @@ public class AdminUserController {
                 );
     }
 
+    @GetMapping("/audit/reasons")
+    public Mono<ResponseEntity<StandardSuccessResponse<List<UserAuditReasonDefinitionGroupedDto>>>> getReasonDefinitions(){
+        return adminAuditService.getAllReasonDefinitions()
+                .map(reasonDefinitions ->  ResponseEntity.ok(
+                        new StandardSuccessResponse<>("Reason definitions retrieved successfully", reasonDefinitions)
+                ));
+
+    }
+
+    @GetMapping("/{userId}/history")
+    public Mono<ResponseEntity<StandardSuccessResponse<List<UserHistoryEntry>>>> getUserHistory(
+            @PathVariable UUID userId){
+
+        return adminAuditService.getUserHistoryList(userId)
+                .collectList()
+                .map(userAuditReasonDefinitionDto -> ResponseEntity.ok(
+                    new StandardSuccessResponse<>("User history retrieved successfully", userAuditReasonDefinitionDto)
+                ));
+
+    }
 
 }

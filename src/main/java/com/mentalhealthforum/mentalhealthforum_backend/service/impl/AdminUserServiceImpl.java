@@ -14,6 +14,7 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.openapitools.jackson.nullable.JsonNullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -118,6 +119,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     private final AdminInvitationRepository adminInvitationRepository;
     private final AppUserRepository appUserRepository;
     private final AppUserService appUserService;
+    private final AdminAuditService adminAuditService;
 
     // Internal context carrier for the admin user assembly line.
     // Used to pass data through the reactive pipeline without losing context.
@@ -138,7 +140,8 @@ public class AdminUserServiceImpl implements AdminUserService {
             NovuService novuService,
             AdminInvitationService adminInvitationService,
             AdminInvitationRepository adminInvitationRepository,
-            AppUserRepository appUserRepository, AppUserService appUserService) {
+            AppUserRepository appUserRepository, AppUserService appUserService,
+            AdminAuditService adminAuditService) {
         this.adminManager = adminManager;
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.verificationService = verificationService;
@@ -147,6 +150,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         this.adminInvitationRepository = adminInvitationRepository;
         this.appUserRepository = appUserRepository;
         this.appUserService = appUserService;
+        this.adminAuditService = adminAuditService;
     }
 
     /**
@@ -234,14 +238,30 @@ public class AdminUserServiceImpl implements AdminUserService {
                         .thenReturn(ctx))
                 // Handle email invitation flow
                 .flatMap(this::handleInvitationFlow)
+                .flatMap(adminCreateUserResponse -> {
+                    UUID userId = UUID.fromString(adminCreateUserResponse.userId());
+                    UUID performedBy =  UUID.fromString(viewerContext.getUserId());
+                    return adminAuditService.logUserCreated(
+                            userId,
+                            request.group(),
+                           performedBy
+                    ).thenReturn(adminCreateUserResponse);
+                })
                 .flatMap(adminCreateUserResponse ->
                                 getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
-                                .map(availableGroups -> new OperationResponse<AdminCreateUserResponse>(
-                                        adminCreateUserResponse,
-                                        availableGroups,
-                                        GroupContext.REISSUE,
-                                        "User created and pending. Once they verify their email, you can update their pending status."
-                                ))
+                                    .flatMap(availableGroups ->
+                                            adminAuditService.getRecentUserHistory(UUID.fromString(adminCreateUserResponse.userId()))
+                                                    .collectList()
+                                                    .map(history ->
+                                                            new OperationResponse<>(
+                                                                    adminCreateUserResponse,
+                                                                    availableGroups,
+                                                                    GroupContext.REISSUE,
+                                                                    "User created and pending. Once they verify their email, you can update their pending status.",
+                                                                    history
+                                                            )
+                                                    )
+                                    )
                 );
     }
 
@@ -346,15 +366,30 @@ public class AdminUserServiceImpl implements AdminUserService {
                         .thenReturn(ctx))
                 // Send invitation email
                 .flatMap(this::handleInvitationFlow)
+                .flatMap(adminCreateUserResponse -> {
+                    UUID performedBy = UUID.fromString(viewerContext.getUserId());
+
+                    return adminAuditService.logInviteReissued(
+                            userUUID,
+                            performedBy,
+                            null,
+                            null
+                    ).thenReturn(adminCreateUserResponse);
+                })
                 .flatMap(adminCreateUserResponse ->
                         getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
-                                .map( availableGroups ->
-                                        new OperationResponse<>(
-                                                adminCreateUserResponse,
-                                                availableGroups,
-                                                GroupContext.REISSUE,
-                                                "Invitation reissued. Once the user verifies their email, you can update their pending status."
-                                        )
+                                .flatMap(availableGroups ->
+                                        adminAuditService.getRecentUserHistory(userUUID)
+                                                .collectList()
+                                                .map(history ->
+                                                        new OperationResponse<>(
+                                                                adminCreateUserResponse,
+                                                                availableGroups,
+                                                                GroupContext.REISSUE,
+                                                                "Invitation reissued. Once the user verifies their email, you can update their pending status.",
+                                                                history
+                                                        )
+                                                )
                                 )
                 );
     }
@@ -396,19 +431,27 @@ public class AdminUserServiceImpl implements AdminUserService {
                                         .subscribeOn(Schedulers.boundedElastic())
                                         .flatMap(userRep ->
                                                 validatePendingInviteGroupTransition(userId, request.getGroup(), viewerContext, GroupContext.PENDING)
-                                                        .flatMap(currentGroups -> applyUserUpdatesInKeycloak(userId, request.getGroup(), request.getIsEnabled(), userRep, currentGroups))
+                                                        .flatMap(currentGroups ->
+                                                                applyUserUpdatesInKeycloak(userId, UserType.PENDING, request.getGroup(), request.getIsEnabled(), userRep, currentGroups, viewerContext)
+                                                        )
+
                                         );
                             })
                             .flatMap(adminInvitationService::updateInvitation)
                             .flatMap(pendingAdminInviteDto ->
                                     getAvailableGroups(GroupContext.PENDING, pendingAdminInviteDto.user_id().toString(), viewerContext)
-                                            .map(availableGroups ->
-                                                    new OperationResponse<>(
-                                                            pendingAdminInviteDto,
-                                                            availableGroups,
-                                                            GroupContext.PENDING,
-                                                            "Pending user updated. Continue managing their pending status."
-                                                    )
+                                            .flatMap(availableGroups ->
+                                                    adminAuditService.getRecentUserHistory(pendingAdminInviteDto.user_id())
+                                                            .collectList()
+                                                            .map(history ->
+                                                                    new OperationResponse<>(
+                                                                            pendingAdminInviteDto,
+                                                                            availableGroups,
+                                                                            GroupContext.PENDING,
+                                                                            "Pending user updated. Continue managing their pending status.",
+                                                                            history
+                                                                    )
+                                                            )
                                             )
 
                             );
@@ -448,19 +491,25 @@ public class AdminUserServiceImpl implements AdminUserService {
                             .subscribeOn(Schedulers.boundedElastic())
                             .flatMap(userRep ->
                                     validateSyncedUserModification(userId, request.getGroup(), request.getIsEnabled(), viewerContext)
-                                            .flatMap(currentGroups -> applyUserUpdatesInKeycloak(userId, request.getGroup(), request.getIsEnabled(), userRep, currentGroups))
+                                            .flatMap(currentGroups -> applyUserUpdatesInKeycloak(userId, UserType.SYNCED, request.getGroup(), request.getIsEnabled(), userRep, currentGroups, viewerContext)
+                                            )
                             )
                             .flatMap(keycloakUserDto ->
                                     appUserService.syncUserViaAdminClient(keycloakUserDto, viewerContext)
                                             .flatMap(userResponse ->
                                                     getAvailableGroups(GroupContext.SYNCED, userResponse.getUserId().toString(), viewerContext)
-                                                            .map(availableGroups ->
-                                                                    new OperationResponse<>(
-                                                                            userResponse,
-                                                                            availableGroups,
-                                                                            GroupContext.SYNCED,
-                                                                            "User updated. You can continue managing their profile or group assignments."
-                                                                    )
+                                                            .flatMap(availableGroups ->
+                                                                    adminAuditService.getRecentUserHistory(userResponse.getUserId())
+                                                                            .collectList()
+                                                                            .map(history ->
+                                                                                    new OperationResponse<>(
+                                                                                            userResponse,
+                                                                                            availableGroups,
+                                                                                            GroupContext.SYNCED,
+                                                                                            "User updated. You can continue managing their profile or group assignments.",
+                                                                                            history
+                                                                                    )
+                                                                            )
                                                             )
                                             )
                             );
@@ -472,7 +521,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * Permanently removes the user from Keycloak and marks invitation as complete.
      */
     @Override
-    public Mono<Void> revokeInvitation(String userId) {
+    public Mono<Void> revokeInvitation(String userId, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
         return appUserRepository.existsByKeycloakId(userUUID)
                 .flatMap(inAppUsers ->
@@ -496,8 +545,16 @@ public class AdminUserServiceImpl implements AdminUserService {
                                     return userId;
                                 })
                                 .subscribeOn(Schedulers.boundedElastic())
-                                .flatMap(id -> adminInvitationService.completeInvitation(UUID.fromString(id)))
-                );
+
+                )
+                .then(adminAuditService.logInviteRevoked(
+                                userUUID,
+                                UUID.fromString(viewerContext.getUserId()),
+                                null,
+                                null
+                        )
+                .then(adminInvitationService.completeInvitation(userUUID)));
+
     }
 
 
@@ -513,6 +570,82 @@ public class AdminUserServiceImpl implements AdminUserService {
             case PENDING -> getGroupsForPendingUpdate(userId, viewerContext);
             case SYNCED ->  getGroupsForSyncedUpdate(userId, viewerContext);
         };
+    }
+
+    @Override
+    public Mono<AdminUserDetailsDto<UserResponse>> getAdminUserDetails(String userId, ViewerContext viewerContext) {
+
+        UUID userUUID = UUID.fromString(userId);
+        return Mono.fromCallable(() ->
+                        // Blocking lookup, then map to Response DTO
+                        adminManager.findUserByUserId(userId)
+                                .orElseThrow(UserDoesNotExistException::new)
+                )
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(userRep -> {
+                    // Get current group
+                    String currentGroupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
+                    GroupPath currentGroup = GroupPath.fromPath(currentGroupPath);
+
+                    return appUserService.syncUserViaAdminClient(keycloakUserDtoMapper.mapToKeycloakUserDto(userRep), viewerContext)
+                            .flatMap(userResponse ->
+                                 getAvailableGroups(GroupContext.SYNCED, userId, viewerContext)
+                                        .flatMap(availableGroups ->
+                                                adminAuditService.getRecentUserHistory(userUUID)
+                                                        .collectList()
+                                                        .map(history ->
+                                                            new AdminUserDetailsDto<>(
+                                                                    UserType.SYNCED,
+                                                                    userResponse,
+                                                                    currentGroup,
+                                                                    availableGroups,
+                                                                    history,
+                                                                    "This is the user's full profile. Use the available groups to manage their permissions."
+                                                            )
+                                                        )
+                                        )
+                            );
+
+                });
+
+    }
+
+    @Override
+    public Mono<AdminUserDetailsDto<PendingAdminInviteDto>> getPendingInviteDetails(String userId, ViewerContext viewerContext) {
+        UUID userUUID = UUID.fromString(userId);
+        return appUserRepository.existsByKeycloakId(userUUID)
+                .flatMap(inAppUsers -> {
+                    if(inAppUsers){
+                        return Mono.error(new ApiException(
+                                "User is already synced: Use 'Get Synced User Details' instead",
+                                ErrorCode.VALIDATION_FAILED
+                        ));
+                    }
+
+                    return  adminInvitationService.getPendingInvite(userId)
+                            .flatMap(pendingAdminInviteDto -> {
+                                String currentGroupPath = adminManager.getUserPrimaryGroupPath(userId);
+
+                                GroupPath currentGroup = GroupPath.fromPath(currentGroupPath);
+
+                                return getAvailableGroups(GroupContext.PENDING, userId, viewerContext)
+                                            .flatMap(availableGroups ->
+                                                    adminAuditService.getUserHistoryList(userUUID)
+                                                            .collectList()
+                                                            .map(history ->
+                                                                new AdminUserDetailsDto<>(
+                                                                        UserType.PENDING,
+                                                                        pendingAdminInviteDto,
+                                                                        currentGroup,
+                                                                        availableGroups,
+                                                                        history,
+                                                                        "This is the pending user's full. Use the available groups to manage their permissions."
+                                                                )
+                                                            )
+                                            );
+
+                            });
+                });
     }
 
 
@@ -650,7 +783,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
             String currentGroupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
             GroupPath currentGroup = GroupPath.fromPath(currentGroupPath);
-            GroupPath viewerGroup = getPrimaryGroup(viewerContext.getGroups());
+            GroupPath viewerGroup = GroupPath.getPrimaryGroup(viewerContext.getGroups());
 
             boolean isSelfModification = isSelfModification(userId, viewerContext);
 
@@ -925,7 +1058,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         return Mono.fromCallable(() -> {
                     // Get target user's current groups
                     List<String> currentGroups = adminManager.getUserGroups(targetUserId);
-                    GroupPath currentGroup = getPrimaryGroup(currentGroups);
+                    GroupPath currentGroup = GroupPath.getPrimaryGroup(currentGroups);
 
                      String errorPrefix = operationContext == GroupContext.REISSUE ? "Reissue" : "Pending Users";
 
@@ -1003,8 +1136,8 @@ public class AdminUserServiceImpl implements AdminUserService {
         return Mono.fromCallable(() -> {
                     // Get target user's current groups
                     List<String> targetCurrentGroups = adminManager.getUserGroups(targetUserId);
-                    GroupPath targetCurrentGroup = getPrimaryGroup(targetCurrentGroups);
-                    GroupPath viewerGroup = getPrimaryGroup(viewerContext.getGroups());
+                    GroupPath targetCurrentGroup = GroupPath.getPrimaryGroup(targetCurrentGroups);
+                    GroupPath viewerGroup = GroupPath.getPrimaryGroup(viewerContext.getGroups());
 
                     // 1. Self-modification Protection (Rules 2.1, 2.2)
                     validateSelfModification(targetUserId, targetCurrentGroup, targetGroup, isEnabled, viewerContext);
@@ -1033,23 +1166,6 @@ public class AdminUserServiceImpl implements AdminUserService {
     // VALIDATION METHODS (Shared)
     // ============================================================
 
-    // Gets the user's primary group from a list of groups, defaulting to MEMBERS_NEW
-    private GroupPath getPrimaryGroup(List<String> groups) {
-        return groups.stream()
-                .map(GroupPath::fromPath)
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(GroupPath.MEMBERS_NEW);
-    }
-
-    // Gets the user's primary group from a set of groups, defaulting to MEMBERS_NEW
-    private GroupPath getPrimaryGroup(Set<String> groups) {
-        return groups.stream()
-                .map(GroupPath::fromPath)
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(GroupPath.MEMBERS_NEW);
-    }
 
     // Users cannot demote, promote, or disable their own accounts.
     // Superadmins and regular admins are completely blocked from self-modification.
@@ -1303,11 +1419,16 @@ public class AdminUserServiceImpl implements AdminUserService {
      */
     private Mono<KeycloakUserDto> applyUserUpdatesInKeycloak(
             String userId,
+            UserType userType,
             JsonNullable<GroupPath> group,
             JsonNullable<Boolean> isEnabled,
             UserRepresentation userRep,
-            List<String> currentGroups
+            List<String> currentGroups,
+            ViewerContext viewerContext
     ){
+        // Capture original values before modification
+        Boolean originalEnabled = userRep.isEnabled();
+
         return Mono.fromCallable(() -> {
             // Handle enabled status change
             boolean isEnabledChanged = patchStrict(
@@ -1318,6 +1439,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
             // Handle group change
             boolean isGroupChanged = false;
+
             if (group != null && group.isPresent()) {
                 GroupPath targetGroupPath = group.get();
 
@@ -1340,8 +1462,60 @@ public class AdminUserServiceImpl implements AdminUserService {
             }
 
             return keycloakUserDtoMapper.mapToKeycloakUserDto(userRep);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
+        }).subscribeOn(Schedulers.boundedElastic())
+            .flatMap(keycloakUserDto -> {
 
+                Mono<Void> auditLogging = Mono.empty();
+
+                UUID logUserId= UUID.fromString(keycloakUserDto.userId());
+                UUID performedBy =  UUID.fromString(viewerContext.getUserId());
+
+                if (group != null && group.isPresent()) {
+                    GroupPath targetGroupPath = group.get();
+
+                    String targetGroupPathStr = targetGroupPath.getPath();
+                    boolean isGroupChanged = currentGroups.isEmpty()
+                            || !currentGroups.contains(targetGroupPathStr);
+
+                    if(isGroupChanged){
+
+                        auditLogging = auditLogging.then(
+                                adminAuditService.logGroupChange(
+                                        logUserId,
+                                        userType,
+                                        GroupPath.getPrimaryGroup(currentGroups),
+                                        targetGroupPath,
+                                        performedBy,
+                                        null,
+                                        null)
+                        ).then();
+
+                    }
+
+                }
+
+                if(isEnabled != null && isEnabled.isPresent()){
+                    boolean isEnabledChanged = !originalEnabled.equals(isEnabled.get());
+
+                    if(isEnabledChanged){
+
+                        auditLogging = auditLogging.then(
+                                adminAuditService.logEnabledChange(
+                                        logUserId,
+                                        originalEnabled,
+                                        isEnabled.get(),
+                                        performedBy,
+                                        null,
+                                        null
+                                )
+                        ).then();
+                    }
+
+                }
+
+                return auditLogging.thenReturn(keycloakUserDto);
+
+            });
+    }
 
 }

@@ -18,7 +18,6 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonInclude(JsonInclude.Include.NON_NULL)
 @Table("category_tags")
 public class CategoryTagEntity {
     @Id

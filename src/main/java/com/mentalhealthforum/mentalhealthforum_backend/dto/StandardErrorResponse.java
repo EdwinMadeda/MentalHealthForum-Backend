@@ -1,13 +1,11 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 
 import java.time.Instant;
 import java.util.List;
 
 // Used as the unified response body for all errors
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public record StandardErrorResponse(
         boolean success, // automatically calculated
         String message,

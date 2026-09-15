@@ -72,6 +72,8 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                         .withEnum("restriction_type_enum", RestrictionType.class)
                         .withEnum("connection_status_enum", ConnectionStatus.class)
                         .withEnum("account_status_enum", AccountStatus.class)
+                        .withEnum("user_audit_action_type_enum", UserAuditAction.class)
+                        .withEnum("user_audit_reason_key_enum", UserAuditReasonKey.class)
                         .build())
                 .build();
     }
@@ -131,7 +133,11 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
                 new ConnectionStatusReadingConverter(),
                 new ConnectionStatusWritingConverter(),
                 new AccountStatusReadingConverter(),
-                new AccountStatusWritingConverter()
+                new AccountStatusWritingConverter(),
+                new UserAuditActionReadingConverter(),
+                new UserAuditActionWritingConverter(),
+                new UserAuditReasonKeyReadingConverter(),
+                new UserAuditReasonKeyWritingConverter()
         );
     }
 
@@ -183,7 +189,10 @@ public class R2dbcPostgresqlConfiguration extends AbstractR2dbcConfiguration {
         converters.add(new ConnectionStatusWritingConverter());
         converters.add(new AccountStatusReadingConverter());
         converters.add(new AccountStatusWritingConverter());
-
+        converters.add(new UserAuditActionReadingConverter());
+        converters.add(new UserAuditActionWritingConverter());
+        converters.add(new UserAuditReasonKeyReadingConverter());
+        converters.add(new UserAuditReasonKeyWritingConverter());
 
         // Add JSONB converters
         converters.add(new JsonNodeToJsonWriteConverter(objectMapper));
