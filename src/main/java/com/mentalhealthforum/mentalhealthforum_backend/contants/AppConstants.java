@@ -29,4 +29,7 @@ public class AppConstants {
      */
     public static final Duration ACTIVITY_UPDATE_THRESHOLD = Duration.ofMinutes(5);
 
+
+    public static final boolean REQUIRE_REASON_FOR_ADMIN_CHANGES = true;
+
 }

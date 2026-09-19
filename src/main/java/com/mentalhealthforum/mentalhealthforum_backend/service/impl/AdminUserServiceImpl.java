@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.novu.AdminInvitePayload;
@@ -9,12 +10,12 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.*;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AdminInvitationRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
+import com.mentalhealthforum.mentalhealthforum_backend.repository.UserAuditReasonDefinitionRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.openapitools.jackson.nullable.JsonNullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.userdetails.User;
+
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -24,7 +25,6 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.*;
-import static com.mentalhealthforum.mentalhealthforum_backend.utils.PatchUtils.*;
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.NormalizeUtils.normalizeUnicode;
 
 /**
@@ -120,6 +120,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     private final AppUserRepository appUserRepository;
     private final AppUserService appUserService;
     private final AdminAuditService adminAuditService;
+    private final UserAuditReasonDefinitionRepository auditReasonDefinitionRepository;
 
     // Internal context carrier for the admin user assembly line.
     // Used to pass data through the reactive pipeline without losing context.
@@ -129,7 +130,8 @@ public class AdminUserServiceImpl implements AdminUserService {
             String email,
             String firstName,
             String tempPassword,
-            String groupPath,
+            String oldGroupPath,
+            String newGroupPath,
             boolean sendInvitationEmail
     ) {}
 
@@ -141,7 +143,8 @@ public class AdminUserServiceImpl implements AdminUserService {
             AdminInvitationService adminInvitationService,
             AdminInvitationRepository adminInvitationRepository,
             AppUserRepository appUserRepository, AppUserService appUserService,
-            AdminAuditService adminAuditService) {
+            AdminAuditService adminAuditService,
+            UserAuditReasonDefinitionRepository auditReasonDefinitionRepository) {
         this.adminManager = adminManager;
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
         this.verificationService = verificationService;
@@ -151,6 +154,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         this.appUserRepository = appUserRepository;
         this.appUserService = appUserService;
         this.adminAuditService = adminAuditService;
+        this.auditReasonDefinitionRepository = auditReasonDefinitionRepository;
     }
 
     /**
@@ -223,6 +227,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                             email,
                             firstName,
                             temporaryPassword,
+                            null,
                             request.group().getPath(),
                             request.sendInvitationEmail()
                     );
@@ -277,9 +282,21 @@ public class AdminUserServiceImpl implements AdminUserService {
         UUID userUUID = UUID.fromString(userId);
         String email = request.email().trim().toLowerCase();
 
-        return Mono.fromCallable(() -> adminManager.findUserByUserId(userId)
-                        .orElseThrow(UserDoesNotExistException::new))
-                .subscribeOn(Schedulers.boundedElastic())
+        // Validate reason if required
+        validateReasonProvided(
+                request.reasonDefinitionId(),
+                request.customReason(),
+                "invitation reissue"
+        );
+
+        // Validate reason matches action if template provided
+        return validateReasonMatchesAction(
+                        request.reasonDefinitionId(),
+                        UserAuditAction.INVITE_REISSUED
+                )
+                .then(Mono.fromCallable(() -> adminManager.findUserByUserId(userId)
+                                .orElseThrow(UserDoesNotExistException::new))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .flatMap(userRep-> {
                     // Only check email uniqueness if it's actually changing
                     if(email.trim().equalsIgnoreCase(userRep.getEmail())){
@@ -311,7 +328,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     }
 
                     // Security check: RULES 5.2, 5.3, 5.4, 7.1: Validate pending group transition
-                    return  validatePendingInviteGroupTransition(userId, JsonNullable.of(request.group()),  viewerContext, GroupContext.REISSUE)
+                    return  validatePendingInviteGroupTransition(userId, request.group(),  viewerContext, GroupContext.REISSUE)
                             .thenReturn(userRep);
                 })
                 .flatMap(userRep -> Mono.fromCallable(() -> {
@@ -322,10 +339,14 @@ public class AdminUserServiceImpl implements AdminUserService {
                             userRep::setEmail
                     );
 
+                    // Capture OLD group BEFORE any updates
+                    String oldGroupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
+
                     // Update group if changed
                     if (request.group() != null) {
                         adminManager.assignUserToGroup(userId, request.group());
                     }
+
 
                     // Update Keycloak if email changed
                     if (isEmailChanged) {
@@ -336,8 +357,8 @@ public class AdminUserServiceImpl implements AdminUserService {
                     String newTempPassword = generateTemporaryPassword();
                     adminManager.resetPassword(userRep.getId(), newTempPassword);
 
-                    // Fetch current group path
-                    String groupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
+                    // Fetch NEW group path AFTER update
+                    String newGroupPath = adminManager.getUserPrimaryGroupPath(userRep.getId());
 
                     return new AdminUserContext(
                             userRep.getId(),
@@ -345,7 +366,8 @@ public class AdminUserServiceImpl implements AdminUserService {
                             userRep.getEmail(),
                             userRep.getFirstName(),
                             newTempPassword,
-                            groupPath,
+                            oldGroupPath,
+                            newGroupPath,
                             request.sendInvitationEmail()
                     );
                 }).subscribeOn(Schedulers.boundedElastic()))
@@ -363,35 +385,47 @@ public class AdminUserServiceImpl implements AdminUserService {
                             adminInvitation.setCurrentStage(OnboardingStage.AWAITING_VERIFICATION);
                             return adminInvitationRepository.save(adminInvitation);
                         })
-                        .thenReturn(ctx))
-                // Send invitation email
-                .flatMap(this::handleInvitationFlow)
-                .flatMap(adminCreateUserResponse -> {
-                    UUID performedBy = UUID.fromString(viewerContext.getUserId());
+                        .thenReturn(ctx)
+                        // Send invitation email
+                        .flatMap(this::handleInvitationFlow)
+                        .flatMap(adminCreateUserResponse -> {
+                            UUID performedBy = UUID.fromString(viewerContext.getUserId());
 
-                    return adminAuditService.logInviteReissued(
-                            userUUID,
-                            performedBy,
-                            null,
-                            null
-                    ).thenReturn(adminCreateUserResponse);
-                })
-                .flatMap(adminCreateUserResponse ->
-                        getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
-                                .flatMap(availableGroups ->
-                                        adminAuditService.getRecentUserHistory(userUUID)
-                                                .collectList()
-                                                .map(history ->
-                                                        new OperationResponse<>(
-                                                                adminCreateUserResponse,
-                                                                availableGroups,
-                                                                GroupContext.REISSUE,
-                                                                "Invitation reissued. Once the user verifies their email, you can update their pending status.",
-                                                                history
+                            GroupPath oldGroup = GroupPath.fromPath(ctx.oldGroupPath);
+                            GroupPath newGroup = GroupPath.fromPath(ctx.newGroupPath);
+
+                            if(oldGroup != null && oldGroup.equals(newGroup)){
+                                oldGroup = null;
+                                newGroup = null;
+                            }
+
+                            return adminAuditService.logInviteReissued(
+                                    userUUID,
+                                    oldGroup,
+                                    newGroup,
+                                    performedBy,
+                                    request.reasonDefinitionId(),
+                                    request.customReason()
+                            ).thenReturn(adminCreateUserResponse);
+                        })
+                        .flatMap(adminCreateUserResponse ->
+                                getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
+                                        .flatMap(availableGroups ->
+                                                adminAuditService.getRecentUserHistory(userUUID)
+                                                        .collectList()
+                                                        .map(history ->
+                                                                new OperationResponse<>(
+                                                                        adminCreateUserResponse,
+                                                                        availableGroups,
+                                                                        GroupContext.REISSUE,
+                                                                        "Invitation reissued. Once the user verifies their email, you can update their pending status.",
+                                                                        history
+                                                                )
                                                         )
-                                                )
-                                )
+                                        )
+                        )
                 );
+
     }
 
     /**
@@ -429,12 +463,19 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 return Mono.fromCallable(() -> adminManager.findUserByUserId(userId)
                                                 .orElseThrow(UserDoesNotExistException::new))
                                         .subscribeOn(Schedulers.boundedElastic())
-                                        .flatMap(userRep ->
-                                                validatePendingInviteGroupTransition(userId, request.getGroup(), viewerContext, GroupContext.PENDING)
-                                                        .flatMap(currentGroups ->
-                                                                applyUserUpdatesInKeycloak(userId, UserType.PENDING, request.getGroup(), request.getIsEnabled(), userRep, currentGroups, viewerContext)
-                                                        )
+                                        .flatMap(userRep -> {
+                                                    GroupChange groupChange = request.groupChange();
+                                                    EnabledChange enabledChange = request.enabledChange();
+                                                    GroupContext context = GroupContext.PENDING;
 
+                                                    GroupPath targetGroup = groupChange != null ? groupChange.group() : null;
+
+                                                    return validatePendingInviteGroupTransition(userId, targetGroup, viewerContext, GroupContext.PENDING)
+                                                            .flatMap(currentGroups ->
+                                                                    validateAuditReasons(context, currentGroups, groupChange, enabledChange)
+                                                                            .then(applyUserUpdatesInKeycloak(userId, context, groupChange, enabledChange, userRep, currentGroups, viewerContext))
+                                                            );
+                                                }
                                         );
                             })
                             .flatMap(adminInvitationService::updateInvitation)
@@ -489,10 +530,20 @@ public class AdminUserServiceImpl implements AdminUserService {
                     return Mono.fromCallable(() -> adminManager.findUserByUserId(userId)
                                     .orElseThrow(UserDoesNotExistException::new))
                             .subscribeOn(Schedulers.boundedElastic())
-                            .flatMap(userRep ->
-                                    validateSyncedUserModification(userId, request.getGroup(), request.getIsEnabled(), viewerContext)
-                                            .flatMap(currentGroups -> applyUserUpdatesInKeycloak(userId, UserType.SYNCED, request.getGroup(), request.getIsEnabled(), userRep, currentGroups, viewerContext)
-                                            )
+                            .flatMap(userRep -> {
+                                        GroupChange groupChange = request.groupChange();
+                                        EnabledChange enabledChange = request.enabledChange();
+                                        GroupContext context = GroupContext.SYNCED;
+
+                                        GroupPath targetGroup = groupChange != null ? groupChange.group() : null;
+                                        Boolean targetEnabled = enabledChange != null ? enabledChange.isEnabled() : null;
+
+                                        return  validateSyncedUserModification(userId, targetGroup, targetEnabled, viewerContext)
+                                                .flatMap(currentGroups ->
+                                                        validateAuditReasons(context, currentGroups, groupChange, enabledChange)
+                                                                .then(applyUserUpdatesInKeycloak(userId, context, groupChange, enabledChange, userRep, currentGroups, viewerContext))
+                                                );
+                                    }
                             )
                             .flatMap(keycloakUserDto ->
                                     appUserService.syncUserViaAdminClient(keycloakUserDto, viewerContext)
@@ -521,9 +572,22 @@ public class AdminUserServiceImpl implements AdminUserService {
      * Permanently removes the user from Keycloak and marks invitation as complete.
      */
     @Override
-    public Mono<Void> revokeInvitation(String userId, ViewerContext viewerContext) {
+    public Mono<Void> revokeInvitation(String userId, RevokeInvitationRequest request, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
-        return appUserRepository.existsByKeycloakId(userUUID)
+
+        // Validate reason if required
+        validateReasonProvided(
+                request.reasonDefinitionId(),
+                request.customReason(),
+                "invitation revocation"
+        );
+
+        // Validate reason matches action if template provided
+        return validateReasonMatchesAction(
+                        request.reasonDefinitionId(),
+                        UserAuditAction.INVITE_REVOKED
+                )
+                .then(appUserRepository.existsByKeycloakId(userUUID))
                 .flatMap(inAppUsers ->
                         Mono.fromCallable(() -> {
                                     // Fetch latest state from Keycloak
@@ -550,8 +614,8 @@ public class AdminUserServiceImpl implements AdminUserService {
                 .then(adminAuditService.logInviteRevoked(
                                 userUUID,
                                 UUID.fromString(viewerContext.getUserId()),
-                                null,
-                                null
+                                request.reasonDefinitionId(),
+                                request.customReason()
                         )
                 .then(adminInvitationService.completeInvitation(userUUID)));
 
@@ -663,6 +727,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                 GroupPath.MEMBERS_NEW,
                 false,
                 ActionType.SAME,
+                null,
                 null
         ));
 
@@ -672,6 +737,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     GroupPath.MODERATORS_PROFESSIONAL,
                     false,
                     ActionType.SAME,
+                    null,
                     null
             ));
         }
@@ -686,15 +752,37 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     }
 
+
     /**
-     * Groups available for REISSUE INVITATION operation.
+     * Groups available for REISSUE INVITATION operation
+     * Same as reissue - pending users can only be assigned pending groups.
+     */
+    private Mono<List<AvailableGroup>> getGroupsForReissue(String userId, ViewerContext viewerContext) {
+        return getGroupsForPendingOperation(userId, GroupContext.REISSUE, viewerContext);
+
+    }
+
+    /**
+     * Groups available for UPDATE PENDING INVITE operation.
+     * Same as reissue - pending users can only be assigned pending groups.
+     */
+    private Mono<List<AvailableGroup>> getGroupsForPendingUpdate(String userId, ViewerContext viewerContext) {
+        return getGroupsForPendingOperation(userId, GroupContext.PENDING, viewerContext);
+    }
+
+
+    /**
+     * Groups available for REISSUE INVITATION/ UPDATE PENDING INVITE operation.
      * Rule 5.2: Can freely move between MEMBERS_NEW and MODERATORS_PROFESSIONAL
      * Rule 5.3: No admin tiers
      * Rule 7.1: MODERATORS_PROFESSIONAL requires superadmin
      */
-    private Mono<List<AvailableGroup>> getGroupsForReissue(String userId, ViewerContext viewerContext) {
+    private Mono<List<AvailableGroup>> getGroupsForPendingOperation(String userId, GroupContext context, ViewerContext viewerContext) {
         if(userId == null){
-            throw new ApiException("userId required for reissue context", ErrorCode.VALIDATION_FAILED);
+            throw new ApiException(
+                    String.format("userId required for %s context", context.getDisplayName()),
+                    ErrorCode.VALIDATION_FAILED
+            );
         }
 
         return Mono.fromCallable(()-> {
@@ -707,21 +795,27 @@ public class AdminUserServiceImpl implements AdminUserService {
 
             List<AvailableGroup> result = new ArrayList<>();
 
-            // Correction flow: If currently in an admin tier, allow correction
-            boolean needsCorrection =  currentGroup  == GroupPath.ADMINISTRATORS ||
-                                       currentGroup == GroupPath.SUPER_ADMINISTRATORS;
+            // Determine expected audit action based on context
+            UserAuditAction expectedAuditAction = context == GroupContext.REISSUE
+                    ? UserAuditAction.INVITE_REISSUED
+                    : UserAuditAction.GROUP_CHANGED;
+
+            // Correction flow: If currently in an invalid group, allow correction
+            boolean needsCorrection = currentGroup != null && (currentGroup != GroupPath.MEMBERS_NEW &&
+                    currentGroup != GroupPath.MODERATORS_PROFESSIONAL);
 
             // 1. If user is in admin tier, show it as CORRECT with warning
             if(needsCorrection){
-                log.warn("User {} is in admin tier '{}' but is pending. Correction available.",
+                log.warn("User {} is in '{}' but is pending. Correction available.",
                         userId, currentGroup.getDisplayName());
 
                 result.add(new AvailableGroup(
                         currentGroup,
                         true,
                         ActionType.CORRECT,
+                        expectedAuditAction,
                         "⚠️ User is pending but assigned to '" + currentGroup.getDisplayName() +
-                                ". Please correct to " +
+                                "'. Please correct to " +
                                 (viewerContext.isSuperAdmin()? "'New members' or 'Professional moderators'." : "'New members'.")
                 ));
             }
@@ -731,6 +825,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     GroupPath.MEMBERS_NEW,
                     GroupPath.MEMBERS_NEW == currentGroup,
                     ActionType.SAME,
+                    expectedAuditAction,
                     null
             ));
 
@@ -740,6 +835,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                         GroupPath.MODERATORS_PROFESSIONAL,
                         GroupPath.MODERATORS_PROFESSIONAL == currentGroup,
                         ActionType.SAME,
+                        expectedAuditAction,
                         null
                 ));
             }
@@ -756,13 +852,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     }
 
-    /**
-     * Groups available for UPDATE PENDING INVITE operation.
-     * Same as reissue - pending users can only be assigned pending groups.
-     */
-    private Mono<List<AvailableGroup>> getGroupsForPendingUpdate(String userId, ViewerContext viewerContext) {
-        return getGroupsForReissue(userId, viewerContext);
-    }
+
 
     /**
      * Groups available for UPDATE SYNCED USER operation.
@@ -846,20 +936,24 @@ public class AdminUserServiceImpl implements AdminUserService {
                     .map(group -> {
                         // Determine action type
                         ActionType action = null;
+                        UserAuditAction expectedAuditAction = null;
 
                         if(group == currentGroup) {
                             action = ActionType.SAME;
+                            // No reason needed
                         }
 
                         else if(GroupPath.isPromotion(currentGroup, group)) {
                             action = ActionType.PROMOTE;
+                            expectedAuditAction = UserAuditAction.forGroupChange(GroupContext.SYNCED, currentGroup, group);
                         }
 
                         else if(GroupPath.isDemotion(currentGroup, group)) {
                             action = ActionType.DEMOTE;
+                            expectedAuditAction = UserAuditAction.forGroupChange(GroupContext.SYNCED, currentGroup, group);
                         }
 
-                        return new AvailableGroup(group, group.equals(currentGroup), action, null);
+                        return new AvailableGroup(group, group.equals(currentGroup), action, expectedAuditAction, null);
                     })
                     .toList();
 
@@ -874,7 +968,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * Creates a verification link and optionally triggers a Novu email.
      */
     private Mono<AdminCreateUserResponse> handleInvitationFlow(AdminUserContext ctx) {
-        return verificationService.createVerificationLink(ctx.email, VerificationType.INVITED, ctx.groupPath, null)
+        return verificationService.createVerificationLink(ctx.email, VerificationType.INVITED, ctx.newGroupPath, null)
                 .flatMap(invitationLink -> {
                     // Only send email if the admin requested it
                     if (ctx.sendInvitationEmail) {
@@ -882,7 +976,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 ctx.firstName,
                                 ctx.tempPassword,
                                 invitationLink,
-                                ctx.groupPath
+                                ctx.newGroupPath
                         );
 
                         return novuService.triggerEvent(NovuWorkflow.ADMIN_ONBOARDING_INVITE, ctx.userId, ctx.email, payload)
@@ -1051,7 +1145,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * */
     private Mono<List<String>> validatePendingInviteGroupTransition(
             String targetUserId,
-            JsonNullable<GroupPath> targetGroup,
+            GroupPath targetGroup,
             ViewerContext viewerContext,
             GroupContext operationContext // "REISSUE" or "UPDATE_PENDING"
     ) {
@@ -1062,16 +1156,15 @@ public class AdminUserServiceImpl implements AdminUserService {
 
                      String errorPrefix = operationContext == GroupContext.REISSUE ? "Reissue" : "Pending Users";
 
-                    if(targetGroup != null && targetGroup.isPresent()){
-                        GroupPath newGroup = targetGroup.get();
+                    if(targetGroup != null){
 
                         // Rule 5.3: Block administrative users
-                        if(newGroup == GroupPath.ADMINISTRATORS || newGroup == GroupPath.SUPER_ADMINISTRATORS){
+                        if(targetGroup == GroupPath.ADMINISTRATORS || targetGroup == GroupPath.SUPER_ADMINISTRATORS){
                             throw new InsufficientPermissionException(
                                     String.format(
                                             "%s invite cannot assign administrative tier '%s'. Only '%s' or '%s' are allowed",
                                             errorPrefix,
-                                            newGroup.getDisplayName(),
+                                            targetGroup.getDisplayName(),
                                             GroupPath.MEMBERS_NEW.getDisplayName(),
                                             GroupPath.MODERATORS_PROFESSIONAL.getDisplayName()
                                     )
@@ -1079,18 +1172,18 @@ public class AdminUserServiceImpl implements AdminUserService {
                         }
 
                         // Rules 5.2, 5.4: Allow free movement between MEMBERS_NEW and MODERATORS_PROFESSIONAL
-                        if(newGroup != GroupPath.MEMBERS_NEW && newGroup != GroupPath.MODERATORS_PROFESSIONAL){
+                        if(targetGroup != GroupPath.MEMBERS_NEW && targetGroup != GroupPath.MODERATORS_PROFESSIONAL){
                             throw new InsufficientPermissionException(
                                     String.format("%s can only be assigned to '%s' or '%s'. Received: '%s'",
                                             errorPrefix,
                                             GroupPath.MEMBERS_NEW.getDisplayName(),
                                             GroupPath.MODERATORS_PROFESSIONAL.getDisplayName(),
-                                            newGroup.getDisplayName())
+                                            targetGroup.getDisplayName())
                             );
                         }
 
                         // Check superAdmin permission for MODERATOR_PROFESSIONAL
-                        if(newGroup == GroupPath.MODERATORS_PROFESSIONAL && !viewerContext.isSuperAdmin()){
+                        if(targetGroup == GroupPath.MODERATORS_PROFESSIONAL && !viewerContext.isSuperAdmin()){
                             throw new InsufficientPermissionException(
                                     String.format("Only superadmins can assign '%s' group.",
                                             GroupPath.MODERATORS_PROFESSIONAL.getDisplayName())
@@ -1100,7 +1193,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                         // Correction scenario: If current group is an admin tier, allow correction
                         if(currentGroup == GroupPath.ADMINISTRATORS || currentGroup == GroupPath.SUPER_ADMINISTRATORS){
                             log.warn("Correcting improperly assigned administrative tier: '{}' to pending group '{}' for user",
-                                    currentGroup.getDisplayName(), newGroup.getDisplayName());
+                                    currentGroup.getDisplayName(), targetGroup.getDisplayName());
 
                             // Allow the correction
                         }
@@ -1129,8 +1222,8 @@ public class AdminUserServiceImpl implements AdminUserService {
      */
     private Mono<List<String>> validateSyncedUserModification(
             String targetUserId,
-            JsonNullable<GroupPath> targetGroup,
-            JsonNullable<Boolean> isEnabled,
+            GroupPath targetGroup,
+            Boolean isEnabled,
             ViewerContext viewerContext
     ) {
         return Mono.fromCallable(() -> {
@@ -1173,8 +1266,8 @@ public class AdminUserServiceImpl implements AdminUserService {
     private void validateSelfModification(
             String targetUserId,
             GroupPath targetCurrentGroup,
-            JsonNullable<GroupPath> targetGroup,
-            JsonNullable<Boolean> isEnabled,
+            GroupPath targetGroup,
+            Boolean isEnabled,
             ViewerContext viewerContext
     ) {
         if (!isSelfModification(targetUserId, viewerContext)) {
@@ -1182,28 +1275,27 @@ public class AdminUserServiceImpl implements AdminUserService {
         }
 
         // Cannot change group at all (promotion or demotion)
-        if (targetGroup != null && targetGroup.isPresent()) {
-            GroupPath newGroup = targetGroup.get();
+        if (targetGroup != null) {
 
-            if (GroupPath.isPromotion(targetCurrentGroup, newGroup)) {
+            if (GroupPath.isPromotion(targetCurrentGroup, targetGroup)) {
                 throw new InsufficientPermissionException(
                         String.format("You cannot promote yourself from '%s' to '%s'. Promotions require superadmin approval.",
                                 targetCurrentGroup.getDisplayName(),
-                                newGroup.getDisplayName())
+                                targetGroup.getDisplayName())
                 );
             }
 
             // Self-demotion is allowed! The last-user safeguard will prevent removing the last super-admin
-            if (GroupPath.isDemotion(targetCurrentGroup, newGroup)) {
+            if (GroupPath.isDemotion(targetCurrentGroup, targetGroup)) {
                 log.info("User {} is demoting themselves from {} to {}",
                         viewerContext.getUserId(),
                         targetCurrentGroup.getDisplayName(),
-                        newGroup.getDisplayName());
+                        targetGroup.getDisplayName());
             }
         }
 
         // Cannot disable own account
-        if (isEnabled != null && isEnabled.isPresent() && Boolean.FALSE.equals(isEnabled.get())) {
+        if (isEnabled != null  && !isEnabled) {
             throw new InsufficientPermissionException(
                     "You cannot disable your own account."
             );
@@ -1271,29 +1363,27 @@ public class AdminUserServiceImpl implements AdminUserService {
     // Users can only move one level up or down at a time.
     // Hierarchy progression (Rules 1.1, 1.2, 1.3)
     private void validateHierarchyProgression(
-            JsonNullable<GroupPath> targetGroup,
+            GroupPath targetGroup,
             GroupPath targetCurrentGroup
     ) {
-        if (targetGroup == null || !targetGroup.isPresent()) {
+        if (targetGroup == null) {
             return;
         }
 
-        GroupPath newGroup = targetGroup.get();
-
         // Allow no-change updates
-        if (targetCurrentGroup == newGroup) {
+        if (targetCurrentGroup == targetGroup) {
             return;
         }
 
 
         // Enforce single-step transitions (includes Rule 1.3)
-        if (!GroupPath.isValidTransition(targetCurrentGroup, newGroup)) {
+        if (!GroupPath.isValidTransition(targetCurrentGroup, targetGroup)) {
 
             throw new InsufficientPermissionException(
                     String.format(
                             "Cannot move from '%s' to '%s'. Users can only progress one level at a time.",
                             targetCurrentGroup.getDisplayName(),
-                            newGroup.getDisplayName()
+                            targetGroup.getDisplayName()
                     )
             );
         }
@@ -1301,7 +1391,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
         // Rule 1.3: Professional Exception only applies for PROMOTION to MODERATORS_PROFESSIONAL
         // Block demotion to MODERATORS_PROFESSIONAL from higher tiers
-        boolean isDemotionToProfessionalModerator = newGroup == GroupPath.MODERATORS_PROFESSIONAL && GroupPath.isDemotion(targetCurrentGroup, newGroup);
+        boolean isDemotionToProfessionalModerator = targetGroup == GroupPath.MODERATORS_PROFESSIONAL && GroupPath.isDemotion(targetCurrentGroup, targetGroup);
 
 
 
@@ -1310,7 +1400,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     String.format(
                             "Cannot demote from '%s' to '%s'. Professional moderators can only be assigned as a promotion from lower tiers.",
                             targetCurrentGroup.getDisplayName(),
-                            newGroup.getDisplayName()
+                            targetGroup.getDisplayName()
                     )
             );
         }
@@ -1319,20 +1409,19 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     // Only superadmins can assign ADMINISTRATORS or SUPER_ADMINISTRATORS.
-    private void validateGroupAssignmentPermission(JsonNullable<GroupPath> targetGroup,  GroupPath targetCurrentGroup, ViewerContext viewerContext) {
+    private void validateGroupAssignmentPermission(GroupPath targetGroup,  GroupPath targetCurrentGroup, ViewerContext viewerContext) {
 
-        if (targetGroup != null && targetGroup.isPresent()) {
-            GroupPath newGroup = targetGroup.get();
+        if (targetGroup != null) {
 
             // Skip validation if no actual group change (self-update with same group)
-            if(newGroup == targetCurrentGroup){
+            if(targetGroup == targetCurrentGroup){
                 return;
             }
 
-            if (!GroupPath.isSuperAdminOnlyGroup(newGroup, viewerContext)) {
+            if (!GroupPath.isSuperAdminOnlyGroup(targetGroup, viewerContext)) {
                 throw new InsufficientPermissionException(
                         String.format("Only superadmins can assign the '%s' group.",
-                                newGroup.getDisplayName())
+                                targetGroup.getDisplayName())
                 );
             }
 
@@ -1345,8 +1434,8 @@ public class AdminUserServiceImpl implements AdminUserService {
     // are blocked by other validation methods upstream.
     // Last-user safeguard (Rules 4.1, 4.2)
     private Mono<List<String>> validateLastUserSafeguard(
-            JsonNullable<GroupPath> targetGroup,
-            JsonNullable<Boolean> isEnabled,
+            GroupPath targetGroup,
+            Boolean isEnabled,
             List<String> currentGroups
     ) {
         boolean isTargetSuperAdmin = currentGroups.stream().anyMatch(
@@ -1360,14 +1449,13 @@ public class AdminUserServiceImpl implements AdminUserService {
         // Check if this is a destructive action
         boolean isDestructiveAction = false;
 
-        if (targetGroup != null && targetGroup.isPresent()) {
-            GroupPath newGroup = targetGroup.get();
-            if (newGroup != GroupPath.SUPER_ADMINISTRATORS) {
+        if (targetGroup != null) {
+            if (targetGroup != GroupPath.SUPER_ADMINISTRATORS) {
                 isDestructiveAction = true;
             }
         }
 
-        if (isEnabled != null && isEnabled.isPresent() && Boolean.FALSE.equals(isEnabled.get())) {
+        if (isEnabled != null  && !isEnabled) {
             isDestructiveAction = true;
         }
 
@@ -1419,9 +1507,9 @@ public class AdminUserServiceImpl implements AdminUserService {
      */
     private Mono<KeycloakUserDto> applyUserUpdatesInKeycloak(
             String userId,
-            UserType userType,
-            JsonNullable<GroupPath> group,
-            JsonNullable<Boolean> isEnabled,
+            GroupContext context,
+            GroupChange groupChange,
+            EnabledChange enabledChange,
             UserRepresentation userRep,
             List<String> currentGroups,
             ViewerContext viewerContext
@@ -1431,8 +1519,8 @@ public class AdminUserServiceImpl implements AdminUserService {
 
         return Mono.fromCallable(() -> {
             // Handle enabled status change
-            boolean isEnabledChanged = patchStrict(
-                    isEnabled,
+            boolean isEnabledChanged = enabledChange != null && setIfChangedStrict(
+                    enabledChange.isEnabled(),
                     userRep.isEnabled(),
                     userRep::setEnabled
             );
@@ -1440,8 +1528,8 @@ public class AdminUserServiceImpl implements AdminUserService {
             // Handle group change
             boolean isGroupChanged = false;
 
-            if (group != null && group.isPresent()) {
-                GroupPath targetGroupPath = group.get();
+            if (groupChange != null && groupChange.group() != null) {
+                GroupPath targetGroupPath = groupChange.group();
 
                 String targetGroupPathStr = targetGroupPath.getPath();
                 isGroupChanged = currentGroups.isEmpty()
@@ -1463,59 +1551,180 @@ public class AdminUserServiceImpl implements AdminUserService {
 
             return keycloakUserDtoMapper.mapToKeycloakUserDto(userRep);
         }).subscribeOn(Schedulers.boundedElastic())
-            .flatMap(keycloakUserDto -> {
+                .flatMap(keycloakUserDto -> logAuditChanges(context, groupChange, enabledChange, originalEnabled, currentGroups, keycloakUserDto, viewerContext));
 
-                Mono<Void> auditLogging = Mono.empty();
+    }
 
-                UUID logUserId= UUID.fromString(keycloakUserDto.userId());
-                UUID performedBy =  UUID.fromString(viewerContext.getUserId());
+    private Mono<KeycloakUserDto> logAuditChanges(
+            GroupContext context,
+            GroupChange groupChange,
+            EnabledChange enabledChange,
+            Boolean originalEnabled,
+            List<String> currentGroups,
+            KeycloakUserDto keycloakUserDto,
+            ViewerContext viewerContext
+    ){
 
-                if (group != null && group.isPresent()) {
-                    GroupPath targetGroupPath = group.get();
+        Mono<Void> auditLogging = Mono.empty();
 
-                    String targetGroupPathStr = targetGroupPath.getPath();
-                    boolean isGroupChanged = currentGroups.isEmpty()
-                            || !currentGroups.contains(targetGroupPathStr);
+        UUID logUserId= UUID.fromString(keycloakUserDto.userId());
+        UUID performedBy =  UUID.fromString(viewerContext.getUserId());
 
-                    if(isGroupChanged){
+        if (groupChange != null && groupChange.group() != null) {
+            GroupPath targetGroupPath = groupChange.group();
 
-                        auditLogging = auditLogging.then(
-                                adminAuditService.logGroupChange(
-                                        logUserId,
-                                        userType,
-                                        GroupPath.getPrimaryGroup(currentGroups),
-                                        targetGroupPath,
-                                        performedBy,
-                                        null,
-                                        null)
-                        ).then();
+            String targetGroupPathStr = targetGroupPath.getPath();
+            boolean isGroupChanged = currentGroups.isEmpty()
+                    || !currentGroups.contains(targetGroupPathStr);
 
+            if(isGroupChanged){
+
+                auditLogging = auditLogging.then(
+                        adminAuditService.logGroupChange(
+                                logUserId,
+                                context,
+                                GroupPath.getPrimaryGroup(currentGroups),
+                                targetGroupPath,
+                                performedBy,
+                                groupChange.reasonDefinitionId(),
+                                groupChange.customReason())
+                ).then();
+
+            }
+
+        }
+
+        if(enabledChange != null && enabledChange.isEnabled() != null){
+            boolean isEnabledChanged = !originalEnabled.equals(enabledChange.isEnabled());
+
+            if(isEnabledChanged){
+
+                auditLogging = auditLogging.then(
+                        adminAuditService.logEnabledChange(
+                                logUserId,
+                                originalEnabled,
+                                enabledChange.isEnabled(),
+                                performedBy,
+                                enabledChange.reasonDefinitionId(),
+                                enabledChange.customReason()
+                        )
+                ).then();
+            }
+
+        }
+
+        return auditLogging.thenReturn(keycloakUserDto);
+
+    }
+
+
+    private Mono<Void> validateAuditReasons(
+            GroupContext context,
+            List<String> currentGroups,
+            GroupChange groupChange,
+            EnabledChange enabledChange
+    )  {
+
+        Mono<Void> groupValidation = Mono.empty();
+        Mono<Void> enabledValidation = Mono.empty();
+
+        if (groupChange != null && groupChange.group() != null) {
+            validateReasonProvided(
+                    groupChange.reasonDefinitionId(),
+                    groupChange.customReason(),
+                    "group changes"
+            );
+
+
+            GroupPath currentGroup = GroupPath.getPrimaryGroup(currentGroups);
+            GroupPath targetGroup = groupChange.group();
+            UserAuditAction expectedAction = UserAuditAction.forGroupChange(context, currentGroup, targetGroup);
+
+            groupValidation = validateReasonMatchesAction(
+                    groupChange.reasonDefinitionId(),
+                    expectedAction
+            );
+
+        }
+
+        if(enabledChange != null && enabledChange.isEnabled() != null){
+            validateReasonProvided(
+                    enabledChange.reasonDefinitionId(),
+                    enabledChange.customReason(),
+                    "enabled status changes"
+            );
+
+            UserAuditAction expectedAction = UserAuditAction.forEnabledChange(enabledChange.isEnabled());
+
+            enabledValidation = validateReasonMatchesAction(
+                    enabledChange.reasonDefinitionId(),
+                    expectedAction
+            );
+
+        }
+
+        return groupValidation
+                .then(enabledValidation);
+
+    }
+
+
+    /**
+     * Validates that a reason is provided (template or custom).
+     */
+    private void validateReasonProvided(
+            UUID reasonDefinitionId,
+            String customReason,
+            String action
+    ){
+        // Skip validation if not required
+        if (!AppConstants.REQUIRE_REASON_FOR_ADMIN_CHANGES) {
+            return;
+        }
+
+        boolean hasTemplate = reasonDefinitionId != null;
+        boolean hasCustom = customReason != null && !customReason.isBlank();
+
+        if(!hasTemplate && !hasCustom){
+            throw new ApiException(
+                    String.format("A reason is required for %s", action),
+                    ErrorCode.VALIDATION_FAILED
+            );
+        }
+
+    }
+
+    /**
+     * Validates that a selected reason matches the action type.
+     * Used for operations that have an optional reason.
+     */
+    private Mono<Void> validateReasonMatchesAction(
+            UUID reasonDefinitionId,
+            UserAuditAction expectedAction
+    ){
+        if(reasonDefinitionId == null){
+            return Mono.empty(); // No reason selected, valid
+        }
+
+        return auditReasonDefinitionRepository.findById(reasonDefinitionId)
+                .switchIfEmpty(Mono.error(new ApiException(
+                        "Reason definition not found",
+                        ErrorCode.VALIDATION_FAILED
+                )))
+                .flatMap(reason -> {
+                    if(reason.getActionType() != expectedAction){
+                        return Mono.error(new ApiException(
+                                String.format(
+                                        "Selected reason '%s' is for action type '%s', but the operation is '%s'.",
+                                        reason.getKey(),
+                                        reason.getActionType(),
+                                        expectedAction
+                                ),
+                                ErrorCode.VALIDATION_FAILED
+                        ));
                     }
-
-                }
-
-                if(isEnabled != null && isEnabled.isPresent()){
-                    boolean isEnabledChanged = !originalEnabled.equals(isEnabled.get());
-
-                    if(isEnabledChanged){
-
-                        auditLogging = auditLogging.then(
-                                adminAuditService.logEnabledChange(
-                                        logUserId,
-                                        originalEnabled,
-                                        isEnabled.get(),
-                                        performedBy,
-                                        null,
-                                        null
-                                )
-                        ).then();
-                    }
-
-                }
-
-                return auditLogging.thenReturn(keycloakUserDto);
-
-            });
+                    return Mono.empty();
+                });
     }
 
 }

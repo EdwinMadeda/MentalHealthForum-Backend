@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser;
 
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 
 /**
  * Represents a group available for assignment in dropdowns.
@@ -18,6 +19,7 @@ public record AvailableGroup(
         String displayName,
         boolean isCurrent,
         ActionType action,
+        UserAuditAction expectedAuditAction,
         String warningMessage
 ) {
     public AvailableGroup(GroupPath groupPath){
@@ -31,17 +33,19 @@ public record AvailableGroup(
                 groupPath.getDisplayName(),
                 isCurrent,
                 ActionType.SAME,
+                null,
                 null
         );
     }
 
-    public AvailableGroup(GroupPath groupPath, boolean isCurrent, ActionType action, String warningMessage){
+    public AvailableGroup(GroupPath groupPath, boolean isCurrent, ActionType action, UserAuditAction expectedAuditAction, String warningMessage){
         this (
                 groupPath.name(),
                 groupPath.getPath(),
                 groupPath.getDisplayName(),
                 isCurrent,
                 action,
+                expectedAuditAction,
                 warningMessage
         );
     }

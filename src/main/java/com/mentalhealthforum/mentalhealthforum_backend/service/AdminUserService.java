@@ -2,12 +2,10 @@ package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-import java.util.Optional;
 
 public interface AdminUserService {
 
@@ -19,7 +17,7 @@ public interface AdminUserService {
 
     Mono<OperationResponse<UserResponse>> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext);
 
-    Mono<Void> revokeInvitation(String userId, ViewerContext viewerContext);
+    Mono<Void> revokeInvitation(String userId, RevokeInvitationRequest revokeInvitationRequest, ViewerContext viewerContext);
 
     Mono<List<AvailableGroup>> getAvailableGroups(GroupContext context, String userId, ViewerContext viewerContext);
 

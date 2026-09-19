@@ -1,9 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserAuditReasonDefinitionDto;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserAuditReasonDefinitionGroupedDto;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserAuditSnapshot;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserHistoryEntry;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditReasonKey;
@@ -30,7 +27,7 @@ public interface AdminAuditService {
     // Convenience method for logging group change
     Mono<UserAuditLogEntity> logGroupChange(
             UUID userId,
-            UserType userType,
+            GroupContext context,
             GroupPath oldGroup,
             GroupPath newGroup,
             UUID performedBy,
@@ -58,6 +55,8 @@ public interface AdminAuditService {
     // Convenience method for logging a user created
     Mono<UserAuditLogEntity> logInviteReissued(
             UUID userId,
+            GroupPath oldGroup,
+            GroupPath newGroup,
             UUID performedBy,
             UUID reasonDefinitionId,
             String customReason

@@ -1,30 +1,19 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser;
 
-import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
-import com.mentalhealthforum.mentalhealthforum_backend.validation.group.ValidAssignableGroup;
-import org.openapitools.jackson.nullable.JsonNullable;
+import jakarta.validation.Valid;
 
-@SuppressWarnings({"LombokGetterMayBeUsed", "LombokSetterMayBeUsed"})
-public class UpdatePendingAdminInviteRequest {
-
-        @ValidAssignableGroup
-        private JsonNullable<GroupPath> group = JsonNullable.undefined();
-
-        private JsonNullable<Boolean> isEnabled = JsonNullable.undefined();
-
-        public JsonNullable<GroupPath> getGroup(){
-                return group;
-        }
-
-        public void setGroup(JsonNullable<GroupPath> group){
-                this.group = group;
-        }
-
-        public JsonNullable<Boolean> getIsEnabled() {
-                return isEnabled;
-        }
-
-        public void setIsEnabled(JsonNullable<Boolean> isEnabled){
-                this.isEnabled = isEnabled;
-        }
-}
+/**
+ * Request DTO for updating a pending admin invitation.
+ *
+ * <p>All fields are optional:
+ * <ul>
+ *   <li>{@code groupChange} - If present, changes the pending user's group</li>
+ *   <li>{@code enabledChange} - If present, changes the pending user's enabled status</li>
+ * </ul>
+ *
+ * <p>If both are present, both changes are applied atomically.
+ */
+public record UpdatePendingAdminInviteRequest(
+        @Valid GroupChange groupChange,        // null = no group change
+        @Valid EnabledChange enabledChange     // null = no enabled change
+) {}

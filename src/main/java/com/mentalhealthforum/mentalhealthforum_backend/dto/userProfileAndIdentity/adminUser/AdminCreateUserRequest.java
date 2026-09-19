@@ -41,6 +41,7 @@ public record AdminCreateUserRequest (
           Required group assignment. Admin must specify which group the user belongs to.
           Must be an assignable group (leaf group with role grants).
          */
+        @NotNull(message = "Group assignment is required.")
         @ValidAssignableGroup
         GroupPath group,
 

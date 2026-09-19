@@ -1,16 +1,12 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserAuditReasonDefinitionDto;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserAuditReasonDefinitionGroupedDto;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserAuditSnapshot;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserHistoryEntry;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditReasonKey;
 
-import com.mentalhealthforum.mentalhealthforum_backend.enums.UserType;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserAuditLogEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserAuditReasonDefinitionEntity;
@@ -97,32 +93,14 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     @Override
     public Mono<UserAuditLogEntity> logGroupChange(
             UUID userId,
-            UserType userType,
+            GroupContext context,
             GroupPath oldGroup,
             GroupPath newGroup,
             UUID performedBy,
             UUID reasonDefinitionId,
             String customReason
     ){
-        UserAuditAction action;
-
-        if(userType == UserType.PENDING){
-            // Pending users always use GROUP_CHANGED
-            action = UserAuditAction.GROUP_CHANGED;
-        }
-        else {
-            // Synced users use PROMOTED/DEMOTED
-            if (GroupPath.isPromotion(oldGroup, newGroup)) {
-                action = UserAuditAction.PROMOTED;
-            }
-            else if (GroupPath.isDemotion(oldGroup, newGroup)) {
-                action = UserAuditAction.DEMOTED;
-            }
-            else {
-                action = UserAuditAction.GROUP_CHANGED;
-            }
-
-        }
+        UserAuditAction action = UserAuditAction.forGroupChange(context, oldGroup, newGroup);
 
         return logAction(
                 userId,
@@ -146,9 +124,7 @@ public class AdminAuditServiceImpl implements AdminAuditService {
             UUID reasonDefinitionId,
             String customReason
     ){
-        UserAuditAction action = Boolean.TRUE.equals(newEnabled)
-                ? UserAuditAction.ENABLED
-                : UserAuditAction.DISABLED;
+        UserAuditAction action = UserAuditAction.forEnabledChange(newEnabled);
 
         return logAction(
                 userId,
@@ -185,6 +161,8 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     @Override
     public Mono<UserAuditLogEntity> logInviteReissued(
             UUID userId,
+            GroupPath oldGroup,
+            GroupPath newGroup,
             UUID performedBy,
             UUID reasonDefinitionId,
             String customReason
@@ -192,8 +170,8 @@ public class AdminAuditServiceImpl implements AdminAuditService {
         return logAction(
                 userId,
                 UserAuditAction.INVITE_REISSUED,
-                null,
-                null,
+                UserAuditSnapshot.forGroup(oldGroup),
+                UserAuditSnapshot.forGroup(newGroup),
                 performedBy,
                 reasonDefinitionId,
                 customReason
@@ -267,18 +245,30 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                       .defaultIfEmpty(AppUserEntity.defaultUser())
                 : Mono.just(AppUserEntity.defaultUser());
 
-        return performedByDetailsMono
-                .map(userDetails -> new UserHistoryEntry(
-                        userAuditLog.getActionType(),
-                        userAuditLog.getOldValue(),
-                        userAuditLog.getNewValue(),
-                        userAuditLog.getPerformedBy(),
-                        userDetails.getDisplayName(),
-                        null,
-                        null,
-                        userAuditLog.getCustomReason(),
-                        userAuditLog.getCreatedAt()
-                ));
+        // Resolve suggested reason (if reasonDefinitionId is present)
+        Mono<UserAuditReasonDefinitionEntity> reasonMono = userAuditLog.getReasonDefinitionId() != null
+                ? auditReasonDefinitionRepository.findById(userAuditLog.getReasonDefinitionId())
+                  .defaultIfEmpty(new UserAuditReasonDefinitionEntity())
+                : Mono.just(new UserAuditReasonDefinitionEntity());
+
+        return Mono.zip(performedByDetailsMono, reasonMono)
+                .map(tuple -> {
+                    UserDetails userDetails = tuple.getT1();
+                    UserAuditReasonDefinitionEntity reason = tuple.getT2();
+
+                    UserAuditReasonDefinitionDto suggestedReason = toUserAuditReasonDefinitionDto(reason);
+
+                    return new UserHistoryEntry(
+                            userAuditLog.getActionType(),
+                            userAuditLog.getOldValue(),
+                            userAuditLog.getNewValue(),
+                            userAuditLog.getPerformedBy(),
+                            userDetails.getDisplayName(),
+                            suggestedReason,
+                            userAuditLog.getCustomReason(),
+                            userAuditLog.getCreatedAt()
+                    );
+                });
 
     }
 
@@ -328,7 +318,7 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     }
 
     private UserAuditReasonDefinitionDto toUserAuditReasonDefinitionDto(UserAuditReasonDefinitionEntity entity){
-        if(entity == null){
+        if(entity == null || entity.getId() == null){
             return null;
         }
 

@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.enums;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.GroupContext;
 import lombok.Getter;
 
 /**
@@ -40,5 +41,44 @@ public enum UserAuditAction {
 
     UserAuditAction(String displayName) {
         this.displayName = displayName;
+    }
+
+    /**
+     * Determines the UserAuditAction for a group change.
+     */
+    public static UserAuditAction forGroupChange(GroupContext context, GroupPath currentGroup, GroupPath targetGroup){
+
+        if(context == GroupContext.REISSUE){
+            // Reissue primary action is INVITE_REISSUED
+            return INVITE_REISSUED;
+        }
+
+        if(context == GroupContext.PENDING){
+            return GROUP_CHANGED;
+            // Pending update primary action is GROUP_CHANGED
+        }
+
+        if(context == GroupContext.SYNCED){
+            // Synced users use PROMOTED/DEMOTED
+            if (GroupPath.isPromotion(currentGroup, targetGroup)) {
+                return PROMOTED;
+            }
+            else if (GroupPath.isDemotion(currentGroup, targetGroup)) {
+                return DEMOTED;
+            }
+            return GROUP_CHANGED;
+
+        }
+
+        // CREATE context - no reason needed
+        return null;
+
+    }
+
+    /**
+     * Determines the UserAuditAction for  enabled change.
+     */
+    public static UserAuditAction forEnabledChange(Boolean isEnabled){
+        return isEnabled ? ENABLED : DISABLED;
     }
 }

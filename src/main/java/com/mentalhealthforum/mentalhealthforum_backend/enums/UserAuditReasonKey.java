@@ -31,7 +31,24 @@ public enum UserAuditReasonKey {
 
     // General
     ADMIN_CORRECTION(UserAuditAction.GROUP_CHANGED),
-    SYSTEM_AUTO(UserAuditAction.CREATED);
+    SYSTEM_AUTO(UserAuditAction.CREATED),
+
+    // Invitation lifecycle - Reissue
+    INVITE_EXPIRED(UserAuditAction.INVITE_REISSUED),
+    EMAIL_BOUNCED(UserAuditAction.INVITE_REISSUED),
+    USER_REQUEST_RESEND(UserAuditAction.INVITE_REISSUED),
+    ADMIN_CORRECTION_REISSUE(UserAuditAction.INVITE_REISSUED),
+    EMAIL_UPDATED(UserAuditAction.INVITE_REISSUED),
+
+    // Invitation lifecycle - Revoke
+    INVITE_CANCELLED(UserAuditAction.INVITE_REVOKED),
+    USER_REQUEST_REVOKE(UserAuditAction.INVITE_REVOKED),
+    DUPLICATE_INVITE(UserAuditAction.INVITE_REVOKED),
+    POLICY_VIOLATION_INVITE(UserAuditAction.INVITE_REVOKED),
+
+    // Platform Architecture Alignments
+    ANONYMIZED_RETAINED(UserAuditAction.DISABLED),
+    ADMIN_MANUAL_LOCK(UserAuditAction.DISABLED);
 
     private final UserAuditAction actionType;
 

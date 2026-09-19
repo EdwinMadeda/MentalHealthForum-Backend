@@ -194,15 +194,16 @@ public class AdminUserController {
 
     }
 
-    @DeleteMapping("/pending-invites/{userId}")
+    @PatchMapping("/pending-invites/{userId}/revoke")
     public Mono<ResponseEntity<StandardSuccessResponse<Void>>> revokeInvitation(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID userId){
+            @PathVariable UUID userId,
+            @Valid @RequestBody RevokeInvitationRequest revokeInvitationRequest){
             log.info("Admin revoking invitation for user ID: {}", userId);
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
 
-        return adminUserService.revokeInvitation(String.valueOf(userId), viewerContext)
+        return adminUserService.revokeInvitation(String.valueOf(userId), revokeInvitationRequest, viewerContext)
                     .thenReturn(ResponseEntity.ok(
                             new StandardSuccessResponse<>("Invitation revoked and user deleted successfully.", null)
                     ));

@@ -12,7 +12,6 @@ import java.lang.annotation.Target;
 @Target({ElementType.FIELD})
 @Retention(RetentionPolicy.RUNTIME)
 @Constraint(validatedBy = AssignableGroupValidator.class)
-@NotNull(message = "Group assignment is required.")
 public @interface ValidAssignableGroup {
     String message() default "Group must be assignable (leaf group with role grants)";
     Class<?>[] groups() default {};

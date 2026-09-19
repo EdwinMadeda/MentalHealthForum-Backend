@@ -7,9 +7,16 @@ import java.util.UUID;
 
 public record UserAuditReasonDefinitionDto(
     UUID id,
-    UserAuditReasonKey key,                     // EXCEPTIONAL_CONTRIBUTION, etc.
+    UserAuditReasonKey key,                  // EXCEPTIONAL_CONTRIBUTION, etc.
     String description,                     // "Exceptional contribution to the community"
     UserAuditAction actionType,             // PROMOTED, DEMOTED, etc.
     boolean isActive,
     int sortOrder
-) {}
+) {
+    /**
+     * Default empty constructor for cases where no reason is present.
+     */
+    public UserAuditReasonDefinitionDto(){
+        this(null, null, null, null, false, 0);
+    }
+}

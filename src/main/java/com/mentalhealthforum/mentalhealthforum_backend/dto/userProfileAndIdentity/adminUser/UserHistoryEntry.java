@@ -1,7 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser;
 
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditReasonKey;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -28,8 +27,7 @@ public record UserHistoryEntry(
         UserAuditSnapshot newValue,             // Raw value (e.g., "/moderators/peer")
         UUID performedById,                     // Keycloak ID of performer (for linking)
         String performedByDisplayName,          // Display name of performer
-        UserAuditReasonKey suggestedReasonKey,  // From definitions
-        String suggestedReasonDisplay,          // Display text (nullable)
+        UserAuditReasonDefinitionDto suggestedReason,  // From definitions
         String customReason,                    // Admin's own reason
         Instant timeStamp
 ) {}
