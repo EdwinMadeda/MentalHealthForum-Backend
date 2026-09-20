@@ -292,7 +292,8 @@ public class AdminUserServiceImpl implements AdminUserService {
         // Validate reason matches action if template provided
         return validateReasonMatchesAction(
                         request.reasonDefinitionId(),
-                        UserAuditAction.INVITE_REISSUED
+                        UserAuditAction.INVITE_REISSUED,
+                        request.group()
                 )
                 .then(Mono.fromCallable(() -> adminManager.findUserByUserId(userId)
                                 .orElseThrow(UserDoesNotExistException::new))
@@ -585,7 +586,8 @@ public class AdminUserServiceImpl implements AdminUserService {
         // Validate reason matches action if template provided
         return validateReasonMatchesAction(
                         request.reasonDefinitionId(),
-                        UserAuditAction.INVITE_REVOKED
+                        UserAuditAction.INVITE_REVOKED,
+                        null
                 )
                 .then(appUserRepository.existsByKeycloakId(userUUID))
                 .flatMap(inAppUsers ->
@@ -1642,7 +1644,8 @@ public class AdminUserServiceImpl implements AdminUserService {
 
             groupValidation = validateReasonMatchesAction(
                     groupChange.reasonDefinitionId(),
-                    expectedAction
+                    expectedAction,
+                    targetGroup
             );
 
         }
@@ -1658,7 +1661,8 @@ public class AdminUserServiceImpl implements AdminUserService {
 
             enabledValidation = validateReasonMatchesAction(
                     enabledChange.reasonDefinitionId(),
-                    expectedAction
+                    expectedAction,
+                    null
             );
 
         }
@@ -1700,7 +1704,8 @@ public class AdminUserServiceImpl implements AdminUserService {
      */
     private Mono<Void> validateReasonMatchesAction(
             UUID reasonDefinitionId,
-            UserAuditAction expectedAction
+            UserAuditAction expectedAction,
+            GroupPath targetGroup
     ){
         if(reasonDefinitionId == null){
             return Mono.empty(); // No reason selected, valid
@@ -1712,6 +1717,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                         ErrorCode.VALIDATION_FAILED
                 )))
                 .flatMap(reason -> {
+                    // Check action type
                     if(reason.getActionType() != expectedAction){
                         return Mono.error(new ApiException(
                                 String.format(
@@ -1723,6 +1729,20 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 ErrorCode.VALIDATION_FAILED
                         ));
                     }
+
+                    // Check target group constraint
+                    if(targetGroup != null && !reason.getKey().isValidForGroup(targetGroup)){
+                        return Mono.error(new ApiException(
+                                String.format(
+                                        "Selected reason '%s' is not valid for target group '%s'.",
+                                        reason.getKey(),
+                                        targetGroup.getDisplayName()
+                                ),
+                                ErrorCode.VALIDATION_FAILED
+                                )
+                        );
+                    }
+
                     return Mono.empty();
                 });
     }
