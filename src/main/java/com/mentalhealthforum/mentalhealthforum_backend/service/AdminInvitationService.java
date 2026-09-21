@@ -15,6 +15,8 @@ public interface AdminInvitationService {
 
     Mono<PendingAdminInviteDto> updateInvitation(KeycloakUserDto keycloakUserDto);
 
+    Mono<PendingAdminInviteDto> syncPendingInviteFromKeycloak(String userId);
+
     Mono<Void> processVerificationSuccess(String userId);
 
     Mono<Void> processPasswordResetSuccess(String userId);

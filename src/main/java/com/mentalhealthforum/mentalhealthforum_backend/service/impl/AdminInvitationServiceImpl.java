@@ -16,19 +16,19 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserReposit
 import com.mentalhealthforum.mentalhealthforum_backend.repository.VerificationTokenRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AdminInvitationService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.KeycloakAdminManager;
+import org.keycloak.representations.idm.UserRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 
-import java.util.UUID;
+import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.setIfChanged;
 
 
 @Service
@@ -92,6 +92,88 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
     }
 
     @Override
+    public Mono<PendingAdminInviteDto> syncPendingInviteFromKeycloak(String userId){
+        return adminInvitationRepository.findByKeycloakId(UUID.fromString(userId))
+                .switchIfEmpty(Mono.error(new UserDoesNotExistException(
+                        "User not found in pending invitations."
+                )))
+                .flatMap(invitation ->
+                        Mono.fromCallable(()-> adminManager.findUserByUserId(userId)
+                                        .orElseThrow(UserDoesNotExistException::new))
+                                .subscribeOn(Schedulers.boundedElastic())
+                                .zipWith(Mono.fromCallable(()-> adminManager.getUserGroups(userId))
+                                        .subscribeOn(Schedulers.boundedElastic()))
+                                .flatMap(tuple -> {
+
+                                    UserRepresentation userRep = tuple.getT1();
+                                    Set<String> keycloakGroups = new HashSet<>(tuple.getT2());
+
+                                    boolean hasChanges = false;
+
+                                    // Check email change
+                                    hasChanges |= setIfChanged(
+                                            userRep.getEmail(),
+                                            invitation.getEmail(),
+                                            invitation::setEmail
+                                    );
+
+                                    // Check username change
+                                    hasChanges |= setIfChanged(
+                                            userRep.getUsername(),
+                                            invitation.getUsername(),
+                                            invitation::setUsername
+                                    );
+
+                                    // Check firstname change
+                                    hasChanges |= setIfChanged(
+                                            userRep.getFirstName(),
+                                            invitation.getFirstName(),
+                                            invitation::setFirstName
+                                    );
+
+                                    // Check lastname change
+                                    hasChanges |= setIfChanged(
+                                            userRep.getLastName(),
+                                            invitation.getLastName(),
+                                            invitation::setLastName
+                                    );
+
+                                    // Check enabled change
+                                    hasChanges |= setIfChanged(
+                                            userRep.isEnabled(),
+                                            invitation.getIsEnabled(),
+                                            invitation::setIsEnabled
+                                    );
+
+                                    // Check verified change
+                                    hasChanges |= setIfChanged(
+                                            userRep.isEmailVerified(),
+                                            invitation.getIsEmailVerified(),
+                                            invitation::setIsEmailVerified
+                                    );
+
+                                    // Check groups change
+                                    if(!keycloakGroups.equals(invitation.getGroups())){
+                                        invitation.setGroups(keycloakGroups);
+                                        hasChanges = true;
+                                    }
+
+                                    if(hasChanges){
+                                        invitation.setUpdatedAt(Instant.now());
+                                        log.info("Synced pending invite for user {} with fresh keycloak data", userId);
+
+                                        return adminInvitationRepository.save(invitation);
+                                    }
+
+                                    log.debug("No changes detected for pending invite {}", userId);
+                                    return Mono.just(invitation);
+
+                                })
+                )
+                .flatMap(this::toPendingInviteDto);
+    }
+
+    @Override
     public Mono<Void> processVerificationSuccess(String userId){
         return adminInvitationRepository.markEmailVerifiedAndAdvanceStage(UUID.fromString(userId))
                 .doOnSuccess(count -> {
@@ -119,11 +201,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
 
     @Override
     public Mono<PendingAdminInviteDto> getPendingInvite(String userId){
-        return adminInvitationRepository.findByKeycloakId(UUID.fromString(userId))
-                .switchIfEmpty(Mono.error(new UserDoesNotExistException(
-                        "User not found in pending invitations"
-                )))
-                .flatMap(this::toPendingInviteDto);
+        return syncPendingInviteFromKeycloak(userId);
     }
 
     @Override
