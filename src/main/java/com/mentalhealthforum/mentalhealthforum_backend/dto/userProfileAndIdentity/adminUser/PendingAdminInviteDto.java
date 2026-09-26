@@ -5,6 +5,15 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * DTO for pending admin invitations.
+ *
+ * <p>Implements {@link InviteExpirable} to provide:
+ * <ul>
+ *   <li>{@code is_expired} - Whether the invitation has passed its expiry time</li>
+ *   <li>{@code is_eligible_for_purge} - Whether the invitation is eligible for purge</li>
+ * </ul>
+ */
 public record PendingAdminInviteDto(
         // Primary key used by the application
         UUID user_id,
@@ -29,5 +38,22 @@ public record PendingAdminInviteDto(
         Instant date_created,
         Instant updated_at,
 
-        OnboardingStage current_stage
-) {}
+        OnboardingStage current_stage,
+
+        // Expiry fields
+        Instant expires_at
+) implements InviteExpirable {
+    @Override
+    public Instant getExpiresAt() {
+        return this.expires_at;
+    }
+
+    @Override
+    public boolean getIsEmailVerified() {return this.is_email_verified;}
+
+    @Override
+    public OnboardingStage getCurrentStage() {
+        return this.current_stage;
+    }
+
+}

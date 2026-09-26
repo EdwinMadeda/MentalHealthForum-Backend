@@ -278,12 +278,27 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 .then();
     }
 
+    @Override
+    public Mono<Void> purgeExpiredInvitation(AdminInvitationEntity invitation){
+        log.info("Purging expired invitation: {}", invitation.getKeycloakId());
+
+        return Mono.fromCallable(()-> {
+            adminManager.deleteUser(invitation.getKeycloakId().toString());
+            return invitation.getKeycloakId();
+        })
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(this::completeInvitation)
+                .onErrorResume(error -> {
+                    log.error("Failed to purge expired invitation: {}", invitation.getKeycloakId(), error);
+                    return Mono.empty();
+                });
+    }
+
     private List<SortOption> getPendingInviteSortOptions(){
         return Arrays.stream(PendingInviteSortField.values())
                 .map(PendingInviteSortField::toSortOption)
                 .toList();
     }
-
 
     private Mono<PendingAdminInviteDto> toPendingInviteDto(AdminInvitationEntity entity) {
         if (entity == null) {
@@ -296,6 +311,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                     String invitedByDisplayName = userDetails.getDisplayName();
                     String invitedByAvatarUrl = userDetails.getAvatarUrl();
 
+
                     return new PendingAdminInviteDto(
                             entity.getKeycloakId(),
                             entity.getUsername(),
@@ -305,7 +321,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
 
                             entity.getGroups() != null ? entity.getGroups().toArray(new String[0]) : new String[0],
                             entity.getIsEnabled() != null ? entity.getIsEnabled() : false,
-                            entity.getIsEmailVerified() != null ? entity.getIsEmailVerified() : false,
+                            entity.getIsEmailVerified(),
 
                             entity.getInvitedBy(),
                             invitedByDisplayName,
@@ -313,7 +329,9 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
 
                             entity.getDateCreated(),
                             entity.getUpdatedAt(),
-                            entity.getCurrentStage()
+                            entity.getCurrentStage(),
+
+                            entity.getExpiresAt()
                     );
                 });
     }

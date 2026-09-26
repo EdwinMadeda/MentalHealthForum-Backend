@@ -1,5 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.InviteExpirable;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -8,10 +10,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
+
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -20,7 +24,7 @@ import java.util.UUID;
 @Getter
 @NoArgsConstructor
 @Table(name = "admin_invitations")
-public class AdminInvitationEntity {
+public class AdminInvitationEntity implements InviteExpirable {
     @Id
     @Column("id")
     private UUID id; // DB-generated UUID Primary Key
@@ -77,6 +81,12 @@ public class AdminInvitationEntity {
     @Column("is_initial_login")
     private Boolean isInitialLogin = true;
 
+    @Column("expires_at")
+    private Instant expiresAt;
+
+    // Implement interface methods
+
+
     public AdminInvitationEntity(
             String keycloakStringId,
             String email,
@@ -102,5 +112,30 @@ public class AdminInvitationEntity {
         this.groups = groups;
         this.dateCreated = dateCreated;
         this.invitedBy = UUID.fromString(invitedByStringId);
+
+        this.expiresAt = this.newExpiryTimestamp();
     }
+
+    @Override
+    public Instant getExpiresAt() {
+        return this.expiresAt;
+    }
+
+    @Override
+    public boolean getIsEmailVerified() {
+        return Boolean.TRUE.equals(this.isEmailVerified);
+    }
+
+    @Override
+    public OnboardingStage getCurrentStage() {
+        return this.currentStage;
+    }
+
+
+     // Resets the expiry timestamp to a new window from now.
+    public void resetExpiry(){
+        this.expiresAt = this.newExpiryTimestamp();
+    }
+
+
 }

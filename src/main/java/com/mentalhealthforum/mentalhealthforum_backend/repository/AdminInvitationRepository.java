@@ -37,7 +37,8 @@ public interface AdminInvitationRepository extends R2dbcRepository<AdminInvitati
                u.avatar_url AS invited_by_avatar_url,
                i.date_created,
                i.updated_at,
-               i.current_stage
+               i.current_stage,
+               i.expires_at
         FROM admin_invitations i
         LEFT join app_users u ON i.invited_by = u.keycloak_id
         WHERE (:search IS NULL

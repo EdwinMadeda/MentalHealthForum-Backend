@@ -29,7 +29,22 @@ public class AppConstants {
      */
     public static final Duration ACTIVITY_UPDATE_THRESHOLD = Duration.ofMinutes(5);
 
-
+    /**
+     * Determines whether administrative modifications require an explicit justification.
+     * When true, actions affecting system configuration or user states must be
+     * accompanied by a valid reason for auditing purposes.
+     */
     public static final boolean REQUIRE_REASON_FOR_ADMIN_CHANGES = true;
+
+    /**
+     * Number of days an invitation is valid before expiring.
+     */
+    public static final int INVITE_EXPIRY_DAYS = 7;
+
+    /**
+     * Number of hours after expiry before an invitation is eligible for purge.
+     * This grace period allows for timezone differences and admin review.
+     */
+    public static final int INVITE_PURGE_GRACE_HOURS = 24;
 
 }

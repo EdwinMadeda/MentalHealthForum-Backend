@@ -384,6 +384,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                         .flatMap(adminInvitation -> {
                             adminInvitation.setIsInitialLogin(true);
                             adminInvitation.setCurrentStage(OnboardingStage.AWAITING_VERIFICATION);
+                            adminInvitation.resetExpiry();
                             return adminInvitationRepository.save(adminInvitation);
                         })
                         .thenReturn(ctx)

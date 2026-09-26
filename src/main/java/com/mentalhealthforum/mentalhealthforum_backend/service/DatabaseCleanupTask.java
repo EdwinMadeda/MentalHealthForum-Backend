@@ -1,5 +1,9 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserDoesNotExistException;
+import com.mentalhealthforum.mentalhealthforum_backend.model.AdminInvitationEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.MfaStateCache;
@@ -7,8 +11,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Component
 public class DatabaseCleanupTask {
@@ -23,6 +30,13 @@ public class DatabaseCleanupTask {
     private final UserConnectRepository userConnectRepository;
     private final AccountPurgeSchedulerService accountPurgeSchedulerService;
     private final MfaStateCache mfaStateCache;
+    private final KeycloakAdminManager adminManager;
+    private final KeycloakUserDtoMapper keycloakUserDtoMapper;
+    private final AppUserRepository appUserRepository;
+    private final AppUserService appUserService;
+    private final AdminInvitationRepository adminInvitationRepository;
+    private final AdminInvitationService adminInvitationService;
+
 
     public DatabaseCleanupTask(
             OtpCredentialRepository otpCredentialRepository,
@@ -31,7 +45,13 @@ public class DatabaseCleanupTask {
             CategoryService categoryService,
             ThreadRepository threadRepository,
             UserConnectRepository userConnectRepository,
-            AccountPurgeSchedulerService accountPurgeSchedulerService, MfaStateCache mfaStateCache) {
+            AccountPurgeSchedulerService accountPurgeSchedulerService,
+            MfaStateCache mfaStateCache,
+            KeycloakAdminManager adminManager,
+            KeycloakUserDtoMapper keycloakUserDtoMapper,
+            AppUserRepository appUserRepository,
+            AppUserService appUserService, AdminInvitationRepository adminInvitationRepository,
+            AdminInvitationService adminInvitationService) {
         this.otpCredentialRepository = otpCredentialRepository;
         this.verificationTokenRepository = verificationTokenRepository;
         this.pendingUserRepository = pendingUserRepository;
@@ -40,6 +60,12 @@ public class DatabaseCleanupTask {
         this.userConnectRepository = userConnectRepository;
         this.accountPurgeSchedulerService = accountPurgeSchedulerService;
         this.mfaStateCache = mfaStateCache;
+        this.keycloakUserDtoMapper = keycloakUserDtoMapper;
+        this.adminManager = adminManager;
+        this.appUserRepository = appUserRepository;
+        this.appUserService = appUserService;
+        this.adminInvitationRepository = adminInvitationRepository;
+        this.adminInvitationService = adminInvitationService;
     }
 
     // Runs at 3:00 AM every day
@@ -129,5 +155,55 @@ public class DatabaseCleanupTask {
         log.debug("Starting cleanup of expired MFA states");
         mfaStateCache.cleanup();
     }
+
+    // Syncs all app users with Keycloak. Runs at 3 AM daily.
+    @Scheduled(cron = "0 0 3 * * *")
+    public void syncAppUsers(){
+        log.info("Cron: Initiating scheduled sync of app users");
+
+        appUserRepository.findAll()
+                .flatMap(appUser -> Mono.fromCallable(()-> adminManager.findUserByUserId(
+                        appUser.getKeycloakId().toString())
+                        .orElseThrow(()-> new UserDoesNotExistException("User not found"))
+                ).subscribeOn(Schedulers.boundedElastic()))
+                .flatMap(userRep -> appUserService.syncUserViaAdminClient(
+                            keycloakUserDtoMapper.mapToKeycloakUserDto(userRep),
+                                null
+                ))
+                .doOnComplete(()-> log.info("Cron Success: Completed sync of app users"))
+                .doOnError(e-> log.error("Cron Failure: App user sync failed: {}", e.getMessage()))
+                .subscribe();
+
+    }
+
+    // Syncs pending invitations with keycloak. Runs at 2 AM daily.
+    @Scheduled(cron = "0 0 2 * * *")
+    public void syncPendingInvitations(){
+        log.info("Cron: Initiating scheduled sync of pending invitations");
+
+        adminInvitationRepository.findAll()
+                .flatMap(invitation -> adminInvitationService.syncPendingInviteFromKeycloak(
+                        invitation.getKeycloakId().toString()
+                ))
+                .doOnComplete(()-> log.info("Cron Success: Completed sync of pending invitations"))
+                .doOnError(e-> log.error("Cron Failure: Pending invitation failed: {}", e.getMessage()))
+                .subscribe();
+
+    }
+
+    // Purges expired invitations that haven't been touched. Runs at 4 AM daily
+    @Scheduled(cron = "0 0 4 * * *")
+    public void purgeExpiredInvitations(){
+        log.info("Cron: Initiating scheduled purge of expired invitations");
+
+        adminInvitationRepository.findAll()
+                .filter(AdminInvitationEntity::isEligibleForPurge)
+                .flatMap(adminInvitationService::purgeExpiredInvitation)
+                .doOnComplete(()-> log.info("Cron success: Completed purge of expired invitations"))
+                .doOnError(e-> log.error("Cron Failure: Expired invitation purge failed: {}", e.getMessage()))
+                .subscribe();
+
+    }
+
 
 }

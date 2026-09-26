@@ -38,4 +38,6 @@ public interface AdminInvitationService {
     );
 
     Mono<Void> completeInvitation(UUID keycloakId);
+
+    Mono<Void> purgeExpiredInvitation(AdminInvitationEntity invitation);
 }
