@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.jwt.JwtValidationException;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
@@ -57,12 +58,14 @@ public class SecurityExceptionHandler implements ServerAuthenticationEntryPoint,
     // --- Handles 401 Unauthorized (Authentication Failure) ---
     @Override
     public Mono<Void> commence(ServerWebExchange exchange, AuthenticationException ex) {
-        logger.warn("401 Unauthorized Access Attempt: {}", ex.getMessage());
+        logger.warn("401 Unauthorized | Path: {} | Reason: {}",
+                exchange.getRequest().getPath().value(),
+                ex.getMessage());
         return writeErrorResponse(
                 exchange,
                 HttpStatus.UNAUTHORIZED,
                 ErrorCode.UNAUTHORIZED,
-                "Authentication failed. Invalid or missing credentials."
+                "Your session is invalid or has expired. Please log in again."
         );
     }
 

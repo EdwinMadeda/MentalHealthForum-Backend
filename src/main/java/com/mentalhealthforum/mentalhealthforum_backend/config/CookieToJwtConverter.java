@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.config;
 
+import com.mentalhealthforum.mentalhealthforum_backend.contants.SecurityConstants;
 import org.springframework.http.HttpCookie;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.core.Authentication;
@@ -23,6 +24,13 @@ public class CookieToJwtConverter implements ServerAuthenticationConverter {
     public Mono<Authentication> convert(ServerWebExchange exchange) {
         ServerHttpRequest request = exchange.getRequest();
 
+        // If this request targets a whitelisted path, don't try to extract a token.
+        // This prevents an expired or malformed cookie from blocking login/refresh/logout
+        // when those endpoints are explicitly permitted in SecurityConfig.
+        if(isWhiteListed(request.getPath().value())){
+            return Mono.empty();
+        }
+
         // 1. Try to find the ACCESS_TOKEN cookie
         HttpCookie jwtCookie = request.getCookies().getFirst(ACCESS_TOKEN_NAME);
 
@@ -39,5 +47,9 @@ public class CookieToJwtConverter implements ServerAuthenticationConverter {
         // parser into handling it as if it came from an Authorization header.
         return Mono.just(tokenValue)
                 .map(BearerTokenAuthenticationToken::new);
+    }
+
+    private boolean isWhiteListed(String path){
+        return SecurityConstants.PUBLIC_PATHS.stream().anyMatch(path::startsWith);
     }
 }
