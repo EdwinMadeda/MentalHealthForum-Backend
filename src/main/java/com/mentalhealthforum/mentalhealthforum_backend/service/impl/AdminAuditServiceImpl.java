@@ -20,9 +20,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.Comparator;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -226,50 +224,19 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     @Override
     public Flux<UserHistoryEntry> getUserHistoryList(UUID userId){
         return auditLogRepository.findByUserIdOrderByCreatedAtDesc(userId)
-                .flatMapSequential(this::mapToHistoryEntry); // Preserves order
+                .collectList()
+                .flatMapMany(records -> enrichedHistoryWithBatchData(records)
+                        .flatMapMany(enriched -> Flux.fromIterable(enriched.entries)));
     }
 
     // Retrieves the most recent N audit history entries for a user.
     @Override
     public Flux<UserHistoryEntry> getRecentUserHistory(UUID userId){
         return auditLogRepository.findRecentByUserId(userId, RECENT_HISTORY_LIMIT)
-                .flatMapSequential(this::mapToHistoryEntry); // Preserves order
-    }
-
-    private Mono<UserHistoryEntry> mapToHistoryEntry(UserAuditLogEntity userAuditLog) {
-
-        // Handle null performedBy using defaultUser()
-        Mono<UserDetails> performedByDetailsMono = userAuditLog.getPerformedBy() != null
-                ? appUserRepository.findAppUserByKeycloakId(userAuditLog.getPerformedBy().toString())
-                    .map(AppUserEntity::toUserDetails)
-                      .defaultIfEmpty(AppUserEntity.defaultUser())
-                : Mono.just(AppUserEntity.defaultUser());
-
-        // Resolve suggested reason (if reasonDefinitionId is present)
-        Mono<UserAuditReasonDefinitionEntity> reasonMono = userAuditLog.getReasonDefinitionId() != null
-                ? auditReasonDefinitionRepository.findById(userAuditLog.getReasonDefinitionId())
-                  .defaultIfEmpty(new UserAuditReasonDefinitionEntity())
-                : Mono.just(new UserAuditReasonDefinitionEntity());
-
-        return Mono.zip(performedByDetailsMono, reasonMono)
-                .map(tuple -> {
-                    UserDetails userDetails = tuple.getT1();
-                    UserAuditReasonDefinitionEntity reason = tuple.getT2();
-
-                    UserAuditReasonDefinitionDto suggestedReason = toUserAuditReasonDefinitionDto(reason);
-
-                    return new UserHistoryEntry(
-                            userAuditLog.getActionType(),
-                            userAuditLog.getOldValue(),
-                            userAuditLog.getNewValue(),
-                            userAuditLog.getPerformedBy(),
-                            userDetails.getDisplayName(),
-                            suggestedReason,
-                            userAuditLog.getCustomReason(),
-                            userAuditLog.getCreatedAt()
-                    );
-                });
-
+                .collectList()
+                .flatMapMany(records -> enrichedHistoryWithBatchData(records)
+                        .flatMapMany(enriched -> Flux.fromIterable(enriched.entries))
+                );
     }
 
     // ============================================================
@@ -300,6 +267,109 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                 .collectList()
                 .map(this::groupByActionType);
     }
+
+    /**
+     * Enriches a list of audit log records with performer and reason details using batch fetching.
+     * Uses batch fetching to avoid N+1 queries.
+     */
+    private Mono<EnrichedHistoryData> enrichedHistoryWithBatchData(List<UserAuditLogEntity> records){
+        if(records.isEmpty()){
+            return Mono.just(new EnrichedHistoryData(
+                    List.of(),
+                    List.of(),
+                    Map.of(),
+                    Map.of()
+            ));
+        }
+
+        // Collect unique performedBy IDs
+        List<UUID> performedByIds = records.stream()
+                .map(UserAuditLogEntity::getPerformedBy)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Collect unique reason definition IDs
+        List<UUID> reasonIds = records.stream()
+                .map(UserAuditLogEntity::getReasonDefinitionId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch performedBys
+        Mono<Map<UUID, UserDetails>> performedBysMono = performedByIds.isEmpty()
+                ? Mono.just(Map.of())
+                : appUserRepository.findAppUsersByKeycloakIds(performedByIds)
+                  .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                  .defaultIfEmpty(new HashMap<>());
+
+        // Batch fetch reasons
+        Mono<Map<UUID, UserAuditReasonDefinitionEntity>> reasonsMono = reasonIds.isEmpty()
+                ? Mono.just(Map.of())
+                : auditReasonDefinitionRepository.findAuditReasonDefinitionByIds(reasonIds)
+                  .collectMap(UserAuditReasonDefinitionEntity::getId)
+                  .defaultIfEmpty(new HashMap<>());
+
+        return Mono.zip(performedBysMono, reasonsMono)
+                .map(tuple -> {
+                    Map<UUID, UserDetails> performedBys = tuple.getT1();
+                    Map<UUID, UserAuditReasonDefinitionEntity> reasons = tuple.getT2();
+
+                    List<UserHistoryEntry> entries = records.stream()
+                            .map(record -> mapToHistoryEntryWithData(record, performedBys, reasons))
+                            .toList();
+
+                    return new EnrichedHistoryData(entries, records, performedBys, reasons);
+                });
+
+    }
+
+    /**
+     * Internal carrier for batch-enriched history data.
+     * Holds both the enriched responses and the raw data needed for future filters.
+     */
+    private record EnrichedHistoryData(
+       List<UserHistoryEntry> entries,
+       List<UserAuditLogEntity> records,
+       Map<UUID, UserDetails> performedBys,
+       Map<UUID, UserAuditReasonDefinitionEntity> reasons
+    ){}
+
+
+    /**
+     * Maps an audit log entity to a UserHistoryEntry using pre-fetched data.
+     * This is synchronous - no async calls needed.
+     */
+    private UserHistoryEntry mapToHistoryEntryWithData(
+            UserAuditLogEntity record,
+            Map<UUID, UserDetails> performedBys,
+            Map<UUID, UserAuditReasonDefinitionEntity> reasons) {
+
+        // Get performer (or default)
+        UserDetails performedBy = record.getPerformedBy() != null
+                ? performedBys.getOrDefault(record.getPerformedBy(), AppUserEntity.defaultUser())
+                : AppUserEntity.defaultUser();
+
+        // Get reason definition (or null)
+        UserAuditReasonDefinitionEntity reasonDefinition = record.getReasonDefinitionId() != null
+                ? reasons.get(record.getReasonDefinitionId())
+                : null;
+
+        UserAuditReasonDefinitionDto suggestedReason = toUserAuditReasonDefinitionDto(reasonDefinition);
+
+        return new UserHistoryEntry(
+                record.getActionType(),
+                record.getOldValue(),
+                record.getNewValue(),
+                record.getPerformedBy(),
+                performedBy.getDisplayName(),
+                suggestedReason,
+                record.getCustomReason(),
+                record.getCreatedAt()
+        );
+
+    }
+
 
     private List<UserAuditReasonDefinitionGroupedDto> groupByActionType(List<UserAuditReasonDefinitionEntity> entities){
         return entities.stream()
