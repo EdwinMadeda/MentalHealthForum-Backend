@@ -32,11 +32,46 @@ public interface UserAuditLogRepository extends R2dbcRepository<UserAuditLogEnti
     Mono<UserAuditLogEntity> findFirstByUserIdOrderByCreatedAtDesc(UUID userId);
 
 
-    // Count number of audit entries for a specific user
-    Mono<Long> countByUserId(UUID userId);
-
-
     // Deletes all audit log entries for a specific user.
     // Used when user is permanently purged (if needed)
     Mono<Void> deleteByUserId(UUID userId);
+
+
+    // Count number of audit entries for a specific user
+    Mono<Long> countByUserId(UUID userId);
+
+    // Finds audit log entries for a user pagination
+    @Query("""
+        SELECT * FROM user_audit_log
+        WHERE (:userId IS NULL OR user_id = :userId)
+            AND (:actionTypes IS NULL OR action_type::text = ANY(:actionTypes))
+            AND (:performedBy IS NULL OR performed_by = :performedBy)
+        ORDER BY
+            CASE WHEN :sortDirection = 'DESC' THEN created_at END DESC NULLS LAST,
+            CASE WHEN :sortDirection = 'ASC' THEN created_at END ASC NULLS FIRST,
+            id
+        LIMIT :limit OFFSET :offset
+    """)
+    Flux<UserAuditLogEntity> findByUserIdPaginated(
+            @Param("userId") UUID userId,
+            @Param("performedBy") UUID performedBy,
+            @Param("actionTypes") String[] actionTypes,
+            @Param("sortDirection") String sortDirection,
+            @Param("limit") int limit,
+            @Param("offset") int offset
+    );
+
+    // Count number of audit entries for a specific user
+    @Query("""
+        SELECT COUNT(*) FROM user_audit_log
+        WHERE (:userId IS NULL OR user_id = :userId)
+            AND (:actionTypes IS NULL OR action_type::text = ANY(:actionTypes))
+            AND (:performedBy IS NULL OR performed_by = :performedBy)
+    """)
+    Mono<Long> countUserHistoryWithFilters(
+            @Param("userId") UUID userId,
+            @Param("performedBy") UUID performedBy,
+            @Param("actionTypes") String[] actionTypes
+    );
+
 }

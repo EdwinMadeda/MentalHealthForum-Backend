@@ -7,7 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
-import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AdminAuditService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.UserAuditService;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -20,11 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
-
-import static com.fasterxml.jackson.databind.type.LogicalType.Map;
 
 @RestController
 @RequestMapping("/api/admin/users")
@@ -37,7 +33,7 @@ public class AdminUserController {
     private final AdminUserService adminUserService;
     private final AppUserService appUserService;
     private final AdminInvitationService adminInvitationService;
-    private final AdminAuditService adminAuditService;
+    private final UserAuditService userAuditService;
     private final AccountPurgeSchedulerService accountPurgeSchedulerService;
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
@@ -45,13 +41,13 @@ public class AdminUserController {
             AdminUserService adminUserService,
             AppUserService appUserService,
             AdminInvitationService adminInvitationService,
-            AdminAuditService adminAuditService,
+            UserAuditService userAuditService,
             AccountPurgeSchedulerService accountPurgeSchedulerService,
             JwtClaimsExtractor jwtClaimsExtractor) {
         this.adminUserService = adminUserService;
         this.appUserService = appUserService;
         this.adminInvitationService = adminInvitationService;
-        this.adminAuditService = adminAuditService;
+        this.userAuditService = userAuditService;
         this.accountPurgeSchedulerService = accountPurgeSchedulerService;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
@@ -280,7 +276,7 @@ public class AdminUserController {
 
     @GetMapping("/audit/reasons")
     public Mono<ResponseEntity<StandardSuccessResponse<List<UserAuditReasonDefinitionGroupedDto>>>> getReasonDefinitions(){
-        return adminAuditService.getAllReasonDefinitions()
+        return userAuditService.getAllReasonDefinitions()
                 .map(reasonDefinitions ->  ResponseEntity.ok(
                         new StandardSuccessResponse<>("Reason definitions retrieved successfully", reasonDefinitions)
                 ));
@@ -291,12 +287,34 @@ public class AdminUserController {
     public Mono<ResponseEntity<StandardSuccessResponse<List<UserHistoryEntry>>>> getUserHistory(
             @PathVariable UUID userId){
 
-        return adminAuditService.getUserHistoryList(userId)
+        return userAuditService.getUserHistoryList(userId)
                 .collectList()
                 .map(userAuditReasonDefinitionDto -> ResponseEntity.ok(
                     new StandardSuccessResponse<>("User history retrieved successfully", userAuditReasonDefinitionDto)
                 ));
 
+    }
+
+    @GetMapping("/history")
+    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserHistoryEntry>>>> getUserHistoryPaginated(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false, name = "user_id") @Parameter(name = "user_id") UUID userId,
+            @RequestParam(required = false, name = "performed_by") @Parameter(name = "performed_by") UUID performedBy,
+            @RequestParam(required = false, name = "action_types") @Parameter(name = "action_types", description = "Filter by thread type: CREATED, SYNCED, PROMOTED, DEMOTED, GROUP_CHANGED, ENABLED, DISABLED, INVITE_REISSUED, INVITE_REVOKED") UserAuditAction[] actionTypes,
+            @RequestParam(defaultValue = "created_at", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: created_at") String sortBy,
+            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+    ){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return userAuditService.getUserHistoryPaginated(page, size, userId, performedBy, actionTypes, sortBy, sortDirection, viewerContext)
+                .map(userHistoryEntry -> {
+                    String message = "User history records retrieved successfully.";
+                    StandardSuccessResponse<PaginatedResponse<UserHistoryEntry>> response = new StandardSuccessResponse<>(message, userHistoryEntry);
+                    return ResponseEntity.ok(response);
+                });
     }
 
 }

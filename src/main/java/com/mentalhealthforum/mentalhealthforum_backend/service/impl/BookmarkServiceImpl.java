@@ -16,6 +16,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.BookmarkSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadBookmarkEntity;
@@ -25,6 +26,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadReposito
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadBookmarkRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 
@@ -36,6 +39,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class BookmarkServiceImpl implements BookmarkService {
+
+    private static final Logger log = LoggerFactory.getLogger(BookmarkServiceImpl.class);
 
     private final TransactionalOperator transactionalOperator;
     private final ThreadBookmarkRepository bookmarkRepository;
@@ -96,8 +101,9 @@ public class BookmarkServiceImpl implements BookmarkService {
             ViewerContext viewerContext
     ){
 
-        if(page < 0 || size <= 0){
-            throw new IllegalArgumentException("Invalid pagination parameters");
+        if (page < 0 || size <= 0) {
+            log.error("Invalid pagination parameters: page={}, size={}", page, size);
+            throw new InvalidPaginationException();
         }
 
         int offset = page * size;

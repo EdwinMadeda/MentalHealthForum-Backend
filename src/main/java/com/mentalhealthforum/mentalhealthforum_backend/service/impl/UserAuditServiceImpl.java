@@ -1,5 +1,11 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.UserHistoryFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
@@ -7,6 +13,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditReasonKey;
 
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.UserHistorySortField;
+import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserAuditLogEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserAuditReasonDefinitionEntity;
@@ -38,9 +46,9 @@ import java.util.stream.Collectors;
  * are not logged here.
  */
 @Service
-public class AdminAuditServiceImpl implements AdminAuditService {
+public class UserAuditServiceImpl implements UserAuditService {
 
-    private static final Logger log = LoggerFactory.getLogger(AdminAuditServiceImpl.class);
+    private static final Logger log = LoggerFactory.getLogger(UserAuditServiceImpl.class);
 
     private static final int RECENT_HISTORY_LIMIT = 5;
 
@@ -49,7 +57,7 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     private final AppUserRepository appUserRepository;
 
 
-    public AdminAuditServiceImpl(
+    public UserAuditServiceImpl(
             UserAuditLogRepository auditLogRepository,
             UserAuditReasonDefinitionRepository auditReasonDefinitionRepository,
             AppUserRepository appUserRepository) {
@@ -220,6 +228,16 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     // HISTORY RETRIEVAL
     // ============================================================
 
+    // Retrieves the most recent N audit history entries for a user.
+    @Override
+    public Flux<UserHistoryEntry> getRecentUserHistory(UUID userId){
+        return auditLogRepository.findRecentByUserId(userId, RECENT_HISTORY_LIMIT)
+                .collectList()
+                .flatMapMany(records -> enrichedHistoryWithBatchData(records)
+                        .flatMapMany(enriched -> Flux.fromIterable(enriched.entries))
+                );
+    }
+
     // Retrieves the full audit history for a user, ordered newest first.
     @Override
     public Flux<UserHistoryEntry> getUserHistoryList(UUID userId){
@@ -229,14 +247,110 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                         .flatMapMany(enriched -> Flux.fromIterable(enriched.entries)));
     }
 
-    // Retrieves the most recent N audit history entries for a user.
     @Override
-    public Flux<UserHistoryEntry> getRecentUserHistory(UUID userId){
-        return auditLogRepository.findRecentByUserId(userId, RECENT_HISTORY_LIMIT)
+    public Mono<PaginatedResponse<UserHistoryEntry>> getUserHistoryPaginated(
+            int page,
+            int size,
+            UUID userId,
+            UUID performedBy,
+            UserAuditAction[] actionTypes,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext){
+
+        if (page < 0 || size <= 0) {
+            log.error("Invalid pagination parameters (getUserHistoryPaginated) : page={}, size={}", page, size);
+            throw new InvalidPaginationException();
+        }
+
+        int offset = page * size;
+
+        String [] effectiveActionTypes = (actionTypes == null || actionTypes.length == 0)
+                ? null
+                : Arrays.stream(actionTypes).map(Enum::name).toArray(String[]::new);
+
+        UserHistorySortField sortField = UserHistorySortField.fromString(sortBy);
+        String effectiveSortDirection = sortField.determineSortDirection(sortDirection);
+
+        return auditLogRepository.findByUserIdPaginated(userId, performedBy, effectiveActionTypes, effectiveSortDirection, size, offset)
                 .collectList()
-                .flatMapMany(records -> enrichedHistoryWithBatchData(records)
-                        .flatMapMany(enriched -> Flux.fromIterable(enriched.entries))
-                );
+                .flatMap(records -> {
+                    if(records.isEmpty()){
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                    }
+
+                    return enrichedHistoryWithBatchData(records)
+                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, performedBy, effectiveActionTypes))
+                            .map(tuple -> {
+                                EnrichedHistoryData enriched = tuple.getT1();
+                                long totalCount = tuple.getT2();
+
+                                FilterMetadata<UserHistoryFilterDto> filters = buildUserHistoryFilters(enriched);
+
+                                return new PaginatedResponse<>(
+                                        enriched.entries,
+                                        page,
+                                        size,
+                                        totalCount,
+                                        filters
+                                );
+                            });
+
+                });
+
+
+    }
+
+    @Override
+    public Mono<PaginatedResponse<UserHistoryEntry>> getMyHistoryPaginated(
+            int page,
+            int size,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext){
+
+        if (page < 0 || size <= 0) {
+            log.error("Invalid pagination parameters (getMyHistoryPaginated) : page={}, size={}", page, size);
+            throw new InvalidPaginationException();
+        }
+
+        int offset = page * size;
+
+        UUID userId = UUID.fromString(viewerContext.getUserId());
+
+        UserHistorySortField sortField = UserHistorySortField.fromString(sortBy);
+        String effectiveSortDirection = sortField.determineSortDirection(sortDirection);
+
+        return auditLogRepository.findByUserIdPaginated(userId, null, null, effectiveSortDirection, size, offset)
+                .collectList()
+                .flatMap(records -> {
+                    if(records.isEmpty()){
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                    }
+
+                    return enrichedHistoryWithBatchData(records)
+                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, null, null))
+                            .map(tuple -> {
+                                EnrichedHistoryData enriched = tuple.getT1();
+                                long totalCount = tuple.getT2();
+
+                                // Anonymize for user view
+                                List<UserHistoryEntry> anonymizedEntries = enriched.entries.stream()
+                                            .map(this::anonymizeForUser)
+                                            .toList();
+
+                                return new PaginatedResponse<>(
+                                        anonymizedEntries,
+                                        page,
+                                        size,
+                                        totalCount
+                                        // No filters for user view
+                                );
+                            });
+
+                });
+
+
     }
 
     // ============================================================
@@ -278,6 +392,7 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                     List.of(),
                     List.of(),
                     Map.of(),
+                    Map.of(),
                     Map.of()
             ));
         }
@@ -285,6 +400,13 @@ public class AdminAuditServiceImpl implements AdminAuditService {
         // Collect unique performedBy IDs
         List<UUID> performedByIds = records.stream()
                 .map(UserAuditLogEntity::getPerformedBy)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Collect unique targetUser IDs
+        List<UUID> targetUserIds = records.stream()
+                .map(UserAuditLogEntity::getUserId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
@@ -303,6 +425,13 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                   .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
                   .defaultIfEmpty(new HashMap<>());
 
+        // Batch fetch targetUsers
+        Mono<Map<UUID, UserDetails>> targetUsersMono = targetUserIds.isEmpty()
+                ? Mono.just(Map.of())
+                : appUserRepository.findAppUsersByKeycloakIds(targetUserIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                .defaultIfEmpty(new HashMap<>());
+
         // Batch fetch reasons
         Mono<Map<UUID, UserAuditReasonDefinitionEntity>> reasonsMono = reasonIds.isEmpty()
                 ? Mono.just(Map.of())
@@ -310,16 +439,17 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                   .collectMap(UserAuditReasonDefinitionEntity::getId)
                   .defaultIfEmpty(new HashMap<>());
 
-        return Mono.zip(performedBysMono, reasonsMono)
+        return Mono.zip(performedBysMono, targetUsersMono, reasonsMono)
                 .map(tuple -> {
                     Map<UUID, UserDetails> performedBys = tuple.getT1();
-                    Map<UUID, UserAuditReasonDefinitionEntity> reasons = tuple.getT2();
+                    Map<UUID, UserDetails> targetUsers = tuple.getT2();
+                    Map<UUID, UserAuditReasonDefinitionEntity> reasons = tuple.getT3();
 
                     List<UserHistoryEntry> entries = records.stream()
-                            .map(record -> mapToHistoryEntryWithData(record, performedBys, reasons))
+                            .map(record -> mapToHistoryEntryWithData(record, performedBys, targetUsers, reasons))
                             .toList();
 
-                    return new EnrichedHistoryData(entries, records, performedBys, reasons);
+                    return new EnrichedHistoryData(entries, records, performedBys, targetUsers, reasons);
                 });
 
     }
@@ -332,6 +462,7 @@ public class AdminAuditServiceImpl implements AdminAuditService {
        List<UserHistoryEntry> entries,
        List<UserAuditLogEntity> records,
        Map<UUID, UserDetails> performedBys,
+       Map<UUID, UserDetails> targetUsers,
        Map<UUID, UserAuditReasonDefinitionEntity> reasons
     ){}
 
@@ -343,11 +474,17 @@ public class AdminAuditServiceImpl implements AdminAuditService {
     private UserHistoryEntry mapToHistoryEntryWithData(
             UserAuditLogEntity record,
             Map<UUID, UserDetails> performedBys,
+            Map<UUID, UserDetails> targetUsers,
             Map<UUID, UserAuditReasonDefinitionEntity> reasons) {
 
         // Get performer (or default)
         UserDetails performedBy = record.getPerformedBy() != null
                 ? performedBys.getOrDefault(record.getPerformedBy(), AppUserEntity.defaultUser())
+                : AppUserEntity.defaultUser();
+
+        // Get target user (or default)
+        UserDetails targetUser = record.getUserId() != null
+                ? targetUsers.getOrDefault(record.getUserId(), AppUserEntity.defaultUser())
                 : AppUserEntity.defaultUser();
 
         // Get reason definition (or null)
@@ -363,11 +500,128 @@ public class AdminAuditServiceImpl implements AdminAuditService {
                 record.getNewValue(),
                 record.getPerformedBy(),
                 performedBy.getDisplayName(),
+                performedBy.getAvatarUrl(),
+                record.getUserId(),
+                targetUser.getDisplayName(),
+                targetUser.getAvatarUrl(),
                 suggestedReason,
                 record.getCustomReason(),
                 record.getCreatedAt()
         );
 
+    }
+
+    private FilterMetadata<UserHistoryFilterDto> buildUserHistoryFilters(EnrichedHistoryData data){
+        // Build action type options
+        Map<UserAuditAction, Long> actionCounts = data.records().stream()
+                .collect(Collectors.groupingBy(
+                        UserAuditLogEntity::getActionType,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> actionOptions = actionCounts.entrySet().stream()
+                .map(entry -> new FilterOption(
+                        entry.getKey().getDisplayName(),
+                        entry.getKey().name(),
+                        entry.getValue()
+                ))
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build target user options (filter nulls)
+        Map<UUID, Long> targetUserCounts = data.records().stream()
+                .filter(record -> record.getUserId() != null)
+                .collect(Collectors.groupingBy(
+                        UserAuditLogEntity::getUserId,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> targetUserOptions = data.targetUsers().entrySet().stream()
+                .map(entry -> {
+                    UUID targetUserId = entry.getKey();
+                    UserDetails targetUserDetails = entry.getValue();
+                    long count = targetUserCounts.getOrDefault(targetUserId, 0L);
+
+                    return new FilterOption(
+                            targetUserId,
+                            targetUserDetails.getDisplayName(),
+                            targetUserId.toString(),
+                            targetUserDetails.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build performedBy options (filter nulls)
+        Map<UUID, Long> performerCounts = data.records().stream()
+                .filter(record -> record.getPerformedBy() != null)
+                .collect(Collectors.groupingBy(
+                        UserAuditLogEntity::getPerformedBy,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> performedByOptions = data.performedBys().entrySet().stream()
+                .map(entry -> {
+                    UUID performedById = entry.getKey();
+                    UserDetails performedByDetails = entry.getValue();
+                    long count = performerCounts.getOrDefault(performedById, 0L);
+
+                    return new FilterOption(
+                            performedById,
+                            performedByDetails.getDisplayName(),
+                            performedById.toString(),
+                            performedByDetails.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        UserHistoryFilterDto userHistoryFilters = UserHistoryFilterDto.builder()
+                .auditActions(actionOptions)
+                .performedBys(performedByOptions)
+                .targetUsers(targetUserOptions)
+                .build();
+
+        return FilterMetadata.<UserHistoryFilterDto>builder()
+                .filters(userHistoryFilters)
+                .sortOptions(getUserHistorySortOptions())
+                .build();
+
+    }
+
+    /**
+     * Anonymizes a history entry for user self-view.
+     * <p>Hides:
+     * <ul>
+     *   <li>Performer identity (ID, name, avatar)</li>
+     *   <li>Custom reason (could contain internal notes)</li>
+     * </ul>
+     */
+    private UserHistoryEntry anonymizeForUser(UserHistoryEntry entry){
+        return new UserHistoryEntry(
+                entry.action(),
+                entry.oldValue(),
+                entry.newValue(),
+                null,               //  Hide performedById
+                "Admin",                        //  Anonymize
+                null,                           //  Hide avatar
+                entry.targetUserId(),
+                entry.targetUserDisplayName(),
+                entry.targetUserAvatarUrl(),
+                entry.suggestedReason(),
+                null,              // Hide customReason
+                entry.timeStamp()
+        );
+    }
+
+
+    private List<SortOption> getUserHistorySortOptions(){
+        return Arrays.stream(
+                UserHistorySortField.values())
+                .map(UserHistorySortField::toSortOption)
+                .toList();
     }
 
 

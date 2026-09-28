@@ -25,9 +25,18 @@ public record UserHistoryEntry(
         UserAuditAction action,                 // PROMOTION, DEMOTION, etc
         UserAuditSnapshot oldValue,             // Raw value (e.g., "/members/new")
         UserAuditSnapshot newValue,             // Raw value (e.g., "/moderators/peer")
+
+        // Who performed the action
         UUID performedById,                     // Keycloak ID of performer (for linking)
-        String performedByDisplayName,          // Display name of performer
+        String performedByDisplayName,
+        String performedByAvatar,
+
+        // Who was affected (target user)
+        UUID targetUserId,
+        String targetUserDisplayName,
+        String targetUserAvatarUrl,
+
         UserAuditReasonDefinitionDto suggestedReason,  // From definitions
-        String customReason,                    // Admin's own reason
+        String customReason,                           // Admin's own reason
         Instant timeStamp
 ) {}

@@ -1,10 +1,11 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditReasonKey;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.UserType;
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserAuditLogEntity;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -12,7 +13,7 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.UUID;
 
-public interface AdminAuditService {
+public interface UserAuditService {
     // Logs an admin-initiated action for a user.
     Mono<UserAuditLogEntity> logAction(
             UUID userId,
@@ -82,6 +83,25 @@ public interface AdminAuditService {
 
     // Retrieves the most recent N audit history entries for a user.
     Flux<UserHistoryEntry> getRecentUserHistory(UUID userId);
+
+    // Retrieves paginated audit history for users (admin-view)
+    Mono<PaginatedResponse<UserHistoryEntry>> getUserHistoryPaginated(
+            int page,
+            int size,
+            UUID userId,
+            UUID performedBy,
+            UserAuditAction[] actionTypes,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext);
+
+    // Retrieves paginated audit history for the current user (self-view)
+    Mono<PaginatedResponse<UserHistoryEntry>> getMyHistoryPaginated(
+            int page,
+            int size,
+            String sortBy,
+            String sortDirection,
+            ViewerContext viewerContext);
 
     //  Retrieves active reason definitions for a specific action type.
     Flux<UserAuditReasonDefinitionDto> getReasonDefinition(UserAuditAction actionType);

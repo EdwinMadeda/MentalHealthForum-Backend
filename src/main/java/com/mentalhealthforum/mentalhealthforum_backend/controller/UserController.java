@@ -2,13 +2,16 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller;
 
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserHistoryEntry;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InsufficientPermissionException;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserActivityService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AppUserServiceImpl;
+import com.mentalhealthforum.mentalhealthforum_backend.service.impl.UserAuditService;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.DateTimeUtils;
 import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
@@ -36,12 +39,14 @@ public class UserController {
     private final UserService userService;
     private final AppUserService appUserService;
     private final UserActivityService userActivityService;
+    private final UserAuditService userAuditService;
     private final JwtClaimsExtractor jwtClaimsExtractor;
 
-    public UserController(UserService userService, AppUserServiceImpl appUserService, UserActivityService userActivityService, JwtClaimsExtractor jwtClaimsExtractor) {
+    public UserController(UserService userService, AppUserServiceImpl appUserService, UserActivityService userActivityService, UserAuditService userAuditService, JwtClaimsExtractor jwtClaimsExtractor) {
         this.userService = userService;
         this.appUserService = appUserService;
         this.userActivityService = userActivityService;
+        this.userAuditService = userAuditService;
         this.jwtClaimsExtractor = jwtClaimsExtractor;
     }
 
@@ -208,4 +213,25 @@ public class UserController {
                 ));
 
     }
+
+
+    @GetMapping("/history")
+    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserHistoryEntry>>>> getMyHistory(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "created_at", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: created_at") String sortBy,
+            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+    ){
+
+        ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
+
+        return userAuditService.getMyHistoryPaginated(page, size, sortBy, sortDirection, viewerContext)
+                .map(userHistoryEntry -> {
+                    String message = "Your history records retrieved successfully.";
+                    StandardSuccessResponse<PaginatedResponse<UserHistoryEntry>> response = new StandardSuccessResponse<>(message, userHistoryEntry);
+                    return ResponseEntity.ok(response);
+                });
+    }
+
 }

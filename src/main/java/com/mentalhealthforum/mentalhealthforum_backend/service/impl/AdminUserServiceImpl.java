@@ -119,7 +119,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     private final AdminInvitationRepository adminInvitationRepository;
     private final AppUserRepository appUserRepository;
     private final AppUserService appUserService;
-    private final AdminAuditService adminAuditService;
+    private final UserAuditService userAuditService;
     private final UserAuditReasonDefinitionRepository auditReasonDefinitionRepository;
 
     // Internal context carrier for the admin user assembly line.
@@ -143,7 +143,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             AdminInvitationService adminInvitationService,
             AdminInvitationRepository adminInvitationRepository,
             AppUserRepository appUserRepository, AppUserService appUserService,
-            AdminAuditService adminAuditService,
+            UserAuditService userAuditService,
             UserAuditReasonDefinitionRepository auditReasonDefinitionRepository) {
         this.adminManager = adminManager;
         this.keycloakUserDtoMapper = keycloakUserDtoMapper;
@@ -153,7 +153,7 @@ public class AdminUserServiceImpl implements AdminUserService {
         this.adminInvitationRepository = adminInvitationRepository;
         this.appUserRepository = appUserRepository;
         this.appUserService = appUserService;
-        this.adminAuditService = adminAuditService;
+        this.userAuditService = userAuditService;
         this.auditReasonDefinitionRepository = auditReasonDefinitionRepository;
     }
 
@@ -246,7 +246,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                 .flatMap(adminCreateUserResponse -> {
                     UUID userId = UUID.fromString(adminCreateUserResponse.userId());
                     UUID performedBy =  UUID.fromString(viewerContext.getUserId());
-                    return adminAuditService.logUserCreated(
+                    return userAuditService.logUserCreated(
                             userId,
                             request.group(),
                            performedBy
@@ -255,7 +255,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                 .flatMap(adminCreateUserResponse ->
                                 getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
                                     .flatMap(availableGroups ->
-                                            adminAuditService.getRecentUserHistory(UUID.fromString(adminCreateUserResponse.userId()))
+                                            userAuditService.getRecentUserHistory(UUID.fromString(adminCreateUserResponse.userId()))
                                                     .collectList()
                                                     .map(history ->
                                                             new OperationResponse<>(
@@ -401,7 +401,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 newGroup = null;
                             }
 
-                            return adminAuditService.logInviteReissued(
+                            return userAuditService.logInviteReissued(
                                     userUUID,
                                     oldGroup,
                                     newGroup,
@@ -413,7 +413,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                         .flatMap(adminCreateUserResponse ->
                                 getAvailableGroups(GroupContext.REISSUE, adminCreateUserResponse.userId(), viewerContext)
                                         .flatMap(availableGroups ->
-                                                adminAuditService.getRecentUserHistory(userUUID)
+                                                userAuditService.getRecentUserHistory(userUUID)
                                                         .collectList()
                                                         .map(history ->
                                                                 new OperationResponse<>(
@@ -484,7 +484,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                             .flatMap(pendingAdminInviteDto ->
                                     getAvailableGroups(GroupContext.PENDING, pendingAdminInviteDto.user_id().toString(), viewerContext)
                                             .flatMap(availableGroups ->
-                                                    adminAuditService.getRecentUserHistory(pendingAdminInviteDto.user_id())
+                                                    userAuditService.getRecentUserHistory(pendingAdminInviteDto.user_id())
                                                             .collectList()
                                                             .map(history ->
                                                                     new OperationResponse<>(
@@ -552,7 +552,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                             .flatMap(userResponse ->
                                                     getAvailableGroups(GroupContext.SYNCED, userResponse.getUserId().toString(), viewerContext)
                                                             .flatMap(availableGroups ->
-                                                                    adminAuditService.getRecentUserHistory(userResponse.getUserId())
+                                                                    userAuditService.getRecentUserHistory(userResponse.getUserId())
                                                                             .collectList()
                                                                             .map(history ->
                                                                                     new OperationResponse<>(
@@ -614,7 +614,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                 .subscribeOn(Schedulers.boundedElastic())
 
                 )
-                .then(adminAuditService.logInviteRevoked(
+                .then(userAuditService.logInviteRevoked(
                                 userUUID,
                                 UUID.fromString(viewerContext.getUserId()),
                                 request.reasonDefinitionId(),
@@ -658,7 +658,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                             .flatMap(userResponse ->
                                  getAvailableGroups(GroupContext.SYNCED, userId, viewerContext)
                                         .flatMap(availableGroups ->
-                                                adminAuditService.getRecentUserHistory(userUUID)
+                                                userAuditService.getRecentUserHistory(userUUID)
                                                         .collectList()
                                                         .map(history ->
                                                             new AdminUserDetailsDto<>(
@@ -697,7 +697,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
                                 return getAvailableGroups(GroupContext.PENDING, userId, viewerContext)
                                             .flatMap(availableGroups ->
-                                                    adminAuditService.getUserHistoryList(userUUID)
+                                                    userAuditService.getUserHistoryList(userUUID)
                                                             .collectList()
                                                             .map(history ->
                                                                 new AdminUserDetailsDto<>(
@@ -1583,7 +1583,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             if(isGroupChanged){
 
                 auditLogging = auditLogging.then(
-                        adminAuditService.logGroupChange(
+                        userAuditService.logGroupChange(
                                 logUserId,
                                 context,
                                 GroupPath.getPrimaryGroup(currentGroups),
@@ -1603,7 +1603,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             if(isEnabledChanged){
 
                 auditLogging = auditLogging.then(
-                        adminAuditService.logEnabledChange(
+                        userAuditService.logEnabledChange(
                                 logUserId,
                                 originalEnabled,
                                 enabledChange.isEnabled(),

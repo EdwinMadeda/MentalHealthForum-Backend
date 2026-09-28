@@ -49,7 +49,7 @@ public class AppUserServiceImpl implements AppUserService {
     private final UserConnectRepository userConnectRepository;
     private final AdminInvitationService adminInvitationService;
     private final AdminInvitationRepository adminInvitationRepository;
-    private final AdminAuditService adminAuditService;
+    private final UserAuditService userAuditService;
     private final VerificationTokenRepository verificationTokenRepository;
     private final WebClient webClient;
     private final String userInfoUri;
@@ -66,7 +66,7 @@ public class AppUserServiceImpl implements AppUserService {
             UserConnectRepository userConnectRepository,
             AdminInvitationService adminInvitationService,
             AdminInvitationRepository adminInvitationRepository,
-            AdminAuditService adminAuditService,
+            UserAuditService userAuditService,
             VerificationTokenRepository verificationTokenRepository) {
         this.appUserRepository = appUserRepository;
         this.adminManager = adminManager;
@@ -75,7 +75,7 @@ public class AppUserServiceImpl implements AppUserService {
         this.userConnectRepository = userConnectRepository;
         this.adminInvitationService = adminInvitationService;
         this.adminInvitationRepository = adminInvitationRepository;
-        this.adminAuditService = adminAuditService;
+        this.userAuditService = userAuditService;
         this.verificationTokenRepository = verificationTokenRepository;
 
         String authServerUrl = keycloakProperties.getAuthServerUrl();
@@ -132,7 +132,7 @@ public class AppUserServiceImpl implements AppUserService {
                                                         .then(appUserRepository.save(userDetails))
                                                         // Then log sync (after save)
                                                         .flatMap(savedUser ->
-                                                            adminAuditService.logSynced(
+                                                            userAuditService.logSynced(
                                                                     savedUser.getKeycloakId(),
                                                                     GroupPath.getPrimaryGroup(savedUser.getGroups()),
                                                                     null // performedBy = null (system action)
