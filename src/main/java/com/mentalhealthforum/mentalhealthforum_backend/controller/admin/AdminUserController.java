@@ -3,12 +3,18 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller.admin;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PendingInviteSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.AccountPurgeSchedulerService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.impl.UserAuditService;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.Explode;
+import io.swagger.v3.oas.annotations.enums.ParameterStyle;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -120,26 +126,27 @@ public class AdminUserController {
                 });
     }
 
+
     @GetMapping("/pending-invites")
-    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<PendingAdminInviteDto>>>> getPendingInvites(
+    public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<PendingAdminInviteResponse>>>> getPendingInvites(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String[] groups,
-            @RequestParam(required = false, name = "invited_by_user_id") @Parameter(name = "invited_by_user_id") UUID invitedByUserId,
-            @RequestParam(required = false, name = "onboarding_stage") @Parameter(description = "Filter by stage: AWAITING_VERIFICATION, AWAITING_PASSWORD_RESET, AWAITING_PROFILE_COMPLETION") OnboardingStage onboardingStage,
-            @RequestParam(required = false, name = "search") @Parameter(name = "search") String search,
-            @RequestParam(defaultValue = "date_created", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: username, email, date_created") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
-       ){
-
-        return  adminInvitationService.getPendingInvites(page, size, groups, invitedByUserId, search, onboardingStage, sortBy, sortDirection)
+            @RequestParam(required = false) GroupPath[] groups,
+            @RequestParam(required = false, name = "invited_by_user_id") UUID invitedByUserId,
+            @RequestParam(required = false, name = "onboarding_stage") OnboardingStage onboardingStage,
+            @RequestParam(required = false, name = "search") String search,
+            @RequestParam(defaultValue = "DATE_CREATED", name = "sort_by") PendingInviteSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
+    ) {
+        return adminInvitationService.getPendingInvites(page, size, groups, invitedByUserId, search, onboardingStage, sortBy, sortDirection)
                 .map(paginated -> ResponseEntity.ok(
                         new StandardSuccessResponse<>("Pending invitations retrieved.", paginated)
                 ));
     }
 
+
     @GetMapping("/pending-invites/{userId}")
-    public Mono<ResponseEntity<StandardSuccessResponse<AdminUserDetailsDto<PendingAdminInviteDto>>>> getPendingInviteDetails(
+    public Mono<ResponseEntity<StandardSuccessResponse<AdminUserDetailsDto<PendingAdminInviteResponse>>>> getPendingInviteDetails(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId){
 
@@ -152,7 +159,7 @@ public class AdminUserController {
     }
 
     @PatchMapping("/pending-invites/{userId}")
-    public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<PendingAdminInviteDto>>>> updatePendingInvite(
+    public Mono<ResponseEntity<StandardSuccessResponse<OperationResponse<PendingAdminInviteResponse>>>> updatePendingInvite(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID userId,
             @Valid @RequestBody UpdatePendingAdminInviteRequest updatePendingAdminInviteRequest){
@@ -162,7 +169,7 @@ public class AdminUserController {
         return adminUserService.updatePendingAdminInvite(userId.toString(), updatePendingAdminInviteRequest, viewerContext)
                 .map(operationResponse -> {
 
-                    StandardSuccessResponse<OperationResponse<PendingAdminInviteDto>> successResponse =
+                    StandardSuccessResponse<OperationResponse<PendingAdminInviteResponse>> successResponse =
                             new StandardSuccessResponse<>("Pending admin Invite updated successfully", operationResponse);
 
                     return ResponseEntity.ok(successResponse);

@@ -435,7 +435,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * Used for users still in the onboarding lobby (not yet synced to app_users).
      */
     @Override
-    public Mono<OperationResponse<PendingAdminInviteDto>> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext) {
+    public Mono<OperationResponse<PendingAdminInviteResponse>> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
 
         return appUserRepository.existsByKeycloakId(userUUID)
@@ -481,14 +481,14 @@ public class AdminUserServiceImpl implements AdminUserService {
                                         );
                             })
                             .flatMap(adminInvitationService::updateInvitation)
-                            .flatMap(pendingAdminInviteDto ->
-                                    getAvailableGroups(GroupContext.PENDING, pendingAdminInviteDto.user_id().toString(), viewerContext)
+                            .flatMap(pendingAdminInviteResponse ->
+                                    getAvailableGroups(GroupContext.PENDING, pendingAdminInviteResponse.getUserId().toString(), viewerContext)
                                             .flatMap(availableGroups ->
-                                                    userAuditService.getRecentUserHistory(pendingAdminInviteDto.user_id())
+                                                    userAuditService.getRecentUserHistory(pendingAdminInviteResponse.getUserId())
                                                             .collectList()
                                                             .map(history ->
                                                                     new OperationResponse<>(
-                                                                            pendingAdminInviteDto,
+                                                                            pendingAdminInviteResponse,
                                                                             availableGroups,
                                                                             GroupContext.PENDING,
                                                                             "Pending user updated. Continue managing their pending status.",
@@ -678,7 +678,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     @Override
-    public Mono<AdminUserDetailsDto<PendingAdminInviteDto>> getPendingInviteDetails(String userId, ViewerContext viewerContext) {
+    public Mono<AdminUserDetailsDto<PendingAdminInviteResponse>> getPendingInviteDetails(String userId, ViewerContext viewerContext) {
         UUID userUUID = UUID.fromString(userId);
         return appUserRepository.existsByKeycloakId(userUUID)
                 .flatMap(inAppUsers -> {
@@ -690,7 +690,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                     }
 
                     return  adminInvitationService.getPendingInvite(userId)
-                            .flatMap(pendingAdminInviteDto -> {
+                            .flatMap(pendingAdminInviteResponse -> {
                                 String currentGroupPath = adminManager.getUserPrimaryGroupPath(userId);
 
                                 GroupPath currentGroup = GroupPath.fromPath(currentGroupPath);
@@ -702,7 +702,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                                                             .map(history ->
                                                                 new AdminUserDetailsDto<>(
                                                                         UserType.PENDING,
-                                                                        pendingAdminInviteDto,
+                                                                        pendingAdminInviteResponse,
                                                                         currentGroup,
                                                                         availableGroups,
                                                                         history,

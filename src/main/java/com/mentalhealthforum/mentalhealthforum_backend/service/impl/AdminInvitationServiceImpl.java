@@ -1,10 +1,14 @@
 package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.PendingInviteFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.PendingAdminInviteDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.PendingAdminInviteResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PendingInviteSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
@@ -21,12 +25,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.setIfChanged;
 
@@ -70,7 +75,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
     }
 
     @Override
-    public Mono<PendingAdminInviteDto> updateInvitation(KeycloakUserDto keycloakUserDto){
+    public Mono<PendingAdminInviteResponse> updateInvitation(KeycloakUserDto keycloakUserDto){
         List<String> groups = adminManager.getUserGroups(keycloakUserDto.userId());
         return adminInvitationRepository.findByKeycloakId(UUID.fromString(keycloakUserDto.userId()))
                 .flatMap(existing -> {
@@ -85,14 +90,14 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                     existing.setGroups(new HashSet<>(groups));
 
                     return adminInvitationRepository.save(existing)
-                            .flatMap(this::toPendingInviteDto);
+                            .flatMap(this::enrichSingleInviteWithData);
                 })
                 // If they aren't in the lobby, we just return empty so the chain continues
                 .switchIfEmpty(Mono.empty());
     }
 
     @Override
-    public Mono<PendingAdminInviteDto> syncPendingInviteFromKeycloak(String userId){
+    public Mono<PendingAdminInviteResponse> syncPendingInviteFromKeycloak(String userId){
         return adminInvitationRepository.findByKeycloakId(UUID.fromString(userId))
                 .switchIfEmpty(Mono.error(new UserDoesNotExistException(
                         "User not found in pending invitations."
@@ -170,7 +175,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
 
                                 })
                 )
-                .flatMap(this::toPendingInviteDto);
+                .flatMap(this::enrichSingleInviteWithData);
     }
 
     @Override
@@ -200,17 +205,19 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
     }
 
     @Override
-    public Mono<PendingAdminInviteDto> getPendingInvite(String userId){
+    public Mono<PendingAdminInviteResponse> getPendingInvite(String userId){
         return syncPendingInviteFromKeycloak(userId);
     }
 
     @Override
-    public Mono<PaginatedResponse<PendingAdminInviteDto>> getPendingInvites(
+    public Mono<PaginatedResponse<PendingAdminInviteResponse>> getPendingInvites(
             int page,
             int size,
-            String[] groups,
+            GroupPath[] groups,
             UUID invitedByUserId,
-            String search, OnboardingStage onboardingStage, String sortBy,
+            String search,
+            OnboardingStage onboardingStage,
+            PendingInviteSortField sortBy,
             String sortDirection) {
 
         if (page < 0 || size <= 0) {
@@ -220,45 +227,50 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
 
         int offset = page * size;
 
-        String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
+        // Convert GroupPath[] to String [] (paths)
+        String[] effectiveGroups = (groups == null || groups.length == 0)
+                ? null
+                : Arrays.stream(groups)
+                  .map(GroupPath::getPath)
+                  .toArray(String[]::new);
+
         String effectiveOnboardingStage = onboardingStage != null ? onboardingStage.name() : null;
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
-        PendingInviteSortField sortByField = PendingInviteSortField.fromString(sortBy);
+
+        PendingInviteSortField sortByField = sortBy != null ? sortBy : PendingInviteSortField.DEFAULT;
         String normalizedSortDirection = sortByField.determineSortDirection(sortDirection);
 
-        Flux<PendingAdminInviteDto> pendingInviteFlux = adminInvitationRepository.findPendingInvitesPaginated(
-                invitedByUserId,
-                effectiveGroups,
-                effectiveOnboardingStage,
-                effectiveSearch,
-                sortByField.getValue(),
-                normalizedSortDirection,
-                size,
-                offset
-        );
-
-        Mono<Long> totalCount = adminInvitationRepository.countPendingInvitesWithFilters(
-                invitedByUserId,
-                effectiveGroups,
-                effectiveOnboardingStage,
-                effectiveSearch
-        );
-
-
-        return Mono.zip(pendingInviteFlux.collectList(), totalCount)
-                .map(tuple -> {
-                    List<PendingAdminInviteDto> adminInvites = tuple.getT1();
-                    Long total = tuple.getT2();
-
-                    if(adminInvites.isEmpty()){
-                        return new PaginatedResponse<>(List.of(), page, size, 0L);
+        return adminInvitationRepository.findPendingInvitesPaginated(
+                        invitedByUserId,
+                        effectiveGroups,
+                        effectiveOnboardingStage,
+                        effectiveSearch,
+                        sortByField.getValue(),
+                        normalizedSortDirection,
+                        size,
+                        offset
+                )
+                .collectList()
+                .flatMap(records -> {
+                    if(records.isEmpty()){
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
                     }
 
-                    FilterMetadata<Object> filters = FilterMetadata.builder()
-                            .sortOptions(getPendingInviteSortOptions())
-                            .build();
+                    return enrichPendingInvitesWithBatchData(records)
+                            .zipWith(adminInvitationRepository.countPendingInvitesWithFilters(
+                                    invitedByUserId,
+                                    effectiveGroups,
+                                    effectiveOnboardingStage,
+                                    effectiveSearch
+                            ))
+                            .map(tuple -> {
+                                EnrichedPendingInviteData enriched = tuple.getT1();
+                                long totalCount = tuple.getT2();
 
-                    return new PaginatedResponse<>(adminInvites, page, size, total, filters);
+                                FilterMetadata<PendingInviteFilterDto> filters = buildPendingInviteFilters(enriched);
+
+                                return new PaginatedResponse<>(enriched.invites, page, size, totalCount, filters);
+                            });
                 });
 
     }
@@ -294,48 +306,174 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 });
     }
 
-    private List<SortOption> getPendingInviteSortOptions(){
-        return Arrays.stream(PendingInviteSortField.values())
-                .map(PendingInviteSortField::toSortOption)
-                .toList();
-    }
-
-    private Mono<PendingAdminInviteDto> toPendingInviteDto(AdminInvitationEntity entity) {
+    private Mono<PendingAdminInviteResponse> enrichSingleInviteWithData(AdminInvitationEntity entity){
         if (entity == null) {
             return Mono.empty();
         }
 
         return appUserRepository.findAppUserByKeycloakId(entity.getInvitedBy().toString())
                 .map(AppUserEntity::toUserDetails)
-                .map(userDetails -> {
-                    String invitedByDisplayName = userDetails.getDisplayName();
-                    String invitedByAvatarUrl = userDetails.getAvatarUrl();
+                .map(invitedBy -> mapResponseWithData(entity, invitedBy));
 
-
-                    return new PendingAdminInviteDto(
-                            entity.getKeycloakId(),
-                            entity.getUsername(),
-                            entity.getFirstName(),
-                            entity.getLastName(),
-                            entity.getEmail(),
-
-                            entity.getGroups() != null ? entity.getGroups().toArray(new String[0]) : new String[0],
-                            entity.getIsEnabled() != null ? entity.getIsEnabled() : false,
-                            entity.getIsEmailVerified(),
-
-                            entity.getInvitedBy(),
-                            invitedByDisplayName,
-                            invitedByAvatarUrl,
-
-                            entity.getDateCreated(),
-                            entity.getUpdatedAt(),
-                            entity.getCurrentStage(),
-
-                            entity.getExpiresAt()
-                    );
-                });
     }
 
+    private Mono<EnrichedPendingInviteData> enrichPendingInvitesWithBatchData(
+            List<AdminInvitationEntity> records
+    ) {
+        if (records.isEmpty()) {
+            return Mono.just(new EnrichedPendingInviteData(
+                    List.of(),
+                    List.of(),
+                    Map.of()
+            ));
+        }
+
+        // Extract unique inviter IDs
+        List<UUID> inviterIds = records.stream()
+                .map(AdminInvitationEntity::getInvitedBy)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch inviters
+        Mono<Map<UUID, UserDetails>> invitersMono = inviterIds.isEmpty()
+                ? Mono.just(Map.of())
+                : appUserRepository.findAppUsersByKeycloakIds(inviterIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                .defaultIfEmpty(new HashMap<>());
+
+        return invitersMono.map(inviters -> {
+
+            List<PendingAdminInviteResponse> invites = records.stream()
+                    .map(record -> {
+                        UserDetails invitedBy = record.getInvitedBy() != null
+                                ? inviters.getOrDefault(record.getInvitedBy(), AppUserEntity.defaultUser())
+                                : AppUserEntity.defaultUser();
+
+                        return mapResponseWithData(record, invitedBy);
+                    })
+                    .toList();
+
+
+            return new EnrichedPendingInviteData(invites, records, inviters);
+        });
+    }
+
+    private PendingAdminInviteResponse mapResponseWithData(
+            AdminInvitationEntity entity,
+            UserDetails invitedBy
+    ){
+
+        boolean isEnabled = entity.getIsEnabled() != null ? entity.getIsEnabled() : false;
+        boolean isEmailVerified = entity.getIsEmailVerified() != null ? entity.getIsEmailVerified() : false;
+
+        return PendingAdminInviteResponse.builder()
+                .userId(entity.getKeycloakId())
+                .username(entity.getUsername())
+                .firstName(entity.getFirstName())
+                .lastName(entity.getLastName())
+                .email(entity.getEmail())
+                .groups(entity.getGroupPaths())
+                .isEnabled(isEnabled)
+                .isEmailVerified(isEmailVerified)
+                .invitedBy(entity.getInvitedBy())
+                .invitedByDisplayName(invitedBy.getDisplayName())
+                .invitedByAvatarUrl(invitedBy.getAvatarUrl())
+                .dateCreated(entity.getDateCreated())
+                .updatedAt(entity.getUpdatedAt())
+                .currentStage(entity.getCurrentStage())
+                .expiresAt(entity.getExpiresAt())
+                .isExpired(entity.isExpired())
+                .isEligibleForPurge(entity.isEligibleForPurge())
+                .build();
+
+    }
+
+
+    private record EnrichedPendingInviteData(
+            List<PendingAdminInviteResponse> invites,
+            List<AdminInvitationEntity> records,
+            Map<UUID, UserDetails> inviters
+    ) {}
+
+    private FilterMetadata<PendingInviteFilterDto> buildPendingInviteFilters(
+            EnrichedPendingInviteData data){
+
+        // Build stage options
+        Map<OnboardingStage, Long> stageCounts = data.records().stream()
+                .collect(Collectors.groupingBy(
+                        AdminInvitationEntity::getCurrentStage,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> stageOptions = stageCounts.entrySet().stream()
+                .map(entry -> new FilterOption(
+                        entry.getKey().getDisplayName(),
+                        entry.getKey().name(),
+                        entry.getValue()
+                ))
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build inviter options
+        Map<UUID, Long> inviterCounts = data.records().stream()
+                .filter(record -> record.getInvitedBy() != null)
+                .collect(Collectors.groupingBy(
+                        AdminInvitationEntity::getInvitedBy,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> inviterOptions = data.inviters().entrySet().stream()
+                .map(entry -> {
+                    UUID inviterId = entry.getKey();
+                    UserDetails inviter = entry.getValue();
+                    long count = inviterCounts.getOrDefault(inviterId, 0L);
+                    return new FilterOption(
+                            inviterId,
+                            inviter.getDisplayName(),
+                            inviterId.toString(),
+                            inviter.getAvatarUrl(),
+                            count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        // Build group options
+        Map<GroupPath, Long> groupCounts = data.invites().stream()
+                .flatMap(invite -> Arrays.stream(invite.getGroups()))
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> groupOptions = groupCounts.entrySet().stream()
+                .map(entry -> new FilterOption(
+                        entry.getKey().getDisplayName(),
+                        entry.getKey().name(),
+                        entry.getValue()
+                ))
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        PendingInviteFilterDto filters = PendingInviteFilterDto.builder()
+                .stages(stageOptions)
+                .inviters(inviterOptions)
+                .groups(groupOptions)
+                .build();
+
+        return FilterMetadata.<PendingInviteFilterDto>builder()
+                .filters(filters)
+                .sortOptions(getPendingInviteSortOptions())
+                .build();
+
+    }
+
+    private List<SortOption> getPendingInviteSortOptions(){
+        return Arrays.stream(PendingInviteSortField.values())
+                .map(PendingInviteSortField::toSortOption)
+                .toList();
+    }
 
 }
 

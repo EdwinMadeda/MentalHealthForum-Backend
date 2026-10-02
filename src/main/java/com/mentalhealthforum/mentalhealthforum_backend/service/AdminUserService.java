@@ -13,7 +13,7 @@ public interface AdminUserService {
 
     Mono<OperationResponse<AdminCreateUserResponse>> reissueAdminInvitation(String userId, ReissueInvitationRequest request, ViewerContext viewerContext);
 
-    Mono<OperationResponse<PendingAdminInviteDto>> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext);
+    Mono<OperationResponse<PendingAdminInviteResponse>> updatePendingAdminInvite(String userId, UpdatePendingAdminInviteRequest request, ViewerContext viewerContext);
 
     Mono<OperationResponse<UserResponse>> updateUserAsAdmin(String userId, AdminUpdateUserRequest request, ViewerContext viewerContext);
 
@@ -21,7 +21,7 @@ public interface AdminUserService {
 
     Mono<List<AvailableGroup>> getAvailableGroups(GroupContext context, String userId, ViewerContext viewerContext);
 
-    Mono<AdminUserDetailsDto<UserResponse>> getAdminUserDetails(String s, ViewerContext viewerContext);
+    Mono<AdminUserDetailsDto<UserResponse>> getAdminUserDetails(String userId, ViewerContext viewerContext);
 
-    Mono<AdminUserDetailsDto<PendingAdminInviteDto>> getPendingInviteDetails(String s, ViewerContext viewerContext);
+    Mono<AdminUserDetailsDto<PendingAdminInviteResponse>> getPendingInviteDetails(String userId, ViewerContext viewerContext);
 }

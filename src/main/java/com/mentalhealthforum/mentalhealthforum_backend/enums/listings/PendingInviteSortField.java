@@ -19,16 +19,18 @@ public enum PendingInviteSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final PendingInviteSortField DEFAULT = PendingInviteSortField.DATE_CREATED;
+
     public static PendingInviteSortField fromString(String value) {
         if(value == null){
-            return DATE_CREATED;  // Default to date created
+            return DEFAULT;  // Default to date created
         }
         for(PendingInviteSortField field : PendingInviteSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  DATE_CREATED;
+        return  DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection){
@@ -43,6 +45,7 @@ public enum PendingInviteSortField {
                 .value(this.value)
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

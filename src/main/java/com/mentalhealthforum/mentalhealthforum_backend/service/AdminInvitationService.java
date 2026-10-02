@@ -2,8 +2,10 @@ package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.PendingAdminInviteDto;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.PendingAdminInviteResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PendingInviteSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AdminInvitationEntity;
 import reactor.core.publisher.Mono;
 
@@ -13,9 +15,9 @@ import java.util.UUID;
 public interface AdminInvitationService {
     Mono<AdminInvitationEntity> createInvitation(KeycloakUserDto keycloakUserDto, String invitedById);
 
-    Mono<PendingAdminInviteDto> updateInvitation(KeycloakUserDto keycloakUserDto);
+    Mono<PendingAdminInviteResponse> updateInvitation(KeycloakUserDto keycloakUserDto);
 
-    Mono<PendingAdminInviteDto> syncPendingInviteFromKeycloak(String userId);
+    Mono<PendingAdminInviteResponse> syncPendingInviteFromKeycloak(String userId);
 
     Mono<Void> processVerificationSuccess(String userId);
 
@@ -24,16 +26,16 @@ public interface AdminInvitationService {
     Mono<Void> updateOnboardingStage(String userId, OnboardingStage onboardingStage);
 
 
-    Mono<PendingAdminInviteDto> getPendingInvite(String userId);
+    Mono<PendingAdminInviteResponse> getPendingInvite(String userId);
 
-    Mono<PaginatedResponse<PendingAdminInviteDto>> getPendingInvites(
+    Mono<PaginatedResponse<PendingAdminInviteResponse>> getPendingInvites(
             int page,
             int size,
-            String[] groups,
+            GroupPath[] groups,
             UUID invitedByUserId,
             String search,
             OnboardingStage onboardingStage,
-            String sortBy,
+            PendingInviteSortField sortBy,
             String sortDirection
     );
 

@@ -1,7 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.InviteExpirable;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -11,12 +11,14 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
 
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -24,7 +26,7 @@ import java.util.UUID;
 @Getter
 @NoArgsConstructor
 @Table(name = "admin_invitations")
-public class AdminInvitationEntity implements InviteExpirable {
+public class AdminInvitationEntity {
     @Id
     @Column("id")
     private UUID id; // DB-generated UUID Primary Key
@@ -84,9 +86,47 @@ public class AdminInvitationEntity implements InviteExpirable {
     @Column("expires_at")
     private Instant expiresAt;
 
-    // Implement interface methods
+    // Checks if this invitation has passed its expiry time.
+    @Transient
+    public boolean isExpired(){
+        Instant now = Instant.now();
+        return this.expiresAt != null && this.expiresAt.isBefore(now);
+    }
 
+    // Checks if this invitation should be purged.
+    @Transient
+    public boolean isEligibleForPurge(){
 
+        Instant now = Instant.now();
+        Instant graceThreshold = now.minus(AppConstants.INVITE_PURGE_GRACE_HOURS, ChronoUnit.HOURS);
+
+        // Must be expired
+        if(this.expiresAt == null || !this.expiresAt.isBefore(graceThreshold)){
+            return false;
+        }
+
+        // Must have verified email
+        if(Boolean.TRUE.equals(this.isEmailVerified)){
+            return false;
+        }
+
+        // Must still be in AWAITING_VERIFICATION stage
+        return this.currentStage == OnboardingStage.AWAITING_VERIFICATION;
+
+    }
+
+    // Returns the groups as an array of GroupPath enums. Converts from stored paths.
+    @Transient
+    public GroupPath[] getGroupPaths() {
+        return  this.groups != null
+                ? this.groups.stream()
+                .map(GroupPath::fromPath)
+                .filter(Objects::nonNull)
+                .toArray(GroupPath[]::new)
+                : new GroupPath[0];
+    }
+
+    // Constructor
     public AdminInvitationEntity(
             String keycloakStringId,
             String email,
@@ -116,26 +156,14 @@ public class AdminInvitationEntity implements InviteExpirable {
         this.expiresAt = this.newExpiryTimestamp();
     }
 
-    @Override
-    public Instant getExpiresAt() {
-        return this.expiresAt;
+    // Calculates a new expiry timestamp from now.
+    private Instant newExpiryTimestamp(){
+        return Instant.now().plus(AppConstants.INVITE_EXPIRY_DAYS, ChronoUnit.DAYS);
     }
-
-    @Override
-    public boolean getIsEmailVerified() {
-        return Boolean.TRUE.equals(this.isEmailVerified);
-    }
-
-    @Override
-    public OnboardingStage getCurrentStage() {
-        return this.currentStage;
-    }
-
 
      // Resets the expiry timestamp to a new window from now.
     public void resetExpiry(){
         this.expiresAt = this.newExpiryTimestamp();
     }
-
 
 }

@@ -1,4 +1,4 @@
-apackage com.mentalhealthforum.mentalhealthforum_backend.enums.listings;
+package com.mentalhealthforum.mentalhealthforum_backend.enums.listings;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import lombok.Getter;

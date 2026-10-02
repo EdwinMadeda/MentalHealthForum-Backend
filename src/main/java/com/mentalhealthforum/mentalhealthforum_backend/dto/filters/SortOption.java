@@ -9,4 +9,5 @@ public class SortOption {
     private String value;
     private String label;
     private String defaultDirection;
+    private boolean isDefault;
 }

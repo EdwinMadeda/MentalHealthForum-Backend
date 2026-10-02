@@ -32,7 +32,7 @@ dependencies {
     //implementation("io.r2dbc:r2dbc-postgresql:0.8.13.RELEASE")  // The PostgreSQL-specific R2DBC driver
 
     implementation("org.keycloak:keycloak-admin-client:26.0.7")
-    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.8.14")
+    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.8.5")
 
 	implementation("org.openapitools:jackson-databind-nullable:0.2.11")
 

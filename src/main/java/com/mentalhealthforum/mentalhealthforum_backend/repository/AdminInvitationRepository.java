@@ -1,6 +1,5 @@
 package com.mentalhealthforum.mentalhealthforum_backend.repository;
 
-import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.PendingAdminInviteDto;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AdminInvitationEntity;
 import org.springframework.data.r2dbc.repository.Modifying;
@@ -24,45 +23,29 @@ public interface AdminInvitationRepository extends R2dbcRepository<AdminInvitati
     Mono<AdminInvitationEntity> findByEmail(String email);
 
     @Query("""
-        SELECT i.keycloak_id AS user_id,
-               i.username,
-               i.first_name,
-               i.last_name,
-               i.email,
-               i.groups,
-               i.is_enabled,
-               i.is_email_verified,
-               i.invited_by,
-               u.display_name AS invited_by_display_name,
-               u.avatar_url AS invited_by_avatar_url,
-               i.date_created,
-               i.updated_at,
-               i.current_stage,
-               i.expires_at
-        FROM admin_invitations i
-        LEFT join app_users u ON i.invited_by = u.keycloak_id
+        SELECT * FROM admin_invitations
         WHERE (:search IS NULL
     
             -- simple unaccent
             OR to_tsvector('public.simple_unaccent',
-                coalesce(i.email, '') || ' ' ||
-                coalesce(i.username, '') || ' ' ||
-                coalesce(i.first_name, '') || ' ' ||
-                coalesce(i.last_name, '')
+                coalesce(email, '') || ' ' ||
+                coalesce(username, '') || ' ' ||
+                coalesce(first_name, '') || ' ' ||
+                coalesce(last_name, '')
             ) @@ websearch_to_tsquery('public.simple_unaccent', :search)
     
             -- trigram fallback
     
-            OR public.unaccent_immutable(i.email) % public.unaccent_immutable(:search)
-            OR public.unaccent_immutable(i.username) % public.unaccent_immutable(:search)
-            OR public.unaccent_immutable(i.first_name) % public.unaccent_immutable(:search)
-            OR public.unaccent_immutable(i.last_name) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(email) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(username) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(first_name) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(last_name) % public.unaccent_immutable(:search)
     
             )
     
-            AND (:groups IS NULL OR i.groups && :groups)
-            AND (:invitedByUserId IS NULL OR i.invited_by = :invitedByUserId)
-            AND (:onboardingStage IS NULL OR i.current_stage = :onboardingStage::onboarding_stage_enum)
+            AND (:groups IS NULL OR groups && :groups)
+            AND (:invitedByUserId IS NULL OR invited_by = :invitedByUserId)
+            AND (:onboardingStage IS NULL OR current_stage = :onboardingStage::onboarding_stage_enum)
     
             ORDER BY
     
@@ -70,9 +53,9 @@ public interface AdminInvitationRepository extends R2dbcRepository<AdminInvitati
                 CASE :sortDirection
                     WHEN 'DESC' THEN
                         CASE :sortBy
-                            WHEN 'email' THEN i.email
-                            WHEN 'username' THEN i.username
-                            ELSE i.date_created::text
+                            WHEN 'email' THEN email
+                            WHEN 'username' THEN username
+                            ELSE date_created::text
                         END
                     ELSE NULL
                 END DESC NULLS LAST,
@@ -81,18 +64,18 @@ public interface AdminInvitationRepository extends R2dbcRepository<AdminInvitati
                 CASE :sortDirection
                     WHEN 'ASC' THEN
                         CASE :sortBy
-                            WHEN 'email' THEN i.email
-                            WHEN 'username' THEN i.username
-                            ELSE i.date_created::text
+                            WHEN 'email' THEN email
+                            WHEN 'username' THEN username
+                            ELSE date_created::text
                         END
                     ELSE NULL
                 END ASC NULLS FIRST,
     
                 -- 4. Tie breaker for deterministic ordering
-                u.keycloak_id
+                keycloak_id
             LIMIT :limit OFFSET :offset;
     """)
-    Flux<PendingAdminInviteDto> findPendingInvitesPaginated(
+    Flux<AdminInvitationEntity> findPendingInvitesPaginated(
         @Param("invitedByUserId") UUID invitedByUserId,
         @Param("groups") String[] groups,
         @Param("onboardingStage") String onboardingStage,
@@ -106,26 +89,26 @@ public interface AdminInvitationRepository extends R2dbcRepository<AdminInvitati
 
     @Query("""
         SELECT COUNT(*)
-        FROM admin_invitations i
+        FROM admin_invitations
         WHERE (:search IS NULL
     
             OR to_tsvector('public.simple_unaccent',
-                coalesce(i.email, '') || ' ' ||
-                coalesce(i.username, '') || ' ' ||
-                coalesce(i.first_name, '') || ' ' ||
-                coalesce(i.last_name, '')
+                coalesce(email, '') || ' ' ||
+                coalesce(username, '') || ' ' ||
+                coalesce(first_name, '') || ' ' ||
+                coalesce(last_name, '')
             ) @@ websearch_to_tsquery('public.simple_unaccent', :search)
     
-            OR public.unaccent_immutable(i.email) % public.unaccent_immutable(:search)
-            OR public.unaccent_immutable(i.username) % public.unaccent_immutable(:search)
-            OR public.unaccent_immutable(i.first_name) % public.unaccent_immutable(:search)
-            OR public.unaccent_immutable(i.last_name) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(email) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(username) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(first_name) % public.unaccent_immutable(:search)
+            OR public.unaccent_immutable(last_name) % public.unaccent_immutable(:search)
     
             )
     
-            AND (:groups IS NULL OR i.groups && :groups)
-            AND (:invitedByUserId IS NULL OR i.invited_by = :invitedByUserId)
-            AND (:onboardingStage IS NULL OR i.current_stage = :onboardingStage::onboarding_stage_enum)
+            AND (:groups IS NULL OR groups && :groups)
+            AND (:invitedByUserId IS NULL OR invited_by = :invitedByUserId)
+            AND (:onboardingStage IS NULL OR current_stage = :onboardingStage::onboarding_stage_enum)
     """)
     Mono<Long> countPendingInvitesWithFilters(
             @Param("invitedByUserId") UUID invitedByUserId,
