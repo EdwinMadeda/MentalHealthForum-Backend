@@ -118,12 +118,7 @@ public class AdminInvitationEntity {
     // Returns the groups as an array of GroupPath enums. Converts from stored paths.
     @Transient
     public GroupPath[] getGroupPaths() {
-        return  this.groups != null
-                ? this.groups.stream()
-                .map(GroupPath::fromPath)
-                .filter(Objects::nonNull)
-                .toArray(GroupPath[]::new)
-                : new GroupPath[0];
+        return  GroupPath.fromPaths(this.groups);
     }
 
     // Constructor

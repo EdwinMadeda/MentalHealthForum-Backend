@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.discovery;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionStatus;
 import lombok.Builder;
 import lombok.Data;
@@ -18,17 +19,9 @@ public class UserConnectResponse {
     private Instant createdAt;
 
     // Initiator (who sent the request)
-    private UUID initiatedById;
-    private String initiatorDisplayName;
-    private String initiatorAvatarUrl;
-    private String initiatorBio;
-    private Instant initiatorLastActiveAt;
+    private UserDetails initiatedBy;
 
     // Recipient (who received the request)
-    private UUID recipientId;
-    private String recipientDisplayName;
-    private String recipientAvatarUrl;
-    private String recipientBio;
-    private Instant recipientLastActiveAt;
+    private UserDetails recipient;
 
 }

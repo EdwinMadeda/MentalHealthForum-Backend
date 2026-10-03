@@ -390,8 +390,8 @@ public class UserConnectServiceImpl implements UserConnectService {
      */
     private UserConnectResponse mapResponseWithData(
             UserConnectEntity connection,
-            UserDetails initiatorDetails,
-            UserDetails recipientDetails
+            UserDetails initiatedBy,
+            UserDetails recipient
     ){
         return  UserConnectResponse.builder()
                 .id(connection.getId())
@@ -400,18 +400,11 @@ public class UserConnectServiceImpl implements UserConnectService {
                 .createdAt(connection.getCreatedAt())
 
                 // Initiator details
-                .initiatedById(connection.getInitiatedBy())
-                .initiatorDisplayName(initiatorDetails.getDisplayName())
-                .initiatorAvatarUrl(initiatorDetails.getAvatarUrl())
-                .initiatorBio(initiatorDetails.getBio())
-                .initiatorLastActiveAt(initiatorDetails.getLastActiveAt())
+                .initiatedBy(initiatedBy)
 
                 // Recipient details
-                .recipientId(connection.getRecipient())
-                .recipientDisplayName(recipientDetails.getDisplayName())
-                .recipientAvatarUrl(recipientDetails.getAvatarUrl())
-                .recipientBio(recipientDetails.getBio())
-                .recipientLastActiveAt(recipientDetails.getLastActiveAt())
+                .recipient(recipient)
+
                 .build();
     }
 

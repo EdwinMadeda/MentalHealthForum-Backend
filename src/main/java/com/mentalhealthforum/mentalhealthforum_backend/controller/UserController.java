@@ -4,8 +4,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserHistoryEntry;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
-import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
-import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InsufficientPermissionException;
+
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserActivityService;

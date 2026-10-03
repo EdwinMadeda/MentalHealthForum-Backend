@@ -498,12 +498,8 @@ public class UserAuditServiceImpl implements UserAuditService {
                 record.getActionType(),
                 record.getOldValue(),
                 record.getNewValue(),
-                record.getPerformedBy(),
-                performedBy.getDisplayName(),
-                performedBy.getAvatarUrl(),
-                record.getUserId(),
-                targetUser.getDisplayName(),
-                targetUser.getAvatarUrl(),
+                performedBy,
+                targetUser,
                 suggestedReason,
                 record.getCustomReason(),
                 record.getCreatedAt()
@@ -600,16 +596,21 @@ public class UserAuditServiceImpl implements UserAuditService {
      * </ul>
      */
     private UserHistoryEntry anonymizeForUser(UserHistoryEntry entry){
+
+        UserDetails anonymizedPerformedBy = UserDetails.builder()
+                .userId(null)
+                .displayName("Admin")
+                .avatarUrl(null)
+                .initials(null)
+                .lastActiveAt(null)
+                .build();
+
         return new UserHistoryEntry(
                 entry.action(),
                 entry.oldValue(),
                 entry.newValue(),
-                null,               //  Hide performedById
-                "Admin",                        //  Anonymize
-                null,                           //  Hide avatar
-                entry.targetUserId(),
-                entry.targetUserDisplayName(),
-                entry.targetUserAvatarUrl(),
+                anonymizedPerformedBy,               //  Hide performedBy
+                entry.targetUser(),
                 entry.suggestedReason(),
                 null,              // Hide customReason
                 entry.timeStamp()

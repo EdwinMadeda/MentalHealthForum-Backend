@@ -3,10 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.enums;
 import com.mentalhealthforum.mentalhealthforum_backend.service.PrivilegedUser;
 import lombok.Getter;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 /**
  * GroupPath defines all user groups in the system along with their role mappings.
@@ -86,6 +83,29 @@ public enum GroupPath {
             }
         }
         return null;
+    }
+
+    // Converts a collection of group paths to an array of GroupPath enums
+    public static GroupPath[] fromPaths(Collection<String> paths){
+        if(paths == null || paths.isEmpty()) {
+            return new GroupPath[0];
+        }
+        return paths.stream()
+                .map(GroupPath::fromPath)
+                .filter(Objects::nonNull)
+                .toArray(GroupPath[]::new);
+
+    }
+
+    // Converts an array of GroupPath to an array of paths
+    public static String[] toPaths(GroupPath[] groups){
+        if(groups == null || groups.length == 0){
+            return null;
+        }
+
+        return Arrays.stream(groups)
+                .map(GroupPath::getPath)
+                .toArray(String[]::new);
     }
 
     public static boolean isInGroup(String userGroupPath, GroupPath targetGroup){
@@ -317,7 +337,6 @@ public enum GroupPath {
                 .findFirst()
                 .orElse(GroupPath.MEMBERS_NEW);
     }
-
 
 }
 

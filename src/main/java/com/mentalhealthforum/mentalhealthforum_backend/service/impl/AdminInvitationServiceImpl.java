@@ -227,13 +227,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
 
         int offset = page * size;
 
-        // Convert GroupPath[] to String [] (paths)
-        String[] effectiveGroups = (groups == null || groups.length == 0)
-                ? null
-                : Arrays.stream(groups)
-                  .map(GroupPath::getPath)
-                  .toArray(String[]::new);
-
+        String [] effectiveGroups = GroupPath.toPaths(groups);
         String effectiveOnboardingStage = onboardingStage != null ? onboardingStage.name() : null;
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null: search.trim();
 
@@ -376,9 +370,7 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                 .groups(entity.getGroupPaths())
                 .isEnabled(isEnabled)
                 .isEmailVerified(isEmailVerified)
-                .invitedBy(entity.getInvitedBy())
-                .invitedByDisplayName(invitedBy.getDisplayName())
-                .invitedByAvatarUrl(invitedBy.getAvatarUrl())
+                .invitedBy(invitedBy)
                 .dateCreated(entity.getDateCreated())
                 .updatedAt(entity.getUpdatedAt())
                 .currentStage(entity.getCurrentStage())

@@ -353,9 +353,10 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
 
     public UserDetails toUserDetails(){
         return UserDetails.builder()
+                .userId(this.getKeycloakId())
                 .displayName(this.getPublicIdentifier())
                 .avatarUrl(this.getAvatarUrl())
-                .bio(this.getBio())
+                .initials(this.getInitials())
                 .lastActiveAt(this.getLastActiveAt())
                 .build();
     }
@@ -363,9 +364,10 @@ public class AppUserEntity implements PrivilegedUser, OnboardingProfileData {
     // For unknown/default user
     public static UserDetails defaultUser(){
         return UserDetails.builder()
+                .userId(null)
                 .displayName(null)
                 .avatarUrl(null)
-                .bio(null)
+                .initials(null)
                 .lastActiveAt(null)
                 .build();
     }

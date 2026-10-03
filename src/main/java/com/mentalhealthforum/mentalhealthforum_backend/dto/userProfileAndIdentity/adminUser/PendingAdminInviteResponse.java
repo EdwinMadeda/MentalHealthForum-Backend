@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
 import lombok.Builder;
@@ -29,10 +30,8 @@ public class PendingAdminInviteResponse {
     private boolean isEnabled;
     private boolean isEmailVerified;
 
-    // Invited by Details
-    private UUID invitedBy;
-    private String invitedByDisplayName;
-    private String invitedByAvatarUrl;
+    // Invited by Details (single object)
+    private UserDetails invitedBy;
 
     private Instant dateCreated;
     private Instant updatedAt;
