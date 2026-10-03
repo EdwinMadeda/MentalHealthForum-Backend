@@ -22,16 +22,18 @@ public enum AppUserSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final AppUserSortField DEFAULT = AppUserSortField.DISPLAY_NAME;
+
     public static AppUserSortField fromString(String value) {
         if(value == null){
-            return DISPLAY_NAME;  // Default to alphabetical
+            return DEFAULT;  // Default to alphabetical
         }
         for(AppUserSortField field : AppUserSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  DISPLAY_NAME;
+        return DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection){
@@ -46,6 +48,7 @@ public enum AppUserSortField {
                 .value(this.value)
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

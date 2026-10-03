@@ -5,6 +5,9 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.KeycloakUserDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UpdateUserProfileRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.RealmRole;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.AppUserSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InsufficientPermissionException;
 import reactor.core.publisher.Mono;
 
@@ -61,7 +64,7 @@ public interface AppUserService {
      * @param size             Number of users per page
      * @param currentUserFirst Whether to place the current user first on page 0
      * @param isConnected      Optional filter by is connected
-     * @param role             Optional role filter
+     * @param roles             Optional role filter
      * @param groups           Optional group filter
      * @param search           Optional search term
      * @param sortBy           Field to sort by
@@ -72,10 +75,10 @@ public interface AppUserService {
     Mono<PaginatedResponse<UserResponse>> getActiveAppUsersWithContext(
             int page, int size, boolean currentUserFirst,
             Boolean isConnected,
-            String role,
-            String[] groups,
+            RealmRole[] roles,
+            GroupPath[] groups,
             String search,
-            String sortBy,
+            AppUserSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext);
 
@@ -89,7 +92,7 @@ public interface AppUserService {
      * @param currentUserFirst Whether to place the current user first on page 0
      * @param isActive         Optional filter by active status
      * @param isConnected      Optional filter by is connected
-     * @param role             Optional role filter
+     * @param roles             Optional role filter
      * @param groups           Optional group filter
      * @param search           Optional search term
      * @param sortBy           Field to sort by
@@ -103,10 +106,10 @@ public interface AppUserService {
             boolean currentUserFirst,
             Boolean isActive,
             Boolean isConnected,
-            String role,
-            String[] groups,
+            RealmRole[] roles,
+            GroupPath[] groups,
             String search,
-            String sortBy,
+            AppUserSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

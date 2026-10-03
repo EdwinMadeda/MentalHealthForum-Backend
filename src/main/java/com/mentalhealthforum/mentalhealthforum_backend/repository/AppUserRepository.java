@@ -62,7 +62,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
                 (:isActive = true AND u.account_status = 'ACTIVE') OR
                 (:isActive = false AND u.account_status != 'ACTIVE')
                 )
-              AND (:role IS NULL OR :role = ANY(u.roles))
+           
+              AND (:roles IS NULL OR u.roles && :roles)
               AND (:groups IS NULL OR u.groups && :groups)
            
               -- Search: GIN index, accent-insensitive, exact word matching  + Trigram (typo/partial) fallback
@@ -133,9 +134,9 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
                 u.keycloak_id
             LIMIT :limit OFFSET :offset;
            """)
-    Flux<AppUserEntity> findAllPaginated(
+    Flux<AppUserEntity> findAppUsersPaginated(
             @Param("isActive") Boolean isActive,
-            @Param("role") String role,
+            @Param("roles") String[] roles,
             @Param("groups") String[] groups,
             @Param("currentUserId") UUID currentUserId,
             @Param("currentUserFirst") boolean currentUserFirst,
@@ -155,7 +156,8 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
                 (:isActive = true AND u.account_status = 'ACTIVE') OR
                 (:isActive = false AND u.account_status != 'ACTIVE')
                 )
-              AND (:role IS NULL OR :role = ANY(u.roles))
+            
+              AND (:roles IS NULL OR u.roles && :roles)
               AND (:groups IS NULL OR u.groups && :groups)
 
               AND (:search IS NULL
@@ -185,9 +187,9 @@ public interface AppUserRepository extends R2dbcRepository<AppUserEntity, UUID> 
               AND profile_is_visible(u.keycloak_id, :currentUserId, :isAdmin, :isModeratorOrAdmin)
            
             """)
-    Mono<Long> countAll(
+    Mono<Long> countAppUsersWithFilters(
             @Param("isActive") Boolean isActive,
-            @Param("role") String role,
+            @Param("roles") String[] roles,
             @Param("groups") String[] groups,
             @Param("currentUserId") UUID currentUserId,
             @Param("isAdmin") boolean isAdmin,

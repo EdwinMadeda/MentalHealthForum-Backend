@@ -5,6 +5,9 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserHistoryEntry;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
 
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.RealmRole;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.AppUserSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.UserHistorySortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
@@ -93,13 +96,13 @@ public class UserController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "true", name = "current_user_first") @Parameter(name = "current_user_first") boolean currentUserFirst,
-            @RequestParam(required = false, name = "is_connected") @Parameter(name = "is_connected", description = "Filter by connection status: true (connected), false (not connected)") Boolean isConnected,
-            @RequestParam(required = false) String role,
-            @RequestParam(required = false) String[] groups,
-            @RequestParam(required = false, name = "search") @Parameter(name = "search", description = "Search display_name (case-insensitive contains)") String search,
-            @RequestParam(defaultValue = "display_name", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: display_name, date_joined, posts_count, reputation_score, last_posted_at, last_active_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(defaultValue = "true", name = "current_user_first")  boolean currentUserFirst,
+            @RequestParam(required = false, name = "is_connected") Boolean isConnected,
+            @RequestParam(required = false) RealmRole[] role,
+            @RequestParam(required = false) GroupPath[] groups,
+            @RequestParam(required = false, name = "search") String search,
+            @RequestParam(defaultValue = "DISPLAY_NAME", name = "sort_by") AppUserSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);

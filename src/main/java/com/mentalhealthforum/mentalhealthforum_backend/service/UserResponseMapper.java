@@ -1,15 +1,12 @@
-
-
-
-
-
 package com.mentalhealthforum.mentalhealthforum_backend.service;
 
 import com.mentalhealthforum.mentalhealthforum_backend.contants.AppConstants;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.timezone.TimezoneDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.RealmRole;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import org.springframework.stereotype.Component;
 
@@ -89,8 +86,8 @@ public class UserResponseMapper {
                 appUser.getLastActiveAt(),
                 appUser.getLastPostedAt(),
                 appUser.isActive(),
-                appUser.getRoles(),
-                appUser.getGroups()
+                RealmRole.fromRoleNames(appUser.getRoles()),
+                GroupPath.fromPaths(appUser.getGroups())
         );
         response.setInitials(appUser.getInitials());
         return response;

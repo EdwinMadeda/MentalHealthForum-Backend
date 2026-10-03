@@ -3,7 +3,9 @@ package com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdenti
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.timezone.TimezoneDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.AccountStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ProfileVisibility;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.RealmRole;
 import lombok.*;
 
 import java.time.Instant;
@@ -52,8 +54,8 @@ public class UserResponse {
     private Boolean isEnabled;
 
     // --- Cached Keycloak Data (UI Context) ---
-    private Set<String> roles;
-    private Set<String> groups;
+    private RealmRole[] roles;
+    private GroupPath[] groups;
 
     private Boolean isConnected;
 
@@ -71,8 +73,8 @@ public class UserResponse {
             Instant lastActiveAt,
             Instant lastPostedAt,
             Boolean isActive,
-            Set<String> roles,
-            Set<String> groups
+            RealmRole[] roles,
+            GroupPath[] groups
             ) {
         this.userId = userId;
         this.dateJoined = dateJoined;
@@ -83,8 +85,8 @@ public class UserResponse {
         this.lastActiveAt = lastActiveAt;
         this.lastPostedAt = lastPostedAt;
         this.isActive = isActive;
-        this.roles = roles != null ? Set.copyOf(roles) : Set.of();
-        this.groups = groups != null ? Set.copyOf(groups) : Set.of();
+        this.roles = roles;
+        this.groups = groups;
 
         // NO NULL SETTING HERE - fields remain uninitialized (null by default)
         // Privacy enforcement happens in the mapper, not here

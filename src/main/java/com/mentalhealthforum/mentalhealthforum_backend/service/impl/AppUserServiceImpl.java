@@ -2,6 +2,8 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.config.KeycloakProperties;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.UserFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
@@ -31,6 +33,7 @@ import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.mentalhealthforum.mentalhealthforum_backend.utils.ChangeUtils.*;
@@ -215,10 +218,10 @@ public class AppUserServiceImpl implements AppUserService {
     public Mono<PaginatedResponse<UserResponse>> getActiveAppUsersWithContext(
             int page, int size, boolean currentUserFirst,
             Boolean isConnected,
-            String role,
-            String[] groups,
+            RealmRole[] role,
+            GroupPath[] groups,
             String search,
-            String sortBy,
+            AppUserSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext) {
         return executeGetAppUsersQuery(page, size, currentUserFirst, true, isConnected, role, groups, search, sortBy, sortDirection, viewerContext);
@@ -229,18 +232,14 @@ public class AppUserServiceImpl implements AppUserService {
             int page, int size, boolean currentUserFirst,
             Boolean isActive,
             Boolean isConnected,
-            String role,
-            String[] groups,
+            RealmRole[] role,
+            GroupPath[] groups,
             String search,
-            String sortBy,
+            AppUserSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext) {
         return ModerationAction.USER_VIEW_INACTIVE.checkPermission(viewerContext)
                 .then(executeGetAppUsersQuery(page, size, currentUserFirst, isActive, isConnected, role, groups, search, sortBy, sortDirection, viewerContext));
-    }
-
-    private AppUserSortField validateAndNormalizeSortBy(String sortBy) {
-        return AppUserSortField.fromString(sortBy);
     }
 
     @Override
@@ -367,10 +366,10 @@ public class AppUserServiceImpl implements AppUserService {
             int page, int size, boolean currentUserFirst,
             Boolean isActive,
             Boolean isConnected,
-            String role,
-            String[] groups,
+            RealmRole[] roles,
+            GroupPath[] groups,
             String search,
-            String sortBy,
+            AppUserSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext) {
 
@@ -393,23 +392,26 @@ public class AppUserServiceImpl implements AppUserService {
             }
         }
 
-        String[] effectiveGroups = (groups == null || groups.length == 0) ? null : groups;
+        String[] effectiveRoles = RealmRole.toRoleNames(roles);
+        String[] effectiveGroups = GroupPath.toPaths(groups);
+
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null : search.trim();
-        AppUserSortField sortByField = validateAndNormalizeSortBy(sortBy);
+
+        AppUserSortField sortByField = sortBy != null ? sortBy : AppUserSortField.DEFAULT;
         String normalizedDirection = sortByField.determineSortDirection(sortDirection);
 
         boolean applyCurrentUserFirst = currentUserFirst && page == 0;
 
-        Flux<AppUserEntity> appUsersFlux = appUserRepository.findAllPaginated(
-                isActive, role, effectiveGroups,
+        Flux<AppUserEntity> appUsersFlux = appUserRepository.findAppUsersPaginated(
+                isActive, effectiveRoles, effectiveGroups,
                 currentUserId, applyCurrentUserFirst,
                 isAdmin, isModeratorOrAdmin,
                 isConnected, effectiveSearch,
                 sortByField.getValue(), normalizedDirection,
                 size, offset);
 
-        Mono<Long> totalCount = appUserRepository.countAll(
-                isActive, role, effectiveGroups,
+        Mono<Long> totalCount = appUserRepository.countAppUsersWithFilters(
+                isActive, effectiveRoles, effectiveGroups,
                 currentUserId,
                 isAdmin, isModeratorOrAdmin,
                 isConnected, effectiveSearch);
@@ -426,9 +428,9 @@ public class AppUserServiceImpl implements AppUserService {
 
                     return enrichAppUsersWithConnectionStatus(appUsers, finalCurrentUserId, viewerContext)
                             .map(content -> {
-                                FilterMetadata<Object> filters = FilterMetadata.builder()
-                                        .sortOptions(getUserSortOptions())
-                                        .build();
+
+                                FilterMetadata<UserFilterDto> filters = buildUserFilters(new EnrichedUserData(appUsers));
+
                                 return new PaginatedResponse<>(content, page, size, total, filters);
                             });
                 });
@@ -483,6 +485,63 @@ public class AppUserServiceImpl implements AppUserService {
                             })
                             .collect(Collectors.toList());
                 });
+    }
+
+    private record EnrichedUserData(
+            List<AppUserEntity> records
+    ){}
+
+    private FilterMetadata<UserFilterDto> buildUserFilters(EnrichedUserData data){
+
+        // Build role options
+        Map<RealmRole, Long> roleCounts = data.records().stream()
+                .flatMap(record -> record.getRoles().stream())
+                .map(RealmRole::fromRoleName)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> roleOptions = roleCounts.entrySet().stream()
+                .map(entry -> new FilterOption(
+                        entry.getKey().getDisplayName(),
+                        entry.getKey().name(),
+                        entry.getValue()
+                ))
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+
+        // Build group options
+        Map<GroupPath, Long> groupCounts = data.records().stream()
+                .flatMap(record -> record.getGroups().stream())
+                .map(GroupPath::fromPath)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> groupOptions = groupCounts.entrySet().stream()
+                .map(entry -> new FilterOption(
+                        entry.getKey().getDisplayName(),
+                        entry.getKey().name(),
+                        entry.getValue()
+                ))
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+        UserFilterDto userFilters = UserFilterDto.builder()
+                .roles(roleOptions)
+                .groups(groupOptions)
+                .build();
+
+        return FilterMetadata.<UserFilterDto>builder()
+                .filters(userFilters)
+                .sortOptions(getUserSortOptions())
+                .build();
+
     }
 
     private List<SortOption> getUserSortOptions() {
