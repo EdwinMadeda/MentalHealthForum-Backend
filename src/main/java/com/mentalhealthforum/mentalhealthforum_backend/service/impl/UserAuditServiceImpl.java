@@ -254,7 +254,8 @@ public class UserAuditServiceImpl implements UserAuditService {
             UUID userId,
             UUID performedBy,
             UserAuditAction[] actionTypes,
-            String sortBy,
+            String search,
+            UserHistorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext){
 
@@ -269,10 +270,12 @@ public class UserAuditServiceImpl implements UserAuditService {
                 ? null
                 : Arrays.stream(actionTypes).map(Enum::name).toArray(String[]::new);
 
-        UserHistorySortField sortField = UserHistorySortField.fromString(sortBy);
-        String effectiveSortDirection = sortField.determineSortDirection(sortDirection);
+        String effectiveSearch = (search == null || search.trim().isEmpty()) ? null : search.trim();
 
-        return auditLogRepository.findByUserIdPaginated(userId, performedBy, effectiveActionTypes, effectiveSortDirection, size, offset)
+        UserHistorySortField sortByField = sortBy != null ? sortBy : UserHistorySortField.DEFAULT;
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
+
+        return auditLogRepository.findByUserIdPaginated(userId, performedBy, effectiveActionTypes, effectiveSearch, effectiveSortDirection, size, offset)
                 .collectList()
                 .flatMap(records -> {
                     if(records.isEmpty()){
@@ -280,7 +283,7 @@ public class UserAuditServiceImpl implements UserAuditService {
                     }
 
                     return enrichedHistoryWithBatchData(records)
-                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, performedBy, effectiveActionTypes))
+                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, performedBy, effectiveActionTypes, effectiveSearch))
                             .map(tuple -> {
                                 EnrichedHistoryData enriched = tuple.getT1();
                                 long totalCount = tuple.getT2();
@@ -305,7 +308,7 @@ public class UserAuditServiceImpl implements UserAuditService {
     public Mono<PaginatedResponse<UserHistoryEntry>> getMyHistoryPaginated(
             int page,
             int size,
-            String sortBy,
+            UserHistorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext){
 
@@ -318,10 +321,10 @@ public class UserAuditServiceImpl implements UserAuditService {
 
         UUID userId = UUID.fromString(viewerContext.getUserId());
 
-        UserHistorySortField sortField = UserHistorySortField.fromString(sortBy);
-        String effectiveSortDirection = sortField.determineSortDirection(sortDirection);
+        UserHistorySortField sortByField = sortBy != null ? sortBy : UserHistorySortField.DEFAULT;
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
-        return auditLogRepository.findByUserIdPaginated(userId, null, null, effectiveSortDirection, size, offset)
+        return auditLogRepository.findByUserIdPaginated(userId, null, null, null, effectiveSortDirection, size, offset)
                 .collectList()
                 .flatMap(records -> {
                     if(records.isEmpty()){
@@ -329,7 +332,7 @@ public class UserAuditServiceImpl implements UserAuditService {
                     }
 
                     return enrichedHistoryWithBatchData(records)
-                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, null, null))
+                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, null, null, null))
                             .map(tuple -> {
                                 EnrichedHistoryData enriched = tuple.getT1();
                                 long totalCount = tuple.getT2();

@@ -6,6 +6,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditAction;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.UserAuditReasonKey;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.UserHistorySortField;
 import com.mentalhealthforum.mentalhealthforum_backend.model.UserAuditLogEntity;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -91,7 +92,8 @@ public interface UserAuditService {
             UUID userId,
             UUID performedBy,
             UserAuditAction[] actionTypes,
-            String sortBy,
+            String search,
+            UserHistorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext);
 
@@ -99,7 +101,7 @@ public interface UserAuditService {
     Mono<PaginatedResponse<UserHistoryEntry>> getMyHistoryPaginated(
             int page,
             int size,
-            String sortBy,
+            UserHistorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext);
 

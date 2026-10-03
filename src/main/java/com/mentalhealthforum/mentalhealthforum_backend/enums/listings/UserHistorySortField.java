@@ -17,16 +17,18 @@ public enum UserHistorySortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final UserHistorySortField DEFAULT = UserHistorySortField.DATE_CREATED;
+
     public static UserHistorySortField fromString(String value) {
         if(value == null){
-            return DATE_CREATED;
+            return DEFAULT;
         }
         for(UserHistorySortField field : UserHistorySortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return DATE_CREATED;
+        return DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection) {
@@ -41,6 +43,7 @@ public enum UserHistorySortField {
                 .value(this.value)
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 }

@@ -42,20 +42,46 @@ public interface UserAuditLogRepository extends R2dbcRepository<UserAuditLogEnti
 
     // Finds audit log entries for a user pagination
     @Query("""
-        SELECT * FROM user_audit_log
-        WHERE (:userId IS NULL OR user_id = :userId)
-            AND (:actionTypes IS NULL OR action_type::text = ANY(:actionTypes))
-            AND (:performedBy IS NULL OR performed_by = :performedBy)
+        SELECT ual.*
+        FROM user_audit_log ual
+        LEFT JOIN app_users performedBy ON ual.performed_by = performedBy.keycloak_id
+        LEFT JOIN app_users targetUser ON ual.user_id = targetUser.keycloak_id
+        LEFT JOIN user_audit_reason_definitions reason ON ual.reason_definition_id = reason.id
+    
+        WHERE (:userId IS NULL OR ual.user_id = :userId)
+            AND (:actionTypes IS NULL OR ual.action_type::text = ANY(:actionTypes))
+            AND (:performedByUserId IS NULL OR ual.performed_by = :performedByUserId)
+    
+            AND (:search IS NULL
+    
+                OR to_tsvector('public.simple_unaccent',
+                    coalesce(performedBy.display_name, '') || ' ' ||
+                    coalesce(targetUser.display_name, '') || ' ' ||
+                    coalesce(reason.description, '') || ' ' ||
+                    coalesce(ual.custom_reason, '')
+                ) @@ websearch_to_tsquery('public.simple_unaccent', :search)
+    
+                OR public.unaccent_immutable(performedBy.display_name) % public.unaccent_immutable(:search)
+    
+                OR public.unaccent_immutable(targetUser.display_name) % public.unaccent_immutable(:search)
+    
+                OR public.unaccent_immutable(reason.description) % public.unaccent_immutable(:search)
+    
+                OR public.unaccent_immutable(ual.custom_reason) % public.unaccent_immutable(:search)
+    
+                )
+    
         ORDER BY
-            CASE WHEN :sortDirection = 'DESC' THEN created_at END DESC NULLS LAST,
-            CASE WHEN :sortDirection = 'ASC' THEN created_at END ASC NULLS FIRST,
+            CASE WHEN :sortDirection = 'DESC' THEN ual.created_at END DESC NULLS LAST,
+            CASE WHEN :sortDirection = 'ASC' THEN ual.created_at END ASC NULLS FIRST,
             id
         LIMIT :limit OFFSET :offset
     """)
     Flux<UserAuditLogEntity> findByUserIdPaginated(
             @Param("userId") UUID userId,
-            @Param("performedBy") UUID performedBy,
+            @Param("performedByUserId") UUID performedByUserId,
             @Param("actionTypes") String[] actionTypes,
+            @Param("search") String search,
             @Param("sortDirection") String sortDirection,
             @Param("limit") int limit,
             @Param("offset") int offset
@@ -63,15 +89,40 @@ public interface UserAuditLogRepository extends R2dbcRepository<UserAuditLogEnti
 
     // Count number of audit entries for a specific user
     @Query("""
-        SELECT COUNT(*) FROM user_audit_log
-        WHERE (:userId IS NULL OR user_id = :userId)
-            AND (:actionTypes IS NULL OR action_type::text = ANY(:actionTypes))
-            AND (:performedBy IS NULL OR performed_by = :performedBy)
+        SELECT COUNT(*)
+        FROM user_audit_log ual
+        LEFT JOIN app_users performedBy ON ual.performed_by = performedBy.keycloak_id
+        LEFT JOIN app_users targetUser ON ual.user_id = targetUser.keycloak_id
+        LEFT JOIN user_audit_reason_definitions reason ON ual.reason_definition_id = reason.id
+    
+        WHERE (:userId IS NULL OR ual.user_id = :userId)
+            AND (:actionTypes IS NULL OR ual.action_type::text = ANY(:actionTypes))
+            AND (:performedByUserId IS NULL OR ual.performed_by = :performedByUserId)
+    
+            AND (:search IS NULL
+    
+                OR to_tsvector('public.simple_unaccent',
+                    coalesce(performedBy.display_name, '') || ' ' ||
+                    coalesce(targetUser.display_name, '') || ' ' ||
+                    coalesce(reason.description, '') || ' ' ||
+                    coalesce(ual.custom_reason, '')
+                ) @@ websearch_to_tsquery('public.simple_unaccent', :search)
+    
+                OR public.unaccent_immutable(performedBy.display_name) % public.unaccent_immutable(:search)
+    
+                OR public.unaccent_immutable(targetUser.display_name) % public.unaccent_immutable(:search)
+    
+                OR public.unaccent_immutable(reason.description) % public.unaccent_immutable(:search)
+    
+                OR public.unaccent_immutable(ual.custom_reason) % public.unaccent_immutable(:search)
+    
+                )
     """)
     Mono<Long> countUserHistoryWithFilters(
             @Param("userId") UUID userId,
-            @Param("performedBy") UUID performedBy,
-            @Param("actionTypes") String[] actionTypes
+            @Param("performedByUserId") UUID performedByUserId,
+            @Param("actionTypes") String[] actionTypes,
+            @Param("search") String search
     );
 
 }

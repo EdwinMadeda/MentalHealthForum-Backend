@@ -5,6 +5,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.*;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.adminUser.UserHistoryEntry;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.*;
 
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.UserHistorySortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserActivityService;
@@ -17,14 +18,12 @@ import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -219,8 +218,8 @@ public class UserController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "created_at", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: created_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(defaultValue = "DATE_CREATED", name = "sort_by") UserHistorySortField sortBy,
+            @RequestParam(required = false, name = "sort_direction")  String sortDirection
     ){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
