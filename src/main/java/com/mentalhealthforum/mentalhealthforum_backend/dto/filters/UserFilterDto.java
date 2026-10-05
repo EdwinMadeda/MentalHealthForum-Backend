@@ -10,7 +10,5 @@ import java.util.List;
 public class UserFilterDto {
     private List<FilterOption> roles;
     private List<FilterOption> groups;
-    private List<FilterOption> activeStatus;
-    private List<FilterOption> connectionStatus;
 
 }

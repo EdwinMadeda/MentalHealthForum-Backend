@@ -4,6 +4,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.SlugGenerationResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.*;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.CategorySortField;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -41,7 +42,7 @@ public interface CategoryService {
             Boolean isParent,
             Boolean isFocused,
             String search,
-            String sortBy,
+            CategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext);
 
@@ -54,7 +55,7 @@ public interface CategoryService {
             Boolean isParent,
             Boolean isActive,
             String search,
-            String sortBy,
+            CategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

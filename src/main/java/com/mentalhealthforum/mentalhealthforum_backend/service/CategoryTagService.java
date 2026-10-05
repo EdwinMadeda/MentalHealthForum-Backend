@@ -3,6 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.*;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.TagSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -34,7 +35,7 @@ public interface CategoryTagService {
             int page,
             int size,
             String search,
-            String sortBy,
+            TagSortField sortBy,
             String sortDirection);
 
     Flux<CategoryTagAssignmentResponse> assignTagToCategories(AssignTagToCategories request,UUID tagId, ViewerContext viewerContext);

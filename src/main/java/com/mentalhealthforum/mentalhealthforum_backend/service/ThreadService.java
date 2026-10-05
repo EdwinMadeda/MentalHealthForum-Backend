@@ -6,6 +6,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAnd
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ThreadSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadStatusDefinitionEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadTypeDefinitionEntity;
 import reactor.core.publisher.Flux;
@@ -34,7 +35,7 @@ public interface ThreadService {
             Boolean isWatched,
             UUID categoryTagId,
             String search,
-            String sortBy,
+            ThreadSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

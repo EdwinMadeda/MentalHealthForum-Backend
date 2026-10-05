@@ -10,4 +10,7 @@ import java.util.List;
 public class WatchThreadFilterDto {
     private List<FilterOption> creators;
     private List<FilterOption> categories;
+    private List<FilterOption> threadTypes;
+    private List<FilterOption> threadStatuses;
+
 }

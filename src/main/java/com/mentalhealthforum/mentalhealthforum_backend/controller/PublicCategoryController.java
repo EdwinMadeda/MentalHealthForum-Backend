@@ -5,6 +5,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardSuccessRespon
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryHierarchyDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.CategorySortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.CategoryService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -38,13 +39,13 @@ public class PublicCategoryController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false, name = "tag_id") @Parameter(description = "Filter by tag id") UUID tagId,
-            @RequestParam(required = false, name = "parent_category_id") @Parameter(description = "Filter by parent category id") UUID parentCategoryId,
-            @RequestParam(required = false, name = "is_parent") @Parameter(description = "Filter by is parent") Boolean isParent,
-            @RequestParam(required = false, name = "is_focused") @Parameter(description = "Filter by focus") Boolean isFocused,
-            @RequestParam(defaultValue = "", name = "search") @Parameter(description = "Search by name, slug, or description") String search,
-            @RequestParam(defaultValue = "sort_order", name = "sort_by") @Parameter(description = "Sort by: sort_order, name, created_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(required = false, name = "tag_id")  UUID tagId,
+            @RequestParam(required = false, name = "parent_category_id")  UUID parentCategoryId,
+            @RequestParam(required = false, name = "is_parent")  Boolean isParent,
+            @RequestParam(required = false, name = "is_focused")  Boolean isFocused,
+            @RequestParam(required = false, name = "search")  String search,
+            @RequestParam(defaultValue = "SORT_ORDER", name = "sort_by") CategorySortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ) {
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
         return categoryService.getActiveCategories(page, size, tagId, parentCategoryId, isParent, isFocused, search, sortBy, sortDirection, viewerContext)

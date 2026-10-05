@@ -19,16 +19,18 @@ public enum PostSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final PostSortField DEFAULT = PostSortField.CREATED_AT;
+
     public static PostSortField fromString(String value) {
         if(value == null){
-            return CREATED_AT;  // Default to createdAt
+            return DEFAULT;  // Default to createdAt
         }
         for(PostSortField field : PostSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return CREATED_AT;
+        return DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection) {
@@ -40,9 +42,10 @@ public enum PostSortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

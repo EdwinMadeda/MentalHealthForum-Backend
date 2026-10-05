@@ -6,6 +6,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkReq
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.BookmarkSortField;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -24,7 +25,7 @@ public interface BookmarkService {
             ThreadStatus threadStatus,
             Boolean hasContentWarning,
             String search,
-            String sortBy,
+            BookmarkSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

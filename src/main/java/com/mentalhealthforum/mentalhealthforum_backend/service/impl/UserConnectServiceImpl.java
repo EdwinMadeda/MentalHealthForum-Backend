@@ -3,8 +3,11 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserConnectResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ErrorCode;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ConnectionSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
@@ -47,18 +50,18 @@ public class UserConnectServiceImpl implements UserConnectService {
 
     @Override
     public Mono<UserConnectResponse> requestConnection(UUID targetUserId, ViewerContext viewerContext){
-        UUID currentUserId = UUID.fromString(viewerContext.getUserId());
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
 
-        if(currentUserId.equals(targetUserId)){
+        if(viewerId.equals(targetUserId)){
             return Mono.error(new ApiException("Cannot request connection with yourself", ErrorCode.VALIDATION_FAILED));
         }
 
         // Order for storage (user1 < user2)
-        OrderedPair pair = OrderedPair.of(currentUserId, targetUserId);
+        OrderedPair pair = OrderedPair.of(viewerId, targetUserId);
 
         return validateUserExists(targetUserId)
-                .then(checkOrCreateConnection(pair, currentUserId))
-                .flatMap(this::enrichSingleConnectionWithData)
+                .then(checkOrCreateConnection(pair, viewerId))
+                .flatMap(connection -> enrichSingleConnectionWithData(connection, viewerId))
                 .as(transactionalOperator::transactional);
 
     }
@@ -81,7 +84,7 @@ public class UserConnectServiceImpl implements UserConnectService {
                     connection.setUpdatedAt(Instant.now());
                     return userConnectRepository.save(connection);
                 })
-                .flatMap(this::enrichSingleConnectionWithData)
+                .flatMap(connection -> enrichSingleConnectionWithData(connection, user2))
                 .as(transactionalOperator::transactional);
 
     }
@@ -144,7 +147,7 @@ public class UserConnectServiceImpl implements UserConnectService {
             int size,
             Boolean notificationEnabled,
             String search,
-            String sortBy,
+            ConnectionSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext){
 
@@ -153,13 +156,14 @@ public class UserConnectServiceImpl implements UserConnectService {
         }
 
         int offset = page * size;
-        UUID currentUserId = UUID.fromString(viewerContext.getUserId());
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
-        ConnectionSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection);
+
+        ConnectionSortField sortByField = sortBy != null? sortBy : ConnectionSortField.DEFAULT;
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return userConnectRepository.findAcceptedConnectionsPaginated(
-            currentUserId,
+            viewerId,
             notificationEnabled,
             effectiveSearch,
             sortByField.getValue(), effectiveSortDirection,
@@ -171,9 +175,15 @@ public class UserConnectServiceImpl implements UserConnectService {
                         return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
                     }
 
-                    return enrichConnectionsWithBatchData(connections)
-                            .zipWith(userConnectRepository.countAcceptedConnectionsWithFilters(currentUserId, notificationEnabled, effectiveSearch))
-                            .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                    return enrichConnectionsWithBatchData(connections, viewerId)
+                            .zipWith(userConnectRepository.countAcceptedConnectionsWithFilters(viewerId, notificationEnabled, effectiveSearch))
+                            .map(tuple -> {
+                                FilterMetadata<Object> filters = FilterMetadata.builder()
+                                        .sortOptions(getConnectionSortOptions())
+                                        .build();
+
+                                return new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2(), filters);
+                            });
 
                 });
 
@@ -184,8 +194,8 @@ public class UserConnectServiceImpl implements UserConnectService {
             int page,
             int size,
             String search,
-            String type,
-            String sortBy,
+            ConnectionType connectionType,
+            ConnectionSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ){
@@ -195,17 +205,16 @@ public class UserConnectServiceImpl implements UserConnectService {
         }
 
         int offset = page * size;
-        UUID currentUserId = UUID.fromString(viewerContext.getUserId());
+        UUID viewerId = UUID.fromString(viewerContext.getUserId());
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
-        ConnectionSortField sortByField = validateAndNormalizeSortBy(sortBy);
-        String effectiveSortDirection = determineSortDirection(sortDirection);
 
-        // Determine request type filter
-        RequestTypeFilter filter = parseRequestType(type);
+        ConnectionSortField sortByField = sortBy != null? sortBy : ConnectionSortField.DEFAULT;
+        String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
+
 
         return userConnectRepository.findPendingRequestsPaginated(
-                        currentUserId,
-                        effectiveSearch, filter.toString(),
+                        viewerId,
+                        effectiveSearch, connectionType.name(),
                         sortByField.getValue(), effectiveSortDirection,
                         size, offset
                 )
@@ -215,9 +224,15 @@ public class UserConnectServiceImpl implements UserConnectService {
                         return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
                     }
 
-                    return enrichConnectionsWithBatchData(connections)
-                            .zipWith(userConnectRepository.countPendingRequestsWithFilters(currentUserId, effectiveSearch, filter.toString()))
-                            .map(tuple -> new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2()));
+                    return enrichConnectionsWithBatchData(connections, viewerId)
+                            .zipWith(userConnectRepository.countPendingRequestsWithFilters(viewerId, effectiveSearch, connectionType.name()))
+                            .map(tuple -> {
+                                FilterMetadata<Object> filters = FilterMetadata.builder()
+                                        .sortOptions(getConnectionSortOptions())
+                                        .build();
+
+                                return new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2(), filters);
+                            });
                 });
 
     }
@@ -249,23 +264,6 @@ public class UserConnectServiceImpl implements UserConnectService {
                 return new OrderedPair(userId2, userId1, false);
             }
         }
-    }
-
-    private RequestTypeFilter parseRequestType(String type){
-        if(type == null || type.isBlank()){
-            return RequestTypeFilter.INCOMING;
-        }
-        return switch (type.toLowerCase()){
-            case "outgoing" -> RequestTypeFilter.OUTGOING;
-            case "all" -> RequestTypeFilter.ALL;
-            default -> RequestTypeFilter.INCOMING;
-        };
-    }
-
-    private enum RequestTypeFilter {
-        INCOMING,   // initiated_by != current user
-        OUTGOING,   // initiated_by == current user
-        ALL         // no filter on initiated_by
     }
 
     private Mono<Void> validateUserExists(UUID userId) {
@@ -310,22 +308,11 @@ public class UserConnectServiceImpl implements UserConnectService {
         return userConnectRepository.save(connection);
     }
 
-    private ConnectionSortField validateAndNormalizeSortBy(String sortBy) {
-       return ConnectionSortField.fromString(sortBy);
-    }
-
-    private String determineSortDirection(String sortDirection) {
-        if(sortDirection != null){
-            return "desc".equalsIgnoreCase(sortDirection)? "DESC" : "ASC";
-        }
-        return "DESC";
-    }
-
     /**
      * Enriches a single connection with user details.
      * Uses individual queries since only one connection is being fetched.
      */
-    private Mono<UserConnectResponse> enrichSingleConnectionWithData(UserConnectEntity connection) {
+    private Mono<UserConnectResponse> enrichSingleConnectionWithData(UserConnectEntity connection, UUID viewerId) {
         UUID initiatedById = connection.getInitiatedBy();
         UUID recipientId = connection.getRecipient();
 
@@ -336,7 +323,7 @@ public class UserConnectServiceImpl implements UserConnectService {
             UserDetails initiatorDetails = tuple.getT1();
             UserDetails recipientDetails = tuple.getT2();
 
-            return  mapResponseWithData(connection, initiatorDetails, recipientDetails);
+            return  mapResponseWithData(connection, initiatorDetails, recipientDetails, viewerId);
         });
     }
 
@@ -345,8 +332,9 @@ public class UserConnectServiceImpl implements UserConnectService {
      * Uses batch fetching to avoid N+1 queries.
      */
     private Mono<List<UserConnectResponse>> enrichConnectionsWithBatchData(
-        List<UserConnectEntity> connections
-    ){
+        List<UserConnectEntity> connections,
+        UUID viewerId){
+
         if(connections.isEmpty()){
             return Mono.just(List.of());
         }
@@ -376,7 +364,7 @@ public class UserConnectServiceImpl implements UserConnectService {
                                 UserDetails initiatorDetails = userDetails.get(initiatedBy);
                                 UserDetails recipientDetails = userDetails.get(recipientId);
 
-                                return mapResponseWithData(connection, initiatorDetails, recipientDetails);
+                                return mapResponseWithData(connection, initiatorDetails, recipientDetails, viewerId);
 
                             })
                             .toList();
@@ -391,11 +379,16 @@ public class UserConnectServiceImpl implements UserConnectService {
     private UserConnectResponse mapResponseWithData(
             UserConnectEntity connection,
             UserDetails initiatedBy,
-            UserDetails recipient
-    ){
+            UserDetails recipient,
+            UUID viewerId){
+
+        ConnectionType connectionType = connection.getInitiatedBy().equals(viewerId)
+                ? ConnectionType.OUTGOING
+                : ConnectionType.INCOMING;
+
         return  UserConnectResponse.builder()
                 .id(connection.getId())
-                .status(connection.getStatus())
+                .connectionStatus(connection.getStatus())
                 .notificationEnabled(connection.getNotificationEnabled())
                 .createdAt(connection.getCreatedAt())
 
@@ -405,8 +398,15 @@ public class UserConnectServiceImpl implements UserConnectService {
                 // Recipient details
                 .recipient(recipient)
 
+                .connectionType(connectionType)
+
                 .build();
     }
 
+    private List<SortOption> getConnectionSortOptions(){
+        return Arrays.stream(ConnectionSortField.values())
+                .map(ConnectionSortField::toSortOption)
+                .toList();
+    }
 
 }

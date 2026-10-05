@@ -21,16 +21,18 @@ public enum WatchThreadSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final WatchThreadSortField DEFAULT = WatchThreadSortField.CREATED_AT;
+
     public static WatchThreadSortField fromString(String value) {
         if(value == null){
-            return CREATED_AT;  // Default to created_at
+            return DEFAULT;  // Default to created_at
         }
         for(WatchThreadSortField field : WatchThreadSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  CREATED_AT;
+        return  DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection){
@@ -42,9 +44,10 @@ public enum WatchThreadSortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

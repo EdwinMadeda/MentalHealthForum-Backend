@@ -5,7 +5,7 @@ import lombok.Getter;
 
 @Getter
 public enum UserHistorySortField {
-    DATE_CREATED("created_at", "Date Created", "DESC");
+    DATE_CREATED("created_at", "date created", "DESC");
 
     private final String value;
     private final String label;
@@ -40,7 +40,7 @@ public enum UserHistorySortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
                 .isDefault(this == DEFAULT)

@@ -11,4 +11,7 @@ public class ThreadFilterDto {
     private List<FilterOption> creators;
     private List<FilterOption> categories;
     private List<FilterOption> tags;
+    private List<FilterOption> threadTypes;
+    private List<FilterOption> threadStatuses;
+
 }

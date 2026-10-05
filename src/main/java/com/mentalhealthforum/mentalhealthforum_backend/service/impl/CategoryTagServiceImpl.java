@@ -162,7 +162,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
     }
 
     @Override
-    public Mono<PaginatedResponse<CategoryTagResponse>> getAllTags(int page, int size, String search, String sortBy, String sortDirection){
+    public Mono<PaginatedResponse<CategoryTagResponse>> getAllTags(int page, int size, String search, TagSortField sortBy, String sortDirection){
         if(page < 0 || size <= 0){
             throw new InvalidPaginationException();
         }
@@ -170,7 +170,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         int offset = page * size;
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
 
-        TagSortField sortByField = validateAndNormalizeTagSortBy(sortBy);
+        TagSortField sortByField = sortBy != null? sortBy : TagSortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return categoryTagRepository.searchTags(
@@ -441,11 +441,6 @@ public class CategoryTagServiceImpl implements CategoryTagService {
         return categoryTagRepository.save(existingTag);
     }
 
-    private TagSortField validateAndNormalizeTagSortBy(String sortBy) {
-       return TagSortField.fromString(sortBy);
-    }
-
-
     private Mono<Void> validateCategoryExists(UUID categoryId) {
         return categoryRepository.findById(categoryId)
                 .switchIfEmpty(Mono.error(new ApiException("Category not found", ErrorCode.RESOURCE_NOT_FOUND)))
@@ -630,7 +625,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
     private List<SortOption> getTagSortOptions() {
         return Arrays.stream(TagSortField.values())
                 .map(TagSortField::toSortOption)
-                .collect(Collectors.toList());
+                .toList();
     }
 
 }

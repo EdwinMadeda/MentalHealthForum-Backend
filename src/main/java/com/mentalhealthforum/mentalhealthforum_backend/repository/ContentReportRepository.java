@@ -58,13 +58,13 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
                 WHEN 'DESC' THEN
                     CASE :sortBy
                         WHEN 'severity' THEN
-                            CASE severity
-                                WHEN 'CRITICAL' THEN '1'
-                                WHEN 'HIGH' THEN '2'
-                                WHEN 'MEDIUM' THEN '3'
-                                WHEN 'LOW' THEN '4'
-                                ELSE '5'
-                            END
+                           CASE severity
+                               WHEN 'LOW' THEN '1'
+                               WHEN 'MEDIUM' THEN '2'
+                               WHEN 'HIGH' THEN '3'
+                               WHEN 'CRITICAL' THEN '4'
+                               ELSE '5'
+                           END
                         ELSE EXTRACT(EPOCH FROM reported_at)::text
                     END
                 ELSE NULL
@@ -75,13 +75,13 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
                 WHEN 'ASC' THEN
                     CASE :sortBy
                         WHEN 'severity' THEN
-                            CASE severity
-                                WHEN 'CRITICAL' THEN '1'
-                                WHEN 'HIGH' THEN '2'
-                                WHEN 'MEDIUM' THEN '3'
-                                WHEN 'LOW' THEN '4'
-                                ELSE '5'
-                            END
+                           CASE severity
+                               WHEN 'LOW' THEN '1'
+                               WHEN 'MEDIUM' THEN '2'
+                               WHEN 'HIGH' THEN '3'
+                               WHEN 'CRITICAL' THEN '4'
+                               ELSE '5'
+                           END
                         ELSE EXTRACT(EPOCH FROM reported_at)::text
                     END
                 ELSE NULL
@@ -160,13 +160,13 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
                 WHEN 'DESC' THEN
                     CASE :sortBy
                         WHEN 'severity' THEN
-                            CASE severity
-                                WHEN 'CRITICAL' THEN '1'
-                                WHEN 'HIGH' THEN '2'
-                                WHEN 'MEDIUM' THEN '3'
-                                WHEN 'LOW' THEN '4'
-                                ELSE '5'
-                            END
+                           CASE severity
+                               WHEN 'LOW' THEN '1'
+                               WHEN 'MEDIUM' THEN '2'
+                               WHEN 'HIGH' THEN '3'
+                               WHEN 'CRITICAL' THEN '4'
+                               ELSE '5'
+                           END
                         ELSE EXTRACT(EPOCH FROM reported_at)::text
                     END
                 ELSE NULL
@@ -177,13 +177,13 @@ public interface ContentReportRepository extends R2dbcRepository<ContentReportEn
                 WHEN 'ASC' THEN
                     CASE :sortBy
                         WHEN 'severity' THEN
-                            CASE severity
-                                WHEN 'CRITICAL' THEN '1'
-                                WHEN 'HIGH' THEN '2'
-                                WHEN 'MEDIUM' THEN '3'
-                                WHEN 'LOW' THEN '4'
-                                ELSE '5'
-                            END
+                           CASE severity
+                               WHEN 'LOW' THEN '1'
+                               WHEN 'MEDIUM' THEN '2'
+                               WHEN 'HIGH' THEN '3'
+                               WHEN 'CRITICAL' THEN '4'
+                               ELSE '5'
+                           END
                         ELSE EXTRACT(EPOCH FROM reported_at)::text
                     END
                 ELSE NULL

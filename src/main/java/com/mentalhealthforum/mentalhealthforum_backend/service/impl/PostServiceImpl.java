@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterOption;
@@ -99,7 +100,7 @@ public class PostServiceImpl implements PostService {
             Boolean hasContentWarning,
             Boolean isDeleted,
             String search,
-            String sortBy,
+            PostSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ) {
@@ -361,7 +362,7 @@ public class PostServiceImpl implements PostService {
             Boolean hasContentWarning,
             Boolean isDeleted,
             String search,
-            String sortBy,
+            PostSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ) {
@@ -379,7 +380,8 @@ public class PostServiceImpl implements PostService {
 
         String effectivePostType = (postType == null) ? null : postType.name();
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
-        PostSortField sortByField = validateAndNormalizeSortBy(sortBy);
+
+        PostSortField sortByField = sortBy != null? sortBy : PostSortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         // Note: flaggedForReview is not currently used as a filter in the service
@@ -487,6 +489,7 @@ public class PostServiceImpl implements PostService {
             return Mono.just(new EnrichedPostData(
                     List.of(),
                     List.of(),
+                    Map.of(),
                     Map.of()
             ));
         }
@@ -497,14 +500,29 @@ public class PostServiceImpl implements PostService {
                 .distinct()
                 .toList();
 
+        List<UUID> threadIds = posts.stream()
+                .map(PostEntity::getThreadId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
         // Batch fetch all authors
         Mono<Map<UUID, UserDetails>> authorsMap = appUserRepository
                 .findAppUsersByKeycloakIds(authorIds)
                 .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
                 .defaultIfEmpty(new HashMap<>());
 
-        return authorsMap
-                .map(authors -> {
+        // Batch fetch all threads
+        Mono<Map<UUID, ThreadDetails>> threadsMap = threadRepository
+                .findThreadsByIds(threadIds)
+                .collectMap(ThreadEntity::getId, ThreadEntity::toThreadDetails)
+                .defaultIfEmpty(new HashMap<>());
+
+        return Mono.zip(authorsMap, threadsMap)
+                .map(tuple -> {
+                    Map<UUID, UserDetails> authors =  tuple.getT1();
+                    Map<UUID, ThreadDetails> threads = tuple.getT2();
+
                     List<PostResponse> responses = posts.stream()
                             .map(post -> {
                                 UserDetails author = authors.get(post.getAuthorId());
@@ -515,7 +533,8 @@ public class PostServiceImpl implements PostService {
                     return new EnrichedPostData(
                             responses,
                             posts,
-                            authors
+                            authors,
+                            threads
                     );
                 });
 
@@ -558,14 +577,14 @@ public class PostServiceImpl implements PostService {
     private record EnrichedPostData(
             List<PostResponse> responses,
             List<PostEntity> posts,
-            Map<UUID, UserDetails> authors
+            Map<UUID, UserDetails> authors,
+            Map<UUID, ThreadDetails> threads
     ){}
 
     /**
      * Builds filter metadata from enriched post data.
      */
-
-    public FilterMetadata<PostFilterDto> buildPostFilters(EnrichedPostData data){
+    private FilterMetadata<PostFilterDto> buildPostFilters(EnrichedPostData data){
         // Build author options
         Map<UUID, Long> authorCounts = data.posts.stream()
                 .collect(Collectors.groupingBy(
@@ -578,19 +597,62 @@ public class PostServiceImpl implements PostService {
                     UUID authorId = entry.getKey();
                     UserDetails author = entry.getValue();
                     long count = authorCounts.getOrDefault(authorId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofUser(
                             authorId,
                             author.getDisplayName(),
-                            authorId.toString(),
                             author.getAvatarUrl(),
+                            author.getInitials(),
                             count
                     );
                 })
                 .sorted(Comparator.comparing(FilterOption::getLabel))
-                .collect(Collectors.toList());
+                .toList();
+
+        // Build thread options
+        Map<UUID, Long> threadCounts = data.posts.stream()
+                .collect(Collectors.groupingBy(
+                        PostEntity::getThreadId,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> threadOptions = data.threads.entrySet().stream()
+                .map(entry -> {
+                    UUID threadId = entry.getKey();
+                    ThreadDetails thread = entry.getValue();
+                    long count = threadCounts.getOrDefault(threadId, 0L);
+                    return FilterOption.ofEntity(
+                        threadId,
+                        thread.getTitle(),
+                        threadId.toString(),
+                        count
+                    );
+                })
+                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .toList();
+
+
+        // Build post type options
+        Map<PostType, Long> postTypeCounts = data.posts.stream()
+                .map(PostEntity::getPostType)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> postTypeOptions = Arrays.stream(PostType.values())
+                .map(postType -> FilterOption.ofEnum(
+                        postType.getDisplayName(),
+                        postType.name(),
+                        postTypeCounts.getOrDefault(postType, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
 
         PostFilterDto postFilters = PostFilterDto.builder()
                 .authors(authorOptions)
+                .threads(threadOptions)
+                .postTypes(postTypeOptions)
                 .build();
 
         return FilterMetadata.<PostFilterDto>builder()

@@ -83,7 +83,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
             int page,
             int size,
             Boolean notificationEnabled, String search,
-            String sortBy,
+            FocusCategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ){
@@ -100,7 +100,8 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
         boolean isVerified = viewerContext.isVerified();
 
         String effectiveSearch = (search == null || search.isBlank())? null : search.trim();
-        FocusCategorySortField sortByField = validateAndNormalizeSortBy(sortBy);
+
+        FocusCategorySortField sortByField = sortBy != null? sortBy : FocusCategorySortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return focusCategoryRepository.findPaginatedByUserId(
@@ -186,10 +187,6 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
         return  focusCategoryRepository.save(focusCategory);
     }
 
-
-    private FocusCategorySortField validateAndNormalizeSortBy(String sortBy) {
-       return FocusCategorySortField.fromString(sortBy);
-    }
 
     /**
      * Enriches a single focus category with category details and thread count.
@@ -297,7 +294,7 @@ public class FocusCategoryServiceImpl implements FocusCategoryService {
     private List<SortOption> getFocusCategorySortOptions(){
         return Arrays.stream(FocusCategorySortField.values())
                 .map(FocusCategorySortField::toSortOption)
-                .collect(Collectors.toList());
+                .toList();
     }
 
 }

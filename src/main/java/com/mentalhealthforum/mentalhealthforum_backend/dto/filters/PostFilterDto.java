@@ -9,4 +9,7 @@ import java.util.List;
 @Builder
 public class PostFilterDto {
     private List<FilterOption> authors;
+    private List<FilterOption> threads;
+    private List<FilterOption> postTypes;
+
 }

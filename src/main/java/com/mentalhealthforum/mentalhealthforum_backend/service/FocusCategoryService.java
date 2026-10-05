@@ -3,6 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.FocusCategoryResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.FocusCategorySortField;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -19,7 +20,7 @@ public interface FocusCategoryService {
             int size,
             Boolean notificationEnabled,
             String search,
-            String sortBy,
+            FocusCategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

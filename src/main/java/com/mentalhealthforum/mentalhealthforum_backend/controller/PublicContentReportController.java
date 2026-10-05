@@ -7,6 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsCompreh
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportCategory;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportTargetType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ReportSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.ReportService;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -81,9 +82,9 @@ public class PublicContentReportController {
             @RequestParam(required = false, name = "target_type") ReportTargetType targetType,
             @RequestParam(required = false) ReportStatus status,
             @RequestParam(required = false) ReportCategory category,
-            @RequestParam(defaultValue = "", name = "search") @Parameter(description = "Search by reason or details") String search,
-            @RequestParam(defaultValue = "reported_at", name = "sort_by") @Parameter(description = "Sort by: severity, reported_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(required = false, name = "search")  String search,
+            @RequestParam(defaultValue = "REPORTED_AT", name = "sort_by") ReportSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);

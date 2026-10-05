@@ -1,11 +1,20 @@
 package com.mentalhealthforum.mentalhealthforum_backend.enums;
 
+import lombok.Getter;
+
+@Getter
 public enum ThreadType {
-    DISCUSSION,      // General conversation, no specific outcome expected
-    QUESTION,        // Seeking specific answers/advice
-    CRISIS_SUPPORT,  // Urgent support needed
-    PEER_REVIEW,     // Sharing for feedback from peers
-    POLL;             // Community poll/survey
+    DISCUSSION("Discussion"),               // General conversation, no specific outcome expected
+    QUESTION("Question"),                   // Seeking specific answers/advice
+    CRISIS_SUPPORT("Crisis Support"),       // Urgent support needed
+    PEER_REVIEW("Peer Review"),             // Sharing for feedback from peers
+    POLL("Poll");                           // Community poll/survey
+
+    private final String displayName;
+
+    ThreadType(String displayName) {
+        this.displayName = displayName;
+    }
 
     public static ThreadType fromString(String value){
         if(value == null){

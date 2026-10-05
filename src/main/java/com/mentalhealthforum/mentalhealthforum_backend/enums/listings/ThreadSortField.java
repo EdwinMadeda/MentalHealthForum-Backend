@@ -21,16 +21,18 @@ public enum ThreadSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final ThreadSortField DEFAULT = ThreadSortField.LAST_ACTIVITY_AT;
+
     public static ThreadSortField fromString(String value) {
         if(value == null){
-            return LAST_ACTIVITY_AT;  // Default to most recent activity
+            return DEFAULT;  // Default to most recent activity
         }
         for(ThreadSortField field : ThreadSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  LAST_ACTIVITY_AT;
+        return  DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection){
@@ -42,9 +44,10 @@ public enum ThreadSortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

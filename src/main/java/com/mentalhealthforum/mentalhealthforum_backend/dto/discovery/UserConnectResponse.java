@@ -2,6 +2,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.dto.discovery;
 
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionStatus;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionType;
 import lombok.Builder;
 import lombok.Data;
 
@@ -14,7 +15,7 @@ public class UserConnectResponse {
 
     // Connection metadata
     private UUID id;
-    private ConnectionStatus status;
+    private ConnectionStatus connectionStatus;
     private Boolean notificationEnabled;
     private Instant createdAt;
 
@@ -23,5 +24,8 @@ public class UserConnectResponse {
 
     // Recipient (who received the request)
     private UserDetails recipient;
+
+    // Viewer perspective
+    private ConnectionType connectionType;
 
 }

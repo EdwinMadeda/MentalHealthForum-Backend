@@ -8,6 +8,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMet
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.UpdateOwnThreadRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ThreadSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadStatusDefinitionEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadTypeDefinitionEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.service.ThreadService;
@@ -105,21 +106,21 @@ public class PublicThreadController {
     @GetMapping
     public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<ThreadResponse>>>> getAllThreads(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") @Parameter(description = "Page number (0-indexed)") int page,
-            @RequestParam(defaultValue = "20") @Parameter(description = "Number of items per page") int size,
-            @RequestParam(required = false, name = "category_id") @Parameter(name = "category_id", description = "Filter by category ID") UUID categoryId,
-            @RequestParam(required = false, name = "creator_id") @Parameter(name = "creator_id", description = "Filter by creator user ID") UUID creatorId,
-            @RequestParam(required = false, name = "thread_type") @Parameter(name = "thread_type", description = "Filter by thread type: DISCUSSION, QUESTION, CRISIS_SUPPORT, PEER_REVIEW, POLL") ThreadType threadType,
-            @RequestParam(required = false, name = "thread_status") @Parameter(name = "thread_status", description = "Filter by thread status: OPEN, RESOLVED, CLOSED, ARCHIVED") ThreadStatus threadStatus,
-            @RequestParam(defaultValue = "false", name = "is_deleted") @Parameter(name = "is_deleted", description = "Include soft-deleted threads") boolean isDeleted,
-            @RequestParam(required = false, name = "is_featured") @Parameter(name = "is_featured", description = "Filter by featured status") Boolean isFeatured,
-            @RequestParam(required = false, name = "has_content_warning") @Parameter(name = "has_content_warning", description = "Filter threads with content warnings") Boolean hasContentWarning,
-            @RequestParam(required = false, name = "is_bookmarked") @Parameter(name = "is_bookmarked", description = "Filter by featured status") Boolean isBookmarked,
-            @RequestParam(required = false, name = "is_watched") @Parameter(name = "is_watched", description = "Filter by watch status: true (watching), false (not watching)") Boolean isWatched,
-            @RequestParam(required = false, name = "category_tag_id") @Parameter(name = "category_tag_id", description = "Filter by category tag ID") UUID categoryTagId,
-            @RequestParam(defaultValue = "", name = "search") @Parameter(name = "search", description = "Search by title (case-insensitive contains)") String search,
-            @RequestParam(defaultValue = "last_activity_at", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: created_at, last_activity_at, post_count, view_count, title") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20")  int size,
+            @RequestParam(required = false, name = "category_id")  UUID categoryId,
+            @RequestParam(required = false, name = "creator_id")  UUID creatorId,
+            @RequestParam(required = false, name = "thread_type") ThreadType threadType,
+            @RequestParam(required = false, name = "thread_status")  ThreadStatus threadStatus,
+            @RequestParam(defaultValue = "false", name = "is_deleted") boolean isDeleted,
+            @RequestParam(required = false, name = "is_featured")  Boolean isFeatured,
+            @RequestParam(required = false, name = "has_content_warning")  Boolean hasContentWarning,
+            @RequestParam(required = false, name = "is_bookmarked") Boolean isBookmarked,
+            @RequestParam(required = false, name = "is_watched") Boolean isWatched,
+            @RequestParam(required = false, name = "category_tag_id") UUID categoryTagId,
+            @RequestParam(required = false, name = "search")  String search,
+            @RequestParam(defaultValue = "LAST_ACTIVITY_AT", name = "sort_by") ThreadSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction")  String sortDirection
     ){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);

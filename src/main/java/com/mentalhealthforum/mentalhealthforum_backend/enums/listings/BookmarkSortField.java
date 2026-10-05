@@ -20,16 +20,18 @@ public enum BookmarkSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final BookmarkSortField DEFAULT = BookmarkSortField.BOOKMARKED_AT;
+
     public static BookmarkSortField fromString(String value) {
         if(value == null){
-            return BOOKMARKED_AT;  // Default to bookmarked_at
+            return DEFAULT;  // Default to bookmarked_at
         }
         for(BookmarkSortField field : BookmarkSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  BOOKMARKED_AT;
+        return  DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection) {
@@ -41,9 +43,10 @@ public enum BookmarkSortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 }

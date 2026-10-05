@@ -6,6 +6,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchThreadResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.WatchThreadSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.WatchThreadService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -67,18 +68,18 @@ public class ThreadWatchController {
     @GetMapping
     public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<WatchThreadResponse>>>> getWatchThreads(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") @Parameter(description = "Page number (0-indexed)") int page,
-            @RequestParam(defaultValue = "20") @Parameter(description = "Number of items per page") int size,
-            @RequestParam(required = false, name = "category_id") @Parameter(name = "category_id", description = "Filter by category ID") UUID categoryId,
-            @RequestParam(required = false, name = "creator_id") @Parameter(name = "creator_id", description = "Filter by creator user ID") UUID creatorId,
-            @RequestParam(required = false, name = "thread_type") @Parameter(name = "thread_type", description = "Filter by thread type: DISCUSSION, QUESTION, CRISIS_SUPPORT, PEER_REVIEW, POLL") ThreadType threadType,
-            @RequestParam(required = false, name = "thread_status") @Parameter(name = "thread_status", description = "Filter by thread status: OPEN, RESOLVED, CLOSED, ARCHIVED") ThreadStatus threadStatus,
-            @RequestParam(required = false, name = "has_content_warning") @Parameter(name = "has_content_warning", description = "Filter threads with content warnings") Boolean hasContentWarning,
-            @RequestParam(required = false) @Parameter(description = "Filter by bookmark status: true (bookmarked), false (not bookmarked)") Boolean isBookmarked,
-            @RequestParam(required = false) @Parameter(description = "Filter by notification enabled status") Boolean notificationEnabled,
-            @RequestParam(defaultValue = "") @Parameter(description = "Search by thread title or content") String search,
-            @RequestParam(defaultValue = "created_at") @Parameter(description = "Sort field: created_at, thread_title") String sortBy,
-            @RequestParam(required = false) @Parameter(description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20")  int size,
+            @RequestParam(required = false, name = "category_id")  UUID categoryId,
+            @RequestParam(required = false, name = "creator_id") UUID creatorId,
+            @RequestParam(required = false, name = "thread_type")  ThreadType threadType,
+            @RequestParam(required = false, name = "thread_status")  ThreadStatus threadStatus,
+            @RequestParam(required = false, name = "has_content_warning")  Boolean hasContentWarning,
+            @RequestParam(required = false, name = "is_bookmarked")  Boolean isBookmarked,
+            @RequestParam(required = false, name = "notification_enabled") Boolean notificationEnabled,
+            @RequestParam(required = false, name = "search")  String search,
+            @RequestParam(defaultValue = "CREATED_AT", name = "sort_by") WatchThreadSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ){
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
         return watchThreadService.getWatchThreads(page, size, categoryId, creatorId, threadType, threadStatus, hasContentWarning, isBookmarked, notificationEnabled, search, sortBy, sortDirection, viewerContext)

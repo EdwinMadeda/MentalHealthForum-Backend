@@ -7,6 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAnd
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.PostResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.UpdatePostRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.PostType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PostSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.PostService;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -65,19 +66,19 @@ public class PublicPostController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false, name = "thread_id") @Parameter(name = "thread_id", description = "Filter by thread ID") UUID threadId,
-            @RequestParam(required = false, name = "author_id") @Parameter(name = "author_id", description = "Filter by author user ID") UUID authorId,
-            @RequestParam(required = false, name = "parent_post_id") @Parameter(name = "parent_post_id", description = "Filter by parent post ID (for threaded replies)") UUID parentPostId,
-            @RequestParam(required = false, name = "post_type") @Parameter(name = "post_type", description = "Filter by post type: REPLY, ANSWER, SYSTEM_MESSAGE, MODERATOR_NOTE") PostType postType,
-            @RequestParam(required = false, name = "has_content_warning") @Parameter(name = "has_content_warning", description = "Filter posts with content warnings") Boolean hasContentWarning,
-            @RequestParam(defaultValue = "false", name = "is_deleted") @Parameter(name = "is_deleted", description = "Include soft-deleted posts") boolean isDeleted,
-            @RequestParam(defaultValue = "", name = "search") @Parameter(name = "search", description = "Search by content (case-insensitive contains)") String search,
-            @RequestParam(defaultValue = "created_at", name = "sort_by") @Parameter(name = "sort_by", description = "Field to sort by: created_at, updated_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction") @Parameter(name = "sort_direction", description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(required = false, name = "thread_id")  UUID threadId,
+            @RequestParam(required = false, name = "author_id")  UUID authorId,
+            @RequestParam(required = false, name = "parent_post_id")  UUID parentPostId,
+            @RequestParam(required = false, name = "post_type")  PostType postType,
+            @RequestParam(required = false, name = "has_content_warning") Boolean hasContentWarning,
+            @RequestParam(defaultValue = "false", name = "is_deleted") boolean isDeleted,
+            @RequestParam(required = false, name = "search")  String search,
+            @RequestParam(defaultValue = "CREATED_AT", name = "sort_by") PostSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction")  String sortDirection
     ){
 
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-        return postService. getAllPosts( page, size, threadId, authorId, parentPostId, postType, hasContentWarning, isDeleted, search,sortBy, sortDirection, viewerContext)
+        return postService.getAllPosts( page, size, threadId, authorId, parentPostId, postType, hasContentWarning, isDeleted, search, sortBy, sortDirection, viewerContext)
                 .map(paginatedPosts ->
                         ResponseEntity.ok(new StandardSuccessResponse<>("Posts retrieved successfully", paginatedPosts)));
     }

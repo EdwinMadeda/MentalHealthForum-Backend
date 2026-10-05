@@ -134,7 +134,7 @@ public class ThreadServiceImpl implements ThreadService {
             Boolean isWatched,
             UUID categoryTagId,
             String search,
-            String sortBy,
+            ThreadSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ) {
@@ -164,7 +164,7 @@ public class ThreadServiceImpl implements ThreadService {
         String effectiveThreadStatus = threadStatus != null ? threadStatus.name() : null;
         String effectiveSearch = (search == null || search.trim().isEmpty()) ? null : search.trim();
 
-        ThreadSortField sortByField = validateAndNormalizeSortBy(sortBy);
+        ThreadSortField sortByField = sortBy != null ? sortBy : ThreadSortField.DEFAULT;
         String normalizedSortDirection = sortByField.determineSortDirection(sortDirection);
 
         Flux<ThreadEntity> theadsFlux = threadRepository.findAllPaginated(
@@ -716,10 +716,6 @@ public class ThreadServiceImpl implements ThreadService {
 
     // ==================== PRIVATE HELPERS ====================
 
-    private ThreadSortField validateAndNormalizeSortBy(String sortBy) {
-        return ThreadSortField.fromString(sortBy);
-    }
-
     private Mono<ThreadEntity> findThread(UUID threadId, ViewerContext viewerContext) {
         UUID viewerId = UUID.fromString(viewerContext.getUserId());
         boolean isAdmin = viewerContext.isAdmin();
@@ -1188,11 +1184,11 @@ public class ThreadServiceImpl implements ThreadService {
                             .filter(thread -> thread.getCreatorId().equals(creator.getKeycloakId()))
                             .count();
 
-                    return new FilterOption(
+                    return  FilterOption.ofUser(
                             creator.getKeycloakId(),
                             creator.getPublicIdentifier(),
-                            creator.getKeycloakId().toString(),
                             creator.getAvatarUrl(),
+                            creator.getInitials(),
                             count
                     );
                 })
@@ -1206,7 +1202,7 @@ public class ThreadServiceImpl implements ThreadService {
                             .filter(thread -> thread.getCategoryId().equals(category.getId()))
                             .count();
 
-                    return new FilterOption(
+                    return FilterOption.ofEntity(
                             category.getId(),
                             category.getName(),
                             category.getSlug(),
@@ -1246,7 +1242,7 @@ public class ThreadServiceImpl implements ThreadService {
                 ))
                 .values()
                 .stream()
-                .map(tag -> new FilterOption(
+                .map(tag -> FilterOption.ofEntity(
                         tag.id(),
                         tag.name(),
                         tag.slug(),
@@ -1255,10 +1251,49 @@ public class ThreadServiceImpl implements ThreadService {
                 .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
 
+        // Build thread type options
+        Map<ThreadType, Long> threadTypeCounts = data.threads.stream()
+                .map(ThreadEntity::getThreadType)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> threadTypeOptions = Arrays.stream(ThreadType.values())
+                .map(threadType -> FilterOption.ofEnum(
+                        threadType.getDisplayName(),
+                        threadType.name(),
+                        threadTypeCounts.getOrDefault(threadType, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+        // Built thread status options
+        Map<ThreadStatus, Long> threadStatusCounts = data.threads.stream()
+                .map(ThreadEntity::getThreadStatus)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> threadStatusOptions = Arrays.stream(ThreadStatus.values())
+                .map(threadStatus -> FilterOption.ofEnum(
+                        threadStatus.getDisplayName(),
+                        threadStatus.name(),
+                        threadStatusCounts.getOrDefault(threadStatus, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+
         ThreadFilterDto threadFilters = ThreadFilterDto.builder()
                 .creators(creatorOptions)
                 .categories(categoryOptions)
                 .tags(tagOptions)
+                .threadTypes(threadTypeOptions)
+                .threadStatuses(threadStatusOptions)
                 .build();
 
 

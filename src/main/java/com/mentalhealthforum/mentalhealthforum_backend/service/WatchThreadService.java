@@ -5,6 +5,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchThreadResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.WatchThreadSortField;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -27,7 +28,7 @@ public interface WatchThreadService {
             Boolean isBookmarked,
             Boolean notificationEnabled,
             String search,
-            String sortBy,
+            WatchThreadSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

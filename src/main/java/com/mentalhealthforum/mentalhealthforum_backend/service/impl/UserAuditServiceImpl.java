@@ -518,13 +518,13 @@ public class UserAuditServiceImpl implements UserAuditService {
                         Collectors.counting()
                 ));
 
-        List<FilterOption> actionOptions = actionCounts.entrySet().stream()
-                .map(entry -> new FilterOption(
-                        entry.getKey().getDisplayName(),
-                        entry.getKey().name(),
-                        entry.getValue()
+        List<FilterOption> actionOptions = Arrays.stream(UserAuditAction.values())
+                .map(action -> FilterOption.ofEnum(
+                        action.getDisplayName(),
+                        action.name(),
+                        actionCounts.getOrDefault(action, 0L)
                 ))
-                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .filter(option -> option.getCount() > 0)
                 .toList();
 
         // Build target user options (filter nulls)
@@ -541,11 +541,11 @@ public class UserAuditServiceImpl implements UserAuditService {
                     UserDetails targetUserDetails = entry.getValue();
                     long count = targetUserCounts.getOrDefault(targetUserId, 0L);
 
-                    return new FilterOption(
+                    return  FilterOption.ofUser(
                             targetUserId,
                             targetUserDetails.getDisplayName(),
-                            targetUserId.toString(),
                             targetUserDetails.getAvatarUrl(),
+                            targetUserDetails.getInitials(),
                             count
                     );
                 })
@@ -566,11 +566,11 @@ public class UserAuditServiceImpl implements UserAuditService {
                     UserDetails performedByDetails = entry.getValue();
                     long count = performerCounts.getOrDefault(performedById, 0L);
 
-                    return new FilterOption(
+                    return FilterOption.ofUser(
                             performedById,
                             performedByDetails.getDisplayName(),
-                            performedById.toString(),
                             performedByDetails.getAvatarUrl(),
+                            performedByDetails.getInitials(),
                             count
                     );
                 })

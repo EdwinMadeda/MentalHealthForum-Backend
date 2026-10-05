@@ -14,4 +14,8 @@ public class ReportFilterDto {
     private List<FilterOption> assignedTo;
     private List<FilterOption> reviewers;
     private List<FilterOption> reportStatus;
+    private List<FilterOption> targetTypes;
+    private List<FilterOption> reportCategories;
+    private List<FilterOption> severities;
+
 }

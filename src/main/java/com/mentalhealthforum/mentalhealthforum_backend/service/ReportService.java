@@ -7,6 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportCategory;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportTargetType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.Severity;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ReportSortField;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -33,7 +34,7 @@ public interface ReportService {
             ReportStatus status,
             ReportCategory category,
             String search,
-            String sortBy,
+            ReportSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );
@@ -52,7 +53,7 @@ public interface ReportService {
             UUID assignedTo,
             UUID reviewedBy,
             String search,
-            String sortBy,
+            ReportSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext);
 

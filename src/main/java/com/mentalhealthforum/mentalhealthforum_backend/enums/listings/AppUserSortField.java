@@ -45,7 +45,7 @@ public enum AppUserSortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
                 .isDefault(this == DEFAULT)

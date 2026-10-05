@@ -3,12 +3,11 @@ package com.mentalhealthforum.mentalhealthforum_backend.controller;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardSuccessResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
-import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserConnectRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserConnectResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ConnectionSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import com.mentalhealthforum.mentalhealthforum_backend.service.UserConnectService;
-import io.swagger.v3.oas.annotations.Parameter;
-import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -118,14 +117,12 @@ public class UserConnectController {
     @GetMapping
     public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserConnectResponse>>>> getMyConnections(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") @Parameter(name = "page", description = "Page number (0-indexed)", example = "0") int page,
-            @RequestParam(defaultValue = "20") @Parameter(name = "size", description = "Number of items per page", example = "20") int size,
-            @RequestParam(required = false) @Parameter(description = "Filter by notification enabled status") Boolean notificationEnabled,
-            @RequestParam(defaultValue = "") @Parameter(name = "search", description = "Search by other user's display name", example = "john") String search,  // ✅ Fixed
-            @RequestParam(defaultValue = "created_at", name = "sort_by")
-            @Parameter(name = "sort_by", description = "Sort field: created_at, display_name", example = "created_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction")
-            @Parameter(name = "sort_direction", description = "Sort direction: asc (ascending) or desc (descending)", example = "desc") String sortDirection
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20")  int size,
+            @RequestParam(required = false, name = "notification_enabled")  Boolean notificationEnabled,
+            @RequestParam(required = false, name = "search")  String search,
+            @RequestParam(defaultValue = "CREATED_AT", name = "sort_by") ConnectionSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ){
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
         return userConnectService.getMyConnections(page, size, notificationEnabled, search, sortBy, sortDirection, viewerContext)
@@ -136,18 +133,17 @@ public class UserConnectController {
     @GetMapping("/pending")
     public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<UserConnectResponse>>>> getMyPendingRequests(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") @Parameter(name = "page", description = "Page number (0-indexed)", example = "0") int page,
-            @RequestParam(defaultValue = "20") @Parameter(name = "size", description = "Number of items per page", example = "20") int size,
-            @RequestParam(defaultValue = "") @Parameter(name = "search", description = "Search by other user's display name", example = "john") String search,  // ✅ Fixed
-            @RequestParam(defaultValue = "incoming") @Parameter(name = "type", description = "Filter by request direction: incoming (requests sent to me), outgoing (requests I sent), all (both)", example = "incoming") String type,  // ✅ Fixed - more descriptive
-            @RequestParam(defaultValue = "created_at", name = "sort_by")
-            @Parameter(name = "sort_by", description = "Sort field: created_at, display_name", example = "created_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction")
-            @Parameter(name = "sort_direction", description = "Sort direction: asc (ascending) or desc (descending)", example = "desc") String sortDirection
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20")  int size,
+            @RequestParam(required = false, name = "search") String search,
+            @RequestParam(defaultValue = "ALL", name = "connection_type") ConnectionType connectionType,
+            @RequestParam(defaultValue = "CREATED_AT", name = "sort_by") ConnectionSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ){
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
-        return userConnectService.getMyPendingRequests(page, size, search, type, sortBy, sortDirection, viewerContext)
+        return userConnectService.getMyPendingRequests(page, size, search, connectionType, sortBy, sortDirection, viewerContext)
                 .map(connections -> ResponseEntity.ok(
                         new StandardSuccessResponse<>("pending requests retrieved successfully", connections)));
     }
+
 }

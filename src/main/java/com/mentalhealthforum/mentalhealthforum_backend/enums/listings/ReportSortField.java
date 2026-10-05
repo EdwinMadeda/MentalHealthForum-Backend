@@ -8,7 +8,7 @@ import java.util.List;
 
 @Getter
 public enum ReportSortField {
-    SEVERITY("severity", "severity", "ASC"),
+    SEVERITY("severity", "severity", "DESC"),
     REPORTED_AT("reported_at", "reported at", "DESC"),
     LAST_MODIFIED_AT("last_modified_at", "last modified at", "DESC");
 
@@ -22,16 +22,18 @@ public enum ReportSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final ReportSortField DEFAULT = ReportSortField.REPORTED_AT;
+
     public static ReportSortField fromString(String value) {
         if(value == null){
-            return REPORTED_AT;  // Default to most recent
+            return DEFAULT;  // Default to most recent
         }
         for(ReportSortField field : ReportSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  REPORTED_AT;
+        return  DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection) {
@@ -43,9 +45,10 @@ public enum ReportSortField {
 
     private SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

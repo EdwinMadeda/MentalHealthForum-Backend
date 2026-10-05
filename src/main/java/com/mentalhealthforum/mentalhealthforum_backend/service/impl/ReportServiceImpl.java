@@ -139,7 +139,7 @@ public class ReportServiceImpl implements ReportService {
             ReportStatus status,
             ReportCategory category,
             String search,
-            String sortBy,
+            ReportSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ) {
@@ -156,7 +156,7 @@ public class ReportServiceImpl implements ReportService {
         String categoryStr = category != null ? category.name() : null;
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
 
-        ReportSortField sortByField = ReportSortField.fromString(sortBy);
+        ReportSortField sortByField = sortBy != null? sortBy : ReportSortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return contentReportRepository.findOwnReportsPaginated(
@@ -180,10 +180,8 @@ public class ReportServiceImpl implements ReportService {
                     return enrichReportsWithBatchData(reports, viewerContext)
                             .map(enrichedReports -> {
 
-                                FilterMetadata<ReportFilterDto> filters = FilterMetadata.<ReportFilterDto>builder()
-                                        .filters(null)
-                                        .sortOptions(ReportSortField.getOwnReportsSortOptions())
-                                        .build();
+                                FilterMetadata<ReportFilterDto> filters = buildOwnReportFilters(enrichedReports);
+
                                 return  new PaginatedResponse<>(enrichedReports.responses, page, size, total, filters);
 
                             });
@@ -208,7 +206,7 @@ public class ReportServiceImpl implements ReportService {
             UUID assignedTo,
             UUID reviewedBy,
             String search,
-            String sortBy,
+            ReportSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext) {
 
@@ -228,7 +226,7 @@ public class ReportServiceImpl implements ReportService {
         String severityStr = severity != null ? severity.name() : null;
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
 
-        ReportSortField sortByField = ReportSortField.fromString(sortBy);
+        ReportSortField sortByField = sortBy != null ? sortBy : ReportSortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return contentReportRepository.findAllReportsPaginated(
@@ -252,7 +250,7 @@ public class ReportServiceImpl implements ReportService {
                     return enrichReportsWithBatchData(reports, viewerContext)
                             .map(enrichedReports -> {
 
-                                FilterMetadata<ReportFilterDto> filters = buildReportFilters(enrichedReports);
+                                FilterMetadata<ReportFilterDto> filters = buildAllReportFilters(enrichedReports);
                                 return  new PaginatedResponse<>(enrichedReports.responses, page, size, total, filters);
 
                             });
@@ -1326,7 +1324,7 @@ public class ReportServiceImpl implements ReportService {
             Map<UUID, UserDetails> reviewers
     ){}
 
-    private FilterMetadata<ReportFilterDto> buildReportFilters(EnrichedReportData data){
+    private FilterMetadata<ReportFilterDto> buildAllReportFilters(EnrichedReportData data){
         // Build reporter options
         Map<UUID, Long> reporterCounts = data.reports().stream()
                 .collect(Collectors.groupingBy(
@@ -1339,11 +1337,11 @@ public class ReportServiceImpl implements ReportService {
                     UUID reporterId = entry.getKey();
                     UserDetails reporter = entry.getValue();
                     long count = reporterCounts.getOrDefault(reporterId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofUser(
                             reporterId,
                             reporter.getDisplayName(),
-                            reporterId.toString(),
                             reporter.getAvatarUrl(),
+                            reporter.getInitials(),
                             count
                     );
                 })
@@ -1363,13 +1361,13 @@ public class ReportServiceImpl implements ReportService {
                     UUID reportedUserId = entry.getKey();
                     UserDetails reportedUser = entry.getValue();
                     long count = reportedUserCounts.getOrDefault(reportedUserId, 0L);
-                    return FilterOption.builder()
-                            .id(reportedUserId)
-                            .label(reportedUser.getDisplayName())
-                            .value(reportedUserId.toString())
-                            .avatarUrl(reportedUser.getAvatarUrl())
-                            .count(count)
-                            .build();
+                    return FilterOption.ofUser(
+                            reportedUserId,
+                            reportedUser.getDisplayName(),
+                            reportedUser.getAvatarUrl(),
+                            reportedUser.getInitials(),
+                            count
+                    );
                 })
                 .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
@@ -1389,7 +1387,7 @@ public class ReportServiceImpl implements ReportService {
                     UUID threadId = entry.getKey();
                     ThreadDetails thread = entry.getValue();
                     long count = threadCounts.getOrDefault(threadId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofEntity(
                             threadId,
                             thread.getTitle(),
                             threadId.toString(),
@@ -1412,11 +1410,11 @@ public class ReportServiceImpl implements ReportService {
                     UUID moderatorId = entry.getKey();
                     UserDetails moderator = entry.getValue();
                     long count = assignedModeratorCounts.getOrDefault(moderatorId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofUser(
                             moderatorId,
                             moderator.getDisplayName(),
-                            moderatorId.toString(),
                             moderator.getAvatarUrl(),
+                            moderator.getInitials(),
                             count
                     );
                 })
@@ -1436,11 +1434,11 @@ public class ReportServiceImpl implements ReportService {
                     UUID reviewerId = entry.getKey();
                     UserDetails reviewer = entry.getValue();
                     long count = reviewerCounts.getOrDefault(reviewerId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofUser(
                             reviewerId,
                             reviewer.getDisplayName(),
-                            reviewerId.toString(),
                             reviewer.getAvatarUrl(),
+                            reviewer.getInitials(),
                             count
                     );
                 })
@@ -1456,15 +1454,67 @@ public class ReportServiceImpl implements ReportService {
                 ));
 
         List<FilterOption> statusOptions = Arrays.stream(ReportStatus.values())
-                .map(status -> new FilterOption(
+                .map(status -> FilterOption.ofEnum(
                     status.getDisplayName(),
                     status.name(),
                     statusCounts.getOrDefault(status, 0L)
                 ))
                 .filter(option -> option.getCount() > 0)
-                .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
 
+        // Build target type options
+        Map<ReportTargetType, Long> targetTypeCounts = data.reports().stream()
+                .map(ContentReportEntity::getTargetType)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> targetTypeOptions = Arrays.stream(ReportTargetType.values())
+                .map(targetType -> FilterOption.ofEnum(
+                        targetType.getDisplayName(),
+                        targetType.name(),
+                        targetTypeCounts.getOrDefault(targetType, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+        // Build report category options
+        Map<ReportCategory, Long> reportCategoryCounts = data.reports().stream()
+                .map(ContentReportEntity::getReportCategory)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> reportCategoryOptions = Arrays.stream(ReportCategory.values())
+                .map(category -> FilterOption.ofEnum(
+                        category.getDisplayName(),
+                        category.name(),
+                        reportCategoryCounts.getOrDefault(category, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+        // Build severity options
+        Map<Severity, Long> severityCounts = data.reports().stream()
+                .map(ContentReportEntity::getSeverity)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> severityOptions = Arrays.stream(Severity.values())
+                .map(severity -> FilterOption.ofEnum(
+                        severity.getDisplayName(),
+                        severity.name(),
+                        severityCounts.getOrDefault(severity, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
 
         ReportFilterDto reportFilters = ReportFilterDto.builder()
                 .reporters(reporterOptions)
@@ -1473,11 +1523,80 @@ public class ReportServiceImpl implements ReportService {
                 .assignedTo(assignedModeratorOptions)
                 .reviewers(reviewerOptions)
                 .reportStatus(statusOptions)
+                .targetTypes(targetTypeOptions)
+                .reportCategories(reportCategoryOptions)
+                .severities(severityOptions)
                 .build();
 
         return FilterMetadata.<ReportFilterDto>builder()
                 .filters(reportFilters)
                 .sortOptions(ReportSortField.getAllReportsSortOptions())
+                .build();
+
+    }
+
+    private FilterMetadata<ReportFilterDto> buildOwnReportFilters(EnrichedReportData data){
+        // Build target type options
+        Map<ReportTargetType, Long> targetTypeCounts = data.reports().stream()
+                .map(ContentReportEntity::getTargetType)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> targetTypeOptions = Arrays.stream(ReportTargetType.values())
+                .map(targetType -> FilterOption.ofEnum(
+                        targetType.getDisplayName(),
+                        targetType.name(),
+                        targetTypeCounts.getOrDefault(targetType, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+        // Build status options
+        Map<ReportStatus, Long> statusCounts = data.reports().stream()
+                .collect(Collectors.groupingBy(
+                        ContentReportEntity::getStatus,
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> statusOptions = Arrays.stream(ReportStatus.values())
+                .map(status -> FilterOption.ofEnum(
+                        status.getDisplayName(),
+                        status.name(),
+                        statusCounts.getOrDefault(status, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+        // Build report category options
+        Map<ReportCategory, Long> reportCategoryCounts = data.reports().stream()
+                .map(ContentReportEntity::getReportCategory)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> reportCategoryOptions = Arrays.stream(ReportCategory.values())
+                .map(category -> FilterOption.ofEnum(
+                        category.getDisplayName(),
+                        category.name(),
+                        reportCategoryCounts.getOrDefault(category, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+        ReportFilterDto reportFilters = ReportFilterDto.builder()
+                .reportStatus(statusOptions)
+                .targetTypes(targetTypeOptions)
+                .reportCategories(reportCategoryOptions)
+                .build();
+
+        return FilterMetadata.<ReportFilterDto>builder()
+                .filters(reportFilters)
+                .sortOptions(ReportSortField.getOwnReportsSortOptions())
                 .build();
 
     }

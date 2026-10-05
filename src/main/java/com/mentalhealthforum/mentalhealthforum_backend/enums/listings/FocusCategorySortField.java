@@ -18,16 +18,18 @@ public enum FocusCategorySortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final FocusCategorySortField DEFAULT = FocusCategorySortField.CREATED_AT;
+
     public static FocusCategorySortField fromString(String value) {
         if(value == null){
-            return CREATED_AT;  // Default to created_at
+            return DEFAULT;  // Default to created_at
         }
         for(FocusCategorySortField field : FocusCategorySortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return CREATED_AT;
+        return DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection) {
@@ -39,9 +41,10 @@ public enum FocusCategorySortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

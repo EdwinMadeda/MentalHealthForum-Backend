@@ -7,6 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAnd
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.PostResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.UpdatePostRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.PostType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PostSortField;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -39,7 +40,7 @@ public interface PostService {
             Boolean hasContentWarning,
             Boolean isDeleted,
             String search,
-            String sortBy,
+            PostSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

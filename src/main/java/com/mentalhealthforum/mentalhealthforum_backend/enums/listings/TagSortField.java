@@ -19,16 +19,18 @@ public enum TagSortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final TagSortField DEFAULT = TagSortField.NAME;
+
     public static TagSortField fromString(String value){
         if(value == null){
-            return NAME; // Default to name
+            return DEFAULT; // Default to name
         }
         for(TagSortField field: TagSortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return NAME;
+        return DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection){
@@ -40,9 +42,10 @@ public enum TagSortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

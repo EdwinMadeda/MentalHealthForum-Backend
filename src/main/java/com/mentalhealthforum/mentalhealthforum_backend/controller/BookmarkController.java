@@ -7,6 +7,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkReq
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.BookmarkSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -69,18 +70,16 @@ public class BookmarkController {
     @GetMapping
     public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<BookmarkResponse>>>> getMyBookmarks(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") @Parameter(name = "page", description = "Page number (0-indexed)", example = "0") int page,
-            @RequestParam(defaultValue = "20") @Parameter(name = "size", description = "Number of items per page", example = "20") int size,
-            @RequestParam(required = false, name = "category_id") @Parameter(name = "category_id", description = "Filter by category ID") UUID categoryId,
-            @RequestParam(required = false, name = "creator_id") @Parameter(name = "creator_id", description = "Filter by creator user ID") UUID creatorId,
-            @RequestParam(required = false, name = "thread_type") @Parameter(name = "thread_type", description = "Filter by thread type: DISCUSSION, QUESTION, CRISIS_SUPPORT, PEER_REVIEW, POLL") ThreadType threadType,
-            @RequestParam(required = false, name = "thread_status") @Parameter(name = "thread_status", description = "Filter by thread status: OPEN, RESOLVED, CLOSED, ARCHIVED") ThreadStatus threadStatus,
-            @RequestParam(required = false, name = "has_content_warning") @Parameter(name = "has_content_warning", description = "Filter threads with content warnings") Boolean hasContentWarning,
-            @RequestParam(defaultValue = "") @Parameter(name = "search", description = "Search in thread title or bookmark notes", example = "anxiety") String search,
-            @RequestParam(defaultValue = "bookmarked_at", name = "sort_by")
-            @Parameter(name = "sort_by", description = "Sort field: title, bookmarked_at, last_activity_at, post_count", example = "bookmarked_at") String sortBy,
-            @RequestParam(required = false, name = "sort_direction")
-            @Parameter(name = "sort_direction", description = "Sort direction: asc (ascending) or desc (descending)", example = "desc") String sortDirection
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false, name = "category_id") UUID categoryId,
+            @RequestParam(required = false, name = "creator_id") UUID creatorId,
+            @RequestParam(required = false, name = "thread_type") ThreadType threadType,
+            @RequestParam(required = false, name = "thread_status") ThreadStatus threadStatus,
+            @RequestParam(required = false, name = "has_content_warning")  Boolean hasContentWarning,
+            @RequestParam(required = false, name = "search") String search,
+            @RequestParam(defaultValue = "BOOKMARKED_AT", name = "sort_by") BookmarkSortField sortBy,
+            @RequestParam(required = false, name = "sort_direction") String sortDirection
     ){
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
         return bookmarkService.getMyBookmarks(page, size, categoryId, creatorId, threadType, threadStatus, hasContentWarning, search, sortBy, sortDirection, viewerContext)

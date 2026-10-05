@@ -10,6 +10,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentit
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.GroupPath;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.OnboardingStage;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ReportStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.PendingInviteSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.UserDoesNotExistException;
@@ -398,13 +399,13 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                         Collectors.counting()
                 ));
 
-        List<FilterOption> stageOptions = stageCounts.entrySet().stream()
-                .map(entry -> new FilterOption(
-                        entry.getKey().getDisplayName(),
-                        entry.getKey().name(),
-                        entry.getValue()
+        List<FilterOption> stageOptions = Arrays.stream(OnboardingStage.values())
+                .map(stage -> FilterOption.ofEnum(
+                        stage.getDisplayName(),
+                        stage.name(),
+                        stageCounts.getOrDefault(stage, 0L)
                 ))
-                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .filter(option -> option.getCount() > 0)
                 .toList();
 
         // Build inviter options
@@ -420,11 +421,11 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                     UUID inviterId = entry.getKey();
                     UserDetails inviter = entry.getValue();
                     long count = inviterCounts.getOrDefault(inviterId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofUser(
                             inviterId,
                             inviter.getDisplayName(),
-                            inviterId.toString(),
                             inviter.getAvatarUrl(),
+                            inviter.getInitials(),
                             count
                     );
                 })
@@ -439,13 +440,13 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                         Collectors.counting()
                 ));
 
-        List<FilterOption> groupOptions = groupCounts.entrySet().stream()
-                .map(entry -> new FilterOption(
-                        entry.getKey().getDisplayName(),
-                        entry.getKey().name(),
-                        entry.getValue()
+        List<FilterOption> groupOptions = Arrays.stream(GroupPath.values())
+                .map(group -> FilterOption.ofEnum(
+                        group.getDisplayName(),
+                        group.name(),
+                        groupCounts.getOrDefault(group, 0L)
                 ))
-                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .filter(option -> option.getCount() > 0)
                 .toList();
 
         PendingInviteFilterDto filters = PendingInviteFilterDto.builder()

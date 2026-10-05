@@ -503,15 +503,14 @@ public class AppUserServiceImpl implements AppUserService {
                         Collectors.counting()
                 ));
 
-        List<FilterOption> roleOptions = roleCounts.entrySet().stream()
-                .map(entry -> new FilterOption(
-                        entry.getKey().getDisplayName(),
-                        entry.getKey().name(),
-                        entry.getValue()
+        List<FilterOption> roleOptions = Arrays.stream(RealmRole.values())
+                .map(role -> FilterOption.ofEnum(
+                        role.getDisplayName(),
+                        role.name(),
+                        roleCounts.getOrDefault(role, 0L)
                 ))
-                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .filter(option -> option.getCount() > 0)
                 .toList();
-
 
         // Build group options
         Map<GroupPath, Long> groupCounts = data.records().stream()
@@ -523,13 +522,13 @@ public class AppUserServiceImpl implements AppUserService {
                         Collectors.counting()
                 ));
 
-        List<FilterOption> groupOptions = groupCounts.entrySet().stream()
-                .map(entry -> new FilterOption(
-                        entry.getKey().getDisplayName(),
-                        entry.getKey().name(),
-                        entry.getValue()
+        List<FilterOption> groupOptions = Arrays.stream(GroupPath.values())
+                .map(group -> FilterOption.ofEnum(
+                        group.getDisplayName(),
+                        group.name(),
+                        groupCounts.getOrDefault(group, 0L)
                 ))
-                .sorted(Comparator.comparing(FilterOption::getLabel))
+                .filter(option -> option.getCount() > 0)
                 .toList();
 
         UserFilterDto userFilters = UserFilterDto.builder()

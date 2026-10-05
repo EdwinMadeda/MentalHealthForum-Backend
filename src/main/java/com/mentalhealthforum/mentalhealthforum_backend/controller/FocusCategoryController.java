@@ -4,6 +4,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardSuccessResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.FocusCategoryResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.FocusCategorySortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.FocusCategoryService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.JwtClaimsExtractor;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -65,12 +66,12 @@ public class FocusCategoryController {
     @GetMapping
     public Mono<ResponseEntity<StandardSuccessResponse<PaginatedResponse<FocusCategoryResponse>>>> getFocusCategories(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") @Parameter(description = "Page number (0-indexed)") int page,
-            @RequestParam(defaultValue = "20") @Parameter(description = "Number of items per page") int size,
-            @RequestParam(required = false) @Parameter(description = "Filter by notification enabled status") Boolean notificationEnabled,
-            @RequestParam(defaultValue = "") @Parameter(description = "Search by category name or description") String search,
-            @RequestParam(defaultValue = "created_at") @Parameter(description = "Sort field: created_at, category_name") String sortBy,
-            @RequestParam(required = false) @Parameter(description = "Sort direction: asc or desc") String sortDirection
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false, name = "notification_enabled")  Boolean notificationEnabled,
+            @RequestParam(required = false, name = "search") String search,
+            @RequestParam(defaultValue = "CREATED_AT", name = "sort_by") FocusCategorySortField sortBy,
+            @RequestParam(required = false, name = "sort_direction")  String sortDirection
     ){
         ViewerContext viewerContext = jwtClaimsExtractor.extractViewerContext(jwt);
         return focusCategoryService.getFocusCategories(page, size,  notificationEnabled,search, sortBy,sortDirection, viewerContext)

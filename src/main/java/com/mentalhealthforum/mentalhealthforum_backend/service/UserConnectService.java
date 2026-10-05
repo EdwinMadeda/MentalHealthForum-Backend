@@ -3,6 +3,8 @@ package com.mentalhealthforum.mentalhealthforum_backend.service;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.UserConnectResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.ConnectionType;
+import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ConnectionSortField;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -23,7 +25,7 @@ public interface UserConnectService {
             int size,
             Boolean notificationEnabled,
             String search,
-            String sortBy,
+            ConnectionSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext);
 
@@ -31,8 +33,8 @@ public interface UserConnectService {
             int page,
             int size,
             String search,
-            String type,
-            String sortBy,
+            ConnectionType connectionType,
+            ConnectionSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     );

@@ -19,16 +19,18 @@ public enum CategorySortField {
         this.defaultDirection = defaultDirection;
     }
 
+    public static final CategorySortField DEFAULT = CategorySortField.SORT_ORDER;
+
     public static CategorySortField fromString(String value) {
         if(value == null){
-            return SORT_ORDER;  // Default to sort_order
+            return DEFAULT;  // Default to sort_order
         }
         for(CategorySortField field : CategorySortField.values()){
             if(field.getValue().equalsIgnoreCase(value)){
                 return field;
             }
         }
-        return  SORT_ORDER;
+        return  DEFAULT;
     }
 
     public String determineSortDirection(String sortDirection) {
@@ -40,9 +42,10 @@ public enum CategorySortField {
 
     public SortOption toSortOption(){
         return SortOption.builder()
-                .value(this.value)
+                .value(this.name())
                 .label(this.label)
                 .defaultDirection(this.defaultDirection)
+                .isDefault(this == DEFAULT)
                 .build();
     }
 

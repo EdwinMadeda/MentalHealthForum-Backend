@@ -344,7 +344,7 @@ public class CategoryServiceImpl implements CategoryService {
             Boolean isParent,
             Boolean isFocused,
             String search,
-            String sortBy,
+            CategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext) {
         // Public - no permission check needed
@@ -360,7 +360,7 @@ public class CategoryServiceImpl implements CategoryService {
             Boolean isParent,
             Boolean isActive,
             String search,
-            String sortBy,
+            CategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ) {
@@ -507,7 +507,7 @@ public class CategoryServiceImpl implements CategoryService {
             Boolean isActive,
             Boolean isFocused,
             String search,
-            String sortBy,
+            CategorySortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ){
@@ -522,7 +522,8 @@ public class CategoryServiceImpl implements CategoryService {
         boolean isVerified = viewerContext.isVerified();
 
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
-        CategorySortField sortByField = validateAndNormalizeSortBy(sortBy);
+
+        CategorySortField sortByField = sortBy != null? sortBy : CategorySortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
         Boolean effectiveIsParent = (parentCategoryId != null && isParent != null) ? null : isParent;
 
@@ -567,10 +568,6 @@ public class CategoryServiceImpl implements CategoryService {
                     });
         });
 
-    }
-
-    private CategorySortField validateAndNormalizeSortBy(String sortBy) {
-       return CategorySortField.fromString(sortBy);
     }
 
 
@@ -754,7 +751,7 @@ public class CategoryServiceImpl implements CategoryService {
                 ))
                 .values()
                 .stream()
-                .map(tag -> new FilterOption(
+                .map(tag -> FilterOption.ofEntity(
                         tag.id(),
                         tag.name(),
                         tag.slug(),
@@ -771,13 +768,14 @@ public class CategoryServiceImpl implements CategoryService {
                             .filter(category -> parent.getId().equals(category.getParentCategoryId()))
                             .count();
 
-                    return new FilterOption(
+                    return  FilterOption.ofEntity(
                             parent.getId(),
                             parent.getName(),
                             parent.getSlug(),
                             count
                     );
                 })
+                .filter(option -> option.getCount() > 0)
                 .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
 

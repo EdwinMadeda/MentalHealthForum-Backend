@@ -35,6 +35,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.*;
 
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -96,7 +97,7 @@ public class BookmarkServiceImpl implements BookmarkService {
             ThreadStatus threadStatus,
             Boolean hasContentWarning,
             String search,
-            String sortBy,
+            BookmarkSortField sortBy,
             String sortDirection,
             ViewerContext viewerContext
     ){
@@ -117,7 +118,8 @@ public class BookmarkServiceImpl implements BookmarkService {
         String effectiveSearch = (search == null || search.isBlank()) ? null : search.trim();
         String effectiveThreadType =  threadType != null? threadType.name() : null;
         String effectiveThreadStatus  = threadStatus != null? threadStatus.name() : null;
-        BookmarkSortField sortByField = validateAndNormalizeSortBy(sortBy);
+
+        BookmarkSortField sortByField = sortBy != null? sortBy: BookmarkSortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
 
@@ -345,11 +347,11 @@ public class BookmarkServiceImpl implements BookmarkService {
                     UUID creatorId = entry.getKey();
                     UserDetails creator = entry.getValue();
                     long count = creatorCounts.getOrDefault(creatorId, 0L);
-                    return new FilterOption(
+                    return  FilterOption.ofUser(
                             creatorId,
                             creator.getDisplayName(),
-                            creatorId.toString(),
                             creator.getAvatarUrl(),
+                            creator.getInitials(),
                             count
                     );
                 })
@@ -368,7 +370,7 @@ public class BookmarkServiceImpl implements BookmarkService {
                     UUID categoryId = entry.getKey();
                     CategoryEntity category = entry.getValue();
                     long count = categoryCounts.getOrDefault(categoryId, 0L);
-                    return new FilterOption(
+                    return FilterOption.ofEntity(
                             categoryId,
                             category.getName(),
                             category.getSlug(),
@@ -378,9 +380,48 @@ public class BookmarkServiceImpl implements BookmarkService {
                 .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
 
+        // Build thread type options
+        Map<ThreadType, Long> threadTypeCounts = data.records.stream()
+                .map(record -> ThreadType.fromString(record.thread_type()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> threadTypeOptions = Arrays.stream(ThreadType.values())
+                .map(threadType -> FilterOption.ofEnum(
+                        threadType.getDisplayName(),
+                        threadType.name(),
+                        threadTypeCounts.getOrDefault(threadType, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
+
+        // Build thread status options
+        Map<ThreadStatus, Long> threadStatusCounts = data.records.stream()
+                .map(record -> ThreadStatus.fromString(record.thread_status()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.counting()
+                ));
+
+        List<FilterOption> threadStatusOptions = Arrays.stream(ThreadStatus.values())
+                .map(threadStatus -> FilterOption.ofEnum(
+                        threadStatus.getDisplayName(),
+                        threadStatus.name(),
+                        threadStatusCounts.getOrDefault(threadStatus, 0L)
+                ))
+                .filter(option -> option.getCount() > 0)
+                .toList();
+
         BookmarkFilterDto bookmarkFilters = BookmarkFilterDto.builder()
                 .creators(creatorOptions)
                 .categories(categoryOptions)
+                .threadTypes(threadTypeOptions)
+                .threadStatuses(threadStatusOptions)
                 .build();
 
         return FilterMetadata.<BookmarkFilterDto>builder()
