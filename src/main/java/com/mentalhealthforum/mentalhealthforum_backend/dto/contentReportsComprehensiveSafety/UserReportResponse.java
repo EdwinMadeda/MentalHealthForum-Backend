@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import lombok.Builder;
 import lombok.Data;
@@ -26,23 +27,16 @@ public class UserReportResponse implements ReportResponse {
     private Boolean isAnonymous;
 
     // Reporter info
-    private UUID reporterId;
-    private String reporterDisplayName;
-    private String reporterAvatarUrl;
+    private UserDetails reporter;
 
     // User-specific fields (REQUIRED)
-    private UUID reportedUserId;
-    private String reportedUserDisplayName;
-    private String reportedUserAvatarUrl;
-    private String reportedUserBio;
+    private UserDetails reportedUser;
 
     // Moderation info
-    private UUID assignedModeratorId;
-    private String assignedModeratorDisplayName;
-    private String assignedModeratorAvatarUrl;
+    private UserDetails assignedModerator;
+    private UserDetails reviewer;
+
     private Instant assignedAt;
     private Instant reviewedAt;
-    private UUID reviewedBy;
-    private String reviewedByDisplayName;
-    private String reviewedByAvatarUrl;
+
 }

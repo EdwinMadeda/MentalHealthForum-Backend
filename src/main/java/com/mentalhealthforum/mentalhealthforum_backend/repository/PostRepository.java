@@ -1,6 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.repository;
 
 import com.mentalhealthforum.mentalhealthforum_backend.model.PostEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadEntity;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
 import org.springframework.data.repository.query.Param;
@@ -9,6 +10,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Repository
@@ -21,6 +23,7 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
     Flux<PostEntity> findByAuthorIdOrderByCreatedAtDesc(UUID authorId);
 
     Mono<PostEntity> findByIdAndIsDeletedFalse(UUID postId);
+
 
     // ==================== PAGINATED QUERIES ====================
 
@@ -207,5 +210,14 @@ public interface PostRepository extends R2dbcRepository<PostEntity, UUID> {
 
     @Query("UPDATE forum_posts SET thread_id = :targetThreadId WHERE thread_id = :sourceThreadId")
     Mono<Void> moveAllPostsToThread(@Param("sourceThreadId") UUID sourceThreadId,@Param("targetThreadId") UUID targetThreadId);
+
+
+
+    /**
+     * Batch fetch threads by IDs.
+     * Used for building filter options in reports.
+     */
+    @Query("SELECT * FROM forum_posts WHERE id IN (:ids)")
+    Flux<PostEntity> findPostsByIds(@Param("ids") List<UUID> ids);
 
 }

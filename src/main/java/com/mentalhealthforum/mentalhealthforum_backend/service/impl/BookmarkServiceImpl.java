@@ -5,6 +5,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkedThreadRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.BookmarkFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
@@ -19,13 +21,15 @@ import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiExcept
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.AppUserEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
-import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadBookmarkEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.model.BookmarkEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.AppUserRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.CategoryRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.ThreadBookmarkRepository;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.BookmarkService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.CategoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -47,6 +51,7 @@ public class BookmarkServiceImpl implements BookmarkService {
     private final ThreadBookmarkRepository bookmarkRepository;
     private final ThreadRepository threadRepository;
     private final CategoryRepository categoryRepository;
+    private final CategoryService categoryService;
     private final AppUserRepository appUserRepository;
     private final AppUserService appUserService;
 
@@ -55,12 +60,14 @@ public class BookmarkServiceImpl implements BookmarkService {
             ThreadBookmarkRepository bookmarkRepository,
             ThreadRepository threadRepository,
             CategoryRepository categoryRepository,
+            CategoryService categoryService,
             AppUserRepository appUserRepository,
             AppUserService appUserService) {
         this.transactionalOperator = transactionalOperator;
         this.bookmarkRepository = bookmarkRepository;
         this.threadRepository = threadRepository;
         this.categoryRepository = categoryRepository;
+        this.categoryService = categoryService;
         this.appUserRepository = appUserRepository;
         this.appUserService = appUserService;
     }
@@ -131,25 +138,29 @@ public class BookmarkServiceImpl implements BookmarkService {
                         effectiveThreadStatus, hasContentWarning,
                         effectiveSearch, sortByField.getValue(), effectiveSortDirection, size, offset)
                 .collectList()
-                .flatMap(records -> {
+                .zipWith(bookmarkRepository.countBookmarksWithFilters(
+                        viewerId,
+                        isAdmin, isModeratorOrAdmin, isVerified,
+                        categoryId, creatorId,
+                        effectiveThreadType,
+                        effectiveThreadStatus, hasContentWarning, effectiveSearch))
+                .flatMap(tuple -> {
+                    List<BookmarkedThreadRecord> records = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
                     if(records.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(getBookmarkSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichBookmarksWithBatchData(records)
-                            .zipWith(bookmarkRepository.countBookmarksWithFilters(
-                                    viewerId,
-                                    isAdmin, isModeratorOrAdmin, isVerified,
-                                    categoryId, creatorId,
-                                    effectiveThreadType,
-                                    effectiveThreadStatus, hasContentWarning, effectiveSearch))
-                            .map(tuple -> {
-                                EnrichedBookmarkData enrichedBookmarkData = tuple.getT1();
-                                long totalCount = tuple.getT2();
+                            .map(enriched -> {
 
-                                FilterMetadata<BookmarkFilterDto> filters = buildBookmarkFilters(enrichedBookmarkData);
+                                FilterMetadata<BookmarkFilterDto> filters = buildBookmarkFilters(enriched);
 
-                                return new PaginatedResponse<>(enrichedBookmarkData.responses, page, size, totalCount, filters);
+                                return new PaginatedResponse<>(enriched.responses, page, size, totalCount, filters);
                             });
                 });
 
@@ -216,7 +227,7 @@ public class BookmarkServiceImpl implements BookmarkService {
     }
 
     private Mono<BookmarkedThreadRecord> createBookmark(UUID userId, UUID threadId, String notes){
-        ThreadBookmarkEntity bookmarkEntity = ThreadBookmarkEntity.builder()
+        BookmarkEntity bookmarkEntity = BookmarkEntity.builder()
                 .userId(userId)
                 .threadId(threadId)
                 .notes(notes)
@@ -235,8 +246,14 @@ public class BookmarkServiceImpl implements BookmarkService {
      * Enriches a single bookmark..
      */
     private Mono<BookmarkResponse> enrichSingleBookmarkWithData(BookmarkedThreadRecord record) {
-        return appUserService.getUserDetails(record.creator_id())
-                .map(creator -> mapResponseWithData(record, creator));
+
+        return Mono.zip(appUserService.getUserDetails(record.creator_id()), categoryService.getCategoryDetails(record.category_id()))
+                .map(tuple -> {
+                     UserDetails creator = tuple.getT1();
+                     CategoryDetails categoryDetails = tuple.getT2();
+
+                     return mapResponseWithData(record, creator, categoryDetails);
+                });
     }
     /**
      * Enriches a list of bookmarked thread records with creator details using batch fetching.
@@ -268,6 +285,7 @@ public class BookmarkServiceImpl implements BookmarkService {
                 .distinct()
                 .toList();
 
+
         // Batch fetch all creators
         Mono<Map<UUID, UserDetails>> creatorsMap = appUserRepository
                 .findAppUsersByKeycloakIds(creatorIds)
@@ -275,23 +293,25 @@ public class BookmarkServiceImpl implements BookmarkService {
                 .defaultIfEmpty(new HashMap<>());
 
         // Batch fetch all categories
-        Mono<Map<UUID, CategoryEntity>> categoriesMap = categoryRepository
+        Mono<Map<UUID, CategoryDetails>> categoriesMap = categoryRepository
                 .findCategoriesByIds(categoryIds)
-                .collectMap(CategoryEntity::getId)
+                .collectMap(CategoryEntity::getId, CategoryEntity::toCategoryDetails)
                 .defaultIfEmpty(new HashMap<>());
-
 
         return Mono.zip(
                 creatorsMap,
                 categoriesMap
         ).map(tuple -> {
             Map<UUID, UserDetails> creators = tuple.getT1();
-            Map<UUID, CategoryEntity> categories = tuple.getT2();
+            Map<UUID, CategoryDetails> categories = tuple.getT2();
+
 
             List<BookmarkResponse> responses = records.stream()
                     .map(record -> {
-                        UserDetails creator = creators.get(record.creator_id());
-                        return mapResponseWithData(record, creator);
+                        UserDetails creatorDetails = creators.getOrDefault(record.creator_id(), AppUserEntity.defaultUser());
+                        CategoryDetails categoryDetails = categories.getOrDefault(record.category_id(), CategoryEntity.defaultCategory());
+
+                        return mapResponseWithData(record, creatorDetails, categoryDetails);
                     })
                     .toList();
 
@@ -302,28 +322,23 @@ public class BookmarkServiceImpl implements BookmarkService {
                     categories
             );
         });
+
     }
 
     private BookmarkResponse mapResponseWithData(
         BookmarkedThreadRecord record,
-        UserDetails creator
+        UserDetails threadCreator,
+        CategoryDetails category
     ){
         return BookmarkResponse.builder()
+                // Bookmark metadata
                 .id(record.bookmark_id())
                 .notes(record.bookmark_notes())
                 .bookmarkedAt(record.bookmarked_at())
-                .categoryId(record.category_id())
-                .threadId(record.thread_id())
-                .threadTitle(record.title())
-                .threadCreatorId(record.creator_id())
-                .threadCreatorDisplayName(creator.getDisplayName())
-                .threadCreatorAvatarUrl(creator.getAvatarUrl())
-                .threadPostCount(record.post_count())
-                .threadViewCount(record.view_count())
-                .threadLastActivityAt(record.last_activity_at())
-                .threadStatus(ThreadStatus.fromString(record.thread_status()))
-                .threadType(ThreadType.fromString(record.thread_type()))
-                .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
+                // References (nested)
+                .thread(record.toThreadDetails())
+                .threadCreator(threadCreator)
+                .category(category)
                 .build();
     }
 
@@ -331,7 +346,7 @@ public class BookmarkServiceImpl implements BookmarkService {
             List<BookmarkResponse> responses,
             List<BookmarkedThreadRecord> records,
             Map<UUID, UserDetails> creators,
-            Map<UUID, CategoryEntity> categories
+            Map<UUID, CategoryDetails> categories
     ) {}
 
     private FilterMetadata<BookmarkFilterDto> buildBookmarkFilters(EnrichedBookmarkData data){
@@ -368,7 +383,7 @@ public class BookmarkServiceImpl implements BookmarkService {
         List<FilterOption> categoryOptions = data.categories.entrySet().stream()
                 .map(entry -> {
                     UUID categoryId = entry.getKey();
-                    CategoryEntity category = entry.getValue();
+                    CategoryDetails category = entry.getValue();
                     long count = categoryCounts.getOrDefault(categoryId, 0L);
                     return FilterOption.ofEntity(
                             categoryId,

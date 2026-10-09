@@ -163,27 +163,30 @@ public class UserConnectServiceImpl implements UserConnectService {
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return userConnectRepository.findAcceptedConnectionsPaginated(
-            viewerId,
-            notificationEnabled,
-            effectiveSearch,
-            sortByField.getValue(), effectiveSortDirection,
-            size, offset
-        )
+                    viewerId,
+                    notificationEnabled,
+                    effectiveSearch,
+                    sortByField.getValue(), effectiveSortDirection,
+                    size, offset
+                )
                 .collectList()
-                .flatMap(connections -> {
+                .zipWith(userConnectRepository.countAcceptedConnectionsWithFilters(viewerId, notificationEnabled, effectiveSearch))
+                .flatMap(tuple -> {
+                    List<UserConnectEntity> connections = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
+                    FilterMetadata<Object> filters = FilterMetadata.builder()
+                            .sortOptions(getConnectionSortOptions())
+                            .build();
+
                     if(connections.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichConnectionsWithBatchData(connections, viewerId)
-                            .zipWith(userConnectRepository.countAcceptedConnectionsWithFilters(viewerId, notificationEnabled, effectiveSearch))
-                            .map(tuple -> {
-                                FilterMetadata<Object> filters = FilterMetadata.builder()
-                                        .sortOptions(getConnectionSortOptions())
-                                        .build();
-
-                                return new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2(), filters);
-                            });
+                            .map(enriched ->
+                                    new PaginatedResponse<>(enriched, page, size, totalCount, filters)
+                            );
 
                 });
 
@@ -219,20 +222,23 @@ public class UserConnectServiceImpl implements UserConnectService {
                         size, offset
                 )
                 .collectList()
-                .flatMap(connections -> {
+                .zipWith(userConnectRepository.countPendingRequestsWithFilters(viewerId, effectiveSearch, connectionType.name()))
+                .flatMap(tuple -> {
+                    List<UserConnectEntity> connections = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
+                    FilterMetadata<Object> filters = FilterMetadata.builder()
+                            .sortOptions(getConnectionSortOptions())
+                            .build();
+
                     if(connections.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichConnectionsWithBatchData(connections, viewerId)
-                            .zipWith(userConnectRepository.countPendingRequestsWithFilters(viewerId, effectiveSearch, connectionType.name()))
-                            .map(tuple -> {
-                                FilterMetadata<Object> filters = FilterMetadata.builder()
-                                        .sortOptions(getConnectionSortOptions())
-                                        .build();
-
-                                return new PaginatedResponse<>(tuple.getT1(), page, size, tuple.getT2(), filters);
-                            });
+                            .map(enriched ->
+                                    new PaginatedResponse<>(enriched, page, size, totalCount, filters)
+                            );
                 });
 
     }

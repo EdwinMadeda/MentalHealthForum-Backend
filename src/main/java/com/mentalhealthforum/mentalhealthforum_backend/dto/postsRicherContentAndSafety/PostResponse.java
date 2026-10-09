@@ -1,8 +1,11 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.EditReason;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.PostType;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,12 +21,13 @@ import java.util.UUID;
 public class PostResponse {
 
     private UUID id;
-    private UUID threadId;
-    private UUID parentPostId;
 
-    private UUID authorId;
-    private String authorDisplayName;
-    private String authorAvatarUrl;
+    // Reference (nested)
+    private ThreadDetails thread;
+    private PostDetails parentPost;
+
+    // Reference (nested)
+    private UserDetails author;
     private String anonymousIdentifier;
 
     private PostType postType;
@@ -38,7 +42,9 @@ public class PostResponse {
     private EditReason editReason;
     private String editReasonCustomText;
     private Instant editedAt;
-    private UUID editedByUserId;
+    // Reference (nested)
+    private UserDetails editedBy;
+
 
     private boolean isAnonymous;
     private boolean isDeleted;

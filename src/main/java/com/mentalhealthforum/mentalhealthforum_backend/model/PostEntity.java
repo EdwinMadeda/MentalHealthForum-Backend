@@ -1,5 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.PostDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.EditReason;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.PostType;
@@ -91,7 +93,37 @@ public class PostEntity {
     @Column("updated_at")
     private Instant updatedAt;
 
-    // Helper methods
+    // ==================== HELPER METHODS ====================
+
+    public PostDetails toPostDetails(
+            // UserDetails author
+    ){
+        return PostDetails.builder()
+                .id(this.id)
+                .content(this.content)
+                .postType(this.postType)
+//                .author(author)
+                .isDeleted(this.isDeleted)
+                .isAnonymous(this.isAnonymous)
+                .anonymousIdentifier(this.anonymousIdentifier)
+                .createdAt(this.createdAt)
+                .build();
+    }
+
+
+    public static PostDetails defaultPost() {
+        return PostDetails.builder()
+                .id(null)
+                .content(null)
+                .postType(null)
+//                .author(null)
+                .isDeleted(null)
+                .isAnonymous(null)
+                .anonymousIdentifier(null)
+                .createdAt(null)
+                .build();
+    }
+    
     public boolean isReply() {
         return postType == PostType.REPLY;
     }

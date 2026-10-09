@@ -1,5 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import lombok.Builder;
 import lombok.Data;
@@ -26,30 +28,23 @@ public class PostReportResponse implements ReportResponse {
     private Boolean isAnonymous;
 
     // Reporter info
-    private UUID reporterId;
-    private String reporterDisplayName;
-    private String reporterAvatarUrl;
+    private UserDetails reporter;
 
     // Post-specific fields (REQUIRED)
     private UUID postId;
     private String postContent;
 
     // Thread context (optional - may be null if thread deleted)
-    private UUID threadId;
-    private String threadTitle;
+    private ThreadDetails thread;
 
     // Reported user (the post author) - REQUIRED
-    private UUID reportedUserId;
-    private String reportedUserDisplayName;
-    private String reportedUserAvatarUrl;
+    private UserDetails reportedUser;
 
     // Moderation info
-    private UUID assignedModeratorId;
-    private String assignedModeratorDisplayName;
-    private String assignedModeratorAvatarUrl;
+    private UserDetails assignedModerator;
+    private UserDetails reviewer;
+
     private Instant assignedAt;
     private Instant reviewedAt;
-    private UUID reviewedBy;
-    private String reviewedByDisplayName;
-    private String reviewedByAvatarUrl;
+
 }

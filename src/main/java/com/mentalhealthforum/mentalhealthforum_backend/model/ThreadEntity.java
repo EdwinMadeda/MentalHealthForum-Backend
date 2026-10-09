@@ -128,16 +128,34 @@ public class ThreadEntity {
 
     public ThreadDetails toThreadDetails(){
         return ThreadDetails.builder()
+                .id(this.id)
                 .title(this.title)
-                .categoryId(this.categoryId)
+                .threadType(this.threadType)
+                .threadStatus(this.threadStatus)
+                .postCount(this.postCount)
+                .viewCount(this.viewCount)
+                .lastActivityAt(this.lastActivityAt)
+                .contentWarningType(this.contentWarningType)
+                .isSticky(this.isSticky)
+                .isFeatured(this.isFeatured)
+                // .isOpen(this.isOpen())   // PRIVACY/DESIGN: deferred
                 .build();
     }
 
 
     public static ThreadDetails defaultThread() {
         return ThreadDetails.builder()
+                .id(null)
                 .title(null)
-                .categoryId(null)
+                .threadType(null)
+                .threadStatus(null)
+                .postCount(null)
+                .viewCount(null)
+                .lastActivityAt(null)
+                .contentWarningType(null)
+                .isSticky(null)
+                .isFeatured(null)
+                // .isOpen(null)   // PRIVACY/DESIGN: deferred
                 .build();
     }
 

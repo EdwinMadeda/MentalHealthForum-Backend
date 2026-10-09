@@ -29,7 +29,7 @@ public interface CategoryTagService {
 
     Mono<Void> deleteAllTagAssignmentsForCategory(UUID categoryId, ViewerContext viewerContext);
 
-    Flux<CategoryTagResponse> getTagsForCategory(UUID categoryId);
+    Flux<CategoryTagResponse> getEnrichedTagsForCategory(UUID categoryId);
 
     Mono<PaginatedResponse<CategoryTagResponse>> getAllTags(
             int page,

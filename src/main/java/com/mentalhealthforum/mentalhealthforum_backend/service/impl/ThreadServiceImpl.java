@@ -5,6 +5,8 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkCountRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkStatusRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchStatusRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagWithCategoryId;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.FilterMetadata;
@@ -13,6 +15,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.SortOption;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.filters.ThreadFilterDto;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.postsRicherContentAndSafety.AddContentWarningRequest;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.*;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.ThreadSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
@@ -34,6 +37,7 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class ThreadServiceImpl implements ThreadService {
@@ -196,7 +200,10 @@ public class ThreadServiceImpl implements ThreadService {
             long total = tuple.getT2();
 
             if (threads.isEmpty()) {
-                return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                FilterMetadata<Object> filters = FilterMetadata.builder()
+                        .sortOptions(getThreadSortOptions())
+                        .build();
+                return Mono.just(new PaginatedResponse<>(List.of(), page, size, total, filters));
             }
 
             return enrichThreadWithBatchData(threads, viewerId, viewerContext)
@@ -206,6 +213,7 @@ public class ThreadServiceImpl implements ThreadService {
                         return new PaginatedResponse<>(enrichedThreadData.responses, page, size, total, filters);
                     });
         });
+
     }
 
     @Override
@@ -946,12 +954,21 @@ public class ThreadServiceImpl implements ThreadService {
     private Mono<ThreadResponse> enrichSingleThreadWithData(ThreadEntity thread, ViewerContext viewerContext) {
         UUID threadId = thread.getId();
 
+        // Get all userId maps
+        List<UUID> allUserIds = Stream.of(thread.getCreatorId(), thread.getResolvedByUserId(), thread.getLockedBy())
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
         return Mono.zip(
                 categoryRepository.findById(thread.getCategoryId())
-                        .switchIfEmpty(Mono.empty()),
+                        .map(CategoryEntity::toCategoryDetails)
+                        .defaultIfEmpty(CategoryEntity.defaultCategory()),
 
-                appUserRepository.findAppUserByKeycloakId(thread.getCreatorId().toString())
-                        .switchIfEmpty(Mono.empty()),
+                categoryTagRepository.findByCategoryId(thread.getCategoryId())
+                        .map(CategoryTagEntity::toCategoryTagDetails)
+                        .collectList()
+                        .defaultIfEmpty(List.of()),
 
                 bookmarkService.isBookmarked(thread.getId(), viewerContext)
                         .defaultIfEmpty(false),
@@ -962,29 +979,27 @@ public class ThreadServiceImpl implements ThreadService {
                 watchThreadService.isWatchingThread(threadId, viewerContext)
                         .defaultIfEmpty(false),
 
-                categoryTagService.getTagsForCategory(thread.getCategoryId())
-                        .map(this::mapToThreadCategoryTag)
-                        .collectList()
-                        .defaultIfEmpty(List.of())
+                appUserRepository.findAppUsersByKeycloakIds(allUserIds)
+                        .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                        .defaultIfEmpty(new HashMap<>())
+
 
         ).map(tuple -> {
-            CategoryEntity category = tuple.getT1();
-            AppUserEntity creator = tuple.getT2();
+            CategoryDetails category = tuple.getT1();
+            List<CategoryTagDetails> categoryTags = tuple.getT2();
             Boolean isBookmarked = tuple.getT3();
             Long bookmarkCount = tuple.getT4();
             Boolean isWatched = tuple.getT5();
-            List<ThreadCategoryTag> categoryTags = tuple.getT6();
-
+            Map<UUID, UserDetails> users = tuple.getT6();
 
             return mapResponseWithData(
                     thread,
                     category,
-                    creator,
+                    categoryTags,
                     isBookmarked,
                     bookmarkCount,
                     isWatched,
-                    categoryTags,
-                    viewerContext
+                    users
             );
         });
     }
@@ -1003,35 +1018,28 @@ public class ThreadServiceImpl implements ThreadService {
                     List.of(),
                     List.of(),
                     Map.of(),
-                    Map.of(),
-                    List.of()
+                    List.of(),
+                    Map.of()
             ));
         }
 
         // Extract IDs for batch fetching
         List<UUID> categoryIds = threads.stream()
                 .map(ThreadEntity::getCategoryId)
-                .distinct()
-                .toList();
-
-        List<UUID> creatorIds = threads.stream()
-                .map(ThreadEntity::getCreatorId)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
 
         List<UUID> threadIds = threads.stream()
                 .map(ThreadEntity::getId)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
 
         // Batch fetch all data in parallel
-        Mono<Map<UUID, CategoryEntity>> categoriesMap =
+        Mono<Map<UUID, CategoryDetails>> categoriesMap =
                 categoryRepository.findCategoriesByIds(categoryIds)
-                        .collectMap(CategoryEntity::getId);
-
-        Mono<Map<UUID, AppUserEntity>> creatorsMap =
-                appUserRepository.findAppUsersByKeycloakIds(creatorIds)
-                        .collectMap(AppUserEntity::getKeycloakId);
+                        .collectMap(CategoryEntity::getId, CategoryEntity::toCategoryDetails);
 
         Mono<Map<UUID, Boolean>> bookmarkStatusMap =
                 threadBookmarkRepository.findBookmarkStatusForThreads(currentUserId, threadIds)
@@ -1053,25 +1061,37 @@ public class ThreadServiceImpl implements ThreadService {
                 .findTagsByCategoryId(categoryIds)
                 .collectList();
 
+        // Get all userId maps
+        List<UUID> allUserIds = threads.stream()
+                .flatMap(thread -> Stream.of(thread.getCreatorId(), thread.getResolvedByUserId(), thread.getLockedBy()))
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        Mono<Map<UUID, UserDetails>>  usersMap =
+                appUserRepository.findAppUsersByKeycloakIds(allUserIds)
+                        .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                        .defaultIfEmpty(new HashMap<>());
+
         return Mono.zip(
                 categoriesMap,
-                creatorsMap,
                 bookmarkStatusMap,
                 bookmarkCountMap,
                 watchStatusMap,
-                flatTagsListMono
+                flatTagsListMono,
+                usersMap
         ).map(tuple -> {
-            Map<UUID, CategoryEntity> categories = tuple.getT1();
-            Map<UUID, AppUserEntity> creators = tuple.getT2();
-            Map<UUID, Boolean> bookmarkStatus = tuple.getT3();
-            Map<UUID, Long> bookmarkCount = tuple.getT4();
-            Map<UUID, Boolean> watchStatus = tuple.getT5();
-            List<CategoryTagWithCategoryId> flatTagsList = tuple.getT6();
+            Map<UUID, CategoryDetails> categories = tuple.getT1();
+            Map<UUID, Boolean> bookmarkStatus = tuple.getT2();
+            Map<UUID, Long> bookmarkCount = tuple.getT3();
+            Map<UUID, Boolean> watchStatus = tuple.getT4();
+            List<CategoryTagWithCategoryId> flatTagsList = tuple.getT5();
+            Map<UUID, UserDetails> users = tuple.getT6();
 
-            Map<UUID, List<ThreadCategoryTag>> categoryTags = flatTagsList.stream()
+            Map<UUID, List<CategoryTagDetails>> categoryTags = flatTagsList.stream()
                     .collect(Collectors.groupingBy(
                             CategoryTagWithCategoryId::category_id,
-                            Collectors.mapping(this::mapToThreadCategoryTag,
+                            Collectors.mapping(CategoryTagWithCategoryId::toCategoryTagDetails,
                                     Collectors.toList())
                     ));
 
@@ -1080,21 +1100,20 @@ public class ThreadServiceImpl implements ThreadService {
                     .map(thread -> mapResponseWithData(
                             thread,
                             categories.get(thread.getCategoryId()),
-                            creators.get(thread.getCreatorId()),
+                            categoryTags.getOrDefault(thread.getCategoryId(), List.of()),
                             bookmarkStatus.getOrDefault(thread.getId(), false),
                             bookmarkCount.getOrDefault(thread.getId(), 0L),
                             watchStatus.getOrDefault(thread.getId(), false),
-                            categoryTags.get(thread.getCategoryId()),
-                            viewerContext
+                            users
                     ))
                     .toList();
 
             return new EnrichedThreadData(
                     responses,
                     threads,
-                    creators,
                     categories,
-                    flatTagsList
+                    flatTagsList,
+                    users
             );
 
         });
@@ -1103,42 +1122,57 @@ public class ThreadServiceImpl implements ThreadService {
 
     private ThreadResponse mapResponseWithData(
             ThreadEntity thread,
-            CategoryEntity category,
-            AppUserEntity creator,
+            CategoryDetails category,
+            List<CategoryTagDetails> categoryTags,
             Boolean isBookmarked,
             Long bookmarkCount,
             Boolean isWatched,
-            List<ThreadCategoryTag> categoryTags,
-            ViewerContext viewerContext) {
+            Map<UUID, UserDetails> users) {
+
+        UserDetails creator =  users.getOrDefault(thread.getCreatorId(), AppUserEntity.defaultUser());
+        UserDetails resolvedBy = thread.getResolvedByUserId() != null
+                ? users.getOrDefault(thread.getResolvedByUserId(), AppUserEntity.defaultUser())
+                : null;
+
+        UserDetails lockedBy = thread.getLockedBy() != null
+                ? users.getOrDefault(thread.getLockedBy(), AppUserEntity.defaultUser())
+                : null;
+
 
         return ThreadResponse.builder()
                 .id(thread.getId())
-                .categoryId(thread.getCategoryId())
-                .categoryName(category.getName())
-                .categorySlug(category.getSlug())
+
+                // Category/Category tag references
+                .category(category)
+                .categoryTags(categoryTags)
+
                 .title(thread.getTitle())
-                .creatorId(thread.getCreatorId())
-                .creatorDisplayName(creator.getPublicIdentifier())
-                .creatorAvatarUrl(creator.getAvatarUrl())
+
+                // Creator reference
+                .creator(creator)
+
                 .threadType(thread.getThreadType())
                 .threadStatus(thread.getThreadStatus())
+
                 .contentWarningType(thread.getContentWarningType())
                 .contentWarningCustomText(thread.getContentWarningCustomText())
-                .categoryTags(categoryTags)
+
                 .isSticky(thread.getIsSticky())
                 .isFeatured(thread.getIsFeatured())
                 .isBookmarked(isBookmarked)
                 .isWatched(isWatched)
+
                 .bookmarkCount((bookmarkCount.intValue()))
                 .postCount(thread.getPostCount())
                 .viewCount(thread.getViewCount())
+
                 .bestAnswerPostId(thread.getBestAnswerPostId())
                 .resolvedAt(thread.getResolvedAt())
-                .resolvedByUserId(thread.getResolvedByUserId())
+                .resolvedBy(resolvedBy)
 
                 // lock metadata
                 .lockReason(thread.getLockReason())
-                .lockedBy(thread.getLockedBy())
+                .lockedBy(lockedBy)
                 .lockedAt(thread.getLockedAt())
                 .lockExpiresAt(thread.getLockExpiresAt())
 
@@ -1155,43 +1189,28 @@ public class ThreadServiceImpl implements ThreadService {
     private record EnrichedThreadData(
             List<ThreadResponse> responses,
             List<ThreadEntity> threads,
-            Map<UUID, AppUserEntity> creators,
-            Map<UUID, CategoryEntity> categories,
-            List<CategoryTagWithCategoryId> flatTags
+            Map<UUID, CategoryDetails> categories,
+            List<CategoryTagWithCategoryId> flatTags,
+            Map<UUID, UserDetails> users
     ) {}
-
-    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagWithCategoryId record) {
-        return ThreadCategoryTag.builder()
-                .id(record.id())
-                .name(record.name())
-                .slug(record.slug())
-                .build();
-    }
-
-    private ThreadCategoryTag mapToThreadCategoryTag(CategoryTagResponse tag) {
-        return ThreadCategoryTag.builder()
-                .id(tag.getId())
-                .name(tag.getName())
-                .slug(tag.getSlug())
-                .build();
-    }
 
     private FilterMetadata<ThreadFilterDto> buildThreadFilters(EnrichedThreadData data) {
         // Build creator options
-        List<FilterOption> creatorOptions = data.creators().values().stream()
+        List<FilterOption> creatorOptions = data.users().values().stream()
                 .map(creator -> {
                     long count = data.threads.stream()
-                            .filter(thread -> thread.getCreatorId().equals(creator.getKeycloakId()))
+                            .filter(thread -> thread.getCreatorId().equals(creator.getUserId()))
                             .count();
 
                     return  FilterOption.ofUser(
-                            creator.getKeycloakId(),
-                            creator.getPublicIdentifier(),
+                            creator.getUserId(),
+                            creator.getDisplayName(),
                             creator.getAvatarUrl(),
                             creator.getInitials(),
                             count
                     );
                 })
+                .filter(option -> option.getCount() > 0)
                 .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
 

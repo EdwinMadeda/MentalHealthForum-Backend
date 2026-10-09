@@ -1,6 +1,9 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
@@ -19,20 +22,16 @@ import java.util.UUID;
 @AllArgsConstructor
 public class ThreadResponse {
     private UUID id;
-    private UUID categoryId;
-    private String categoryName;
-    private String categorySlug;
-    private List<ThreadCategoryTag> categoryTags;
 
+    // References nested
+    private CategoryDetails category;
+    private List<CategoryTagDetails> categoryTags;
+    private UserDetails creator;
+
+    // Thread subject attributes
     private String title;
-
-    private UUID creatorId;
-    private String creatorDisplayName;
-    private String creatorAvatarUrl;
-
     private ThreadType threadType;
     private ThreadStatus threadStatus;
-
     private ContentWarningType contentWarningType;
     private String contentWarningCustomText;
 
@@ -46,12 +45,14 @@ public class ThreadResponse {
     private Integer viewCount;
 
     private UUID bestAnswerPostId;
+
+    // User references (nested
+    private UserDetails resolvedBy;  // ResolvedBy reference
     private Instant resolvedAt;
-    private UUID resolvedByUserId;
 
     // Lock metadata
     private String lockReason;
-    private UUID lockedBy;
+    private UserDetails lockedBy;     // LockedBy reference
     private Instant lockedAt;
     private Instant lockExpiresAt;
 

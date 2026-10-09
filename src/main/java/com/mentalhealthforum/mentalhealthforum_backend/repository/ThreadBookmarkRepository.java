@@ -3,7 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.repository;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkCountRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkStatusRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkedThreadRecord;
-import com.mentalhealthforum.mentalhealthforum_backend.model.ThreadBookmarkEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.model.BookmarkEntity;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
 import org.springframework.data.repository.query.Param;
@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Repository
-public interface ThreadBookmarkRepository extends R2dbcRepository<ThreadBookmarkEntity, UUID> {
+public interface ThreadBookmarkRepository extends R2dbcRepository<BookmarkEntity, UUID> {
 
     @Query("""
         SELECT EXISTS(

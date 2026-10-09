@@ -15,4 +15,12 @@ public record CategoryTagWithCategoryId(
     UUID created_by,
     Instant created_at,
     Instant updated_at
-) {}
+) {
+    public CategoryTagDetails toCategoryTagDetails(){
+        return CategoryTagDetails.builder()
+                .id(id)
+                .name(name)
+                .slug(slug)
+                .build();
+    }
+}

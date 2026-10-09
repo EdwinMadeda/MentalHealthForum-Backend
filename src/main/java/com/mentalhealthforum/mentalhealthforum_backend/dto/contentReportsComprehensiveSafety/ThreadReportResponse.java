@@ -1,5 +1,7 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import lombok.Builder;
 import lombok.Data;
@@ -9,6 +11,7 @@ import java.util.UUID;
 @Data
 @Builder
 public class ThreadReportResponse implements ReportResponse {
+
     // Common report fields
     private UUID id;
     private ReportTargetType targetType;
@@ -26,21 +29,17 @@ public class ThreadReportResponse implements ReportResponse {
     private Boolean isAnonymous;
 
     // Reporter info
-    private UUID reporterId;
-    private String reporterDisplayName;
-    private String reporterAvatarUrl;
+    private UserDetails reporter;
 
     // Thread-specific fields (REQUIRED)
-    private UUID threadId;
-    private String threadTitle;
+    private ThreadDetails thread;
 
     // Moderation info
-    private UUID assignedModeratorId;
-    private String assignedModeratorDisplayName;
-    private String assignedModeratorAvatarUrl;
+    private UserDetails assignedModerator;
+    private UserDetails reviewer;
+
     private Instant assignedAt;
     private Instant reviewedAt;
-    private UUID reviewedBy;
-    private String reviewedByDisplayName;
-    private String reviewedByAvatarUrl;
+
+
 }

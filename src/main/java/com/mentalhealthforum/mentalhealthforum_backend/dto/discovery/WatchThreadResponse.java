@@ -1,5 +1,8 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.discovery;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.threadLifecycleAndMetadata.ThreadDetails;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadStatus;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ThreadType;
@@ -12,39 +15,17 @@ import java.util.UUID;
 @Data
 @Builder
 public class WatchThreadResponse {
-    // Watch metadata
+    // Watch metadata (subject)
     private UUID id;
     private Boolean notificationEnabled;
     private Instant watchedAt;
 
-    // Thread core info
-    private UUID threadId;
-    private String threadTitle;
-    private ThreadType threadType;
-    private ThreadStatus threadStatus;
+    // References (nested)
+    private ThreadDetails thread;
+    private CategoryDetails category;
+    private UserDetails creator;
 
-    // Thread metadata
-    private UUID categoryId;
-    private UUID creatorId;
-    private String creatorDisplayName;
-    private String creatorAvatarUrl;
-
-    // Quick context (most valuable for users)
-    private Integer postCount;
-    private Integer viewCount;
-    private Instant lastActivityAt;
-
-    // Content warnings
-    private ContentWarningType contentWarningType;
-
-    // Thread settings
-    private Boolean isOpen;
-
-    // User-specific
+    // View-specific
     private Boolean isBookmarked;
-
-    // Thread flags
-    private Boolean isSticky;
-    private Boolean isFeatured;
 
 }

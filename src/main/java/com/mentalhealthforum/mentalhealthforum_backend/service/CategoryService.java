@@ -70,4 +70,5 @@ public interface CategoryService {
 
     Flux<CategoryResponse> getChildCategories(UUID parentId, ViewerContext viewerContext);
 
+    Mono<CategoryDetails> getCategoryDetails(UUID categoryId);
 }

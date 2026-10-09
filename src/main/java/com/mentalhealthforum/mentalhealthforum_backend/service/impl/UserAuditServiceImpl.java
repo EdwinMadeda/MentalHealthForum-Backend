@@ -275,32 +275,38 @@ public class UserAuditServiceImpl implements UserAuditService {
         UserHistorySortField sortByField = sortBy != null ? sortBy : UserHistorySortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
-        return auditLogRepository.findByUserIdPaginated(userId, performedBy, effectiveActionTypes, effectiveSearch, effectiveSortDirection, size, offset)
+        return auditLogRepository.findByUserIdPaginated(
+                        userId, performedBy,
+                        effectiveActionTypes,
+                        effectiveSearch,
+                        effectiveSortDirection, size, offset
+                )
                 .collectList()
-                .flatMap(records -> {
+                .zipWith(auditLogRepository.countUserHistoryWithFilters(
+                        userId, performedBy,
+                        effectiveActionTypes,
+                        effectiveSearch
+                ))
+                .flatMap(tuple -> {
+                    List<UserAuditLogEntity> records = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
                     if(records.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(getUserHistorySortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichedHistoryWithBatchData(records)
-                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, performedBy, effectiveActionTypes, effectiveSearch))
-                            .map(tuple -> {
-                                EnrichedHistoryData enriched = tuple.getT1();
-                                long totalCount = tuple.getT2();
+                            .map(enriched -> {
 
                                 FilterMetadata<UserHistoryFilterDto> filters = buildUserHistoryFilters(enriched);
-
-                                return new PaginatedResponse<>(
-                                        enriched.entries,
-                                        page,
-                                        size,
-                                        totalCount,
-                                        filters
+                                return new PaginatedResponse<>(enriched.entries, page, size, totalCount, filters
                                 );
                             });
 
                 });
-
 
     }
 
@@ -324,31 +330,35 @@ public class UserAuditServiceImpl implements UserAuditService {
         UserHistorySortField sortByField = sortBy != null ? sortBy : UserHistorySortField.DEFAULT;
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
-        return auditLogRepository.findByUserIdPaginated(userId, null, null, null, effectiveSortDirection, size, offset)
+        return auditLogRepository.findByUserIdPaginated(
+                         userId, null,
+                        null, null,
+                        effectiveSortDirection, size, offset
+                )
                 .collectList()
-                .flatMap(records -> {
+                .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, null, null, null))
+                .flatMap(tuple -> {
+                    List<UserAuditLogEntity> records = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
+                    FilterMetadata<Object> filters = FilterMetadata.builder()
+                            .sortOptions(getUserHistorySortOptions())
+                            .build();
+
                     if(records.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichedHistoryWithBatchData(records)
-                            .zipWith(auditLogRepository.countUserHistoryWithFilters(userId, null, null, null))
-                            .map(tuple -> {
-                                EnrichedHistoryData enriched = tuple.getT1();
-                                long totalCount = tuple.getT2();
+                            .map(enriched -> {
 
                                 // Anonymize for user view
                                 List<UserHistoryEntry> anonymizedEntries = enriched.entries.stream()
                                             .map(this::anonymizeForUser)
                                             .toList();
 
-                                return new PaginatedResponse<>(
-                                        anonymizedEntries,
-                                        page,
-                                        size,
-                                        totalCount
-                                        // No filters for user view
-                                );
+                                return new PaginatedResponse<>(anonymizedEntries, page, size, totalCount, filters);
+
                             });
 
                 });

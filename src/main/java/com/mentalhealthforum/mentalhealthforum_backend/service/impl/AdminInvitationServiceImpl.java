@@ -246,27 +246,33 @@ public class AdminInvitationServiceImpl implements AdminInvitationService {
                         offset
                 )
                 .collectList()
-                .flatMap(records -> {
+                .zipWith(adminInvitationRepository.countPendingInvitesWithFilters(
+                        invitedByUserId,
+                        effectiveGroups,
+                        effectiveOnboardingStage,
+                        effectiveSearch
+                ))
+                .flatMap(tuple -> {
+                    List<AdminInvitationEntity> records = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
                     if(records.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(getPendingInviteSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichPendingInvitesWithBatchData(records)
-                            .zipWith(adminInvitationRepository.countPendingInvitesWithFilters(
-                                    invitedByUserId,
-                                    effectiveGroups,
-                                    effectiveOnboardingStage,
-                                    effectiveSearch
-                            ))
-                            .map(tuple -> {
-                                EnrichedPendingInviteData enriched = tuple.getT1();
-                                long totalCount = tuple.getT2();
+                            .map(enriched -> {
 
                                 FilterMetadata<PendingInviteFilterDto> filters = buildPendingInviteFilters(enriched);
 
                                 return new PaginatedResponse<>(enriched.invites, page, size, totalCount, filters);
                             });
+
                 });
+
 
     }
 

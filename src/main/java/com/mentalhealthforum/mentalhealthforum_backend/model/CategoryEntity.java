@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.DefaultThreadSettings;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.ParticipationRequirements;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.ContentWarningType;
 import com.mentalhealthforum.mentalhealthforum_backend.utils.JsonUtils;
 import lombok.AllArgsConstructor;
@@ -95,12 +96,37 @@ public class CategoryEntity {
         );
     }
 
-    // --- Helper methods ---
-    public boolean isParent(){
-        return parentCategoryId == null;
+    // ==================== HELPER METHODS ====================
+
+    public CategoryDetails toCategoryDetails(){
+        return CategoryDetails.builder()
+                .id(this.id)
+                .slug(this.slug)
+                .name(this.name)
+                .description(this.description)
+                .colorTheme(this.colorTheme)
+                .contentWarningType(this.contentWarningType)
+                .isChild(this.isChild())
+                .isParent(this.isParent())
+                .build();
     }
 
-    public boolean isChild(){
-        return parentCategoryId != null;
+
+    public static CategoryDetails defaultCategory() {
+        return CategoryDetails.builder()
+                .id(null)
+                .slug(null)
+                .name(null)
+                .description(null)
+                .colorTheme(null)
+                .contentWarningType(null)
+                .isParent(null)
+                .isChild(null)
+                .build();
     }
+
+    public boolean isParent(){ return parentCategoryId == null;}
+
+    public boolean isChild(){ return parentCategoryId != null;}
+
 }

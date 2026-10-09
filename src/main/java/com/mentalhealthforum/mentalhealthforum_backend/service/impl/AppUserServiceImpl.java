@@ -423,7 +423,10 @@ public class AppUserServiceImpl implements AppUserService {
                     long total = tuple.getT2();
 
                     if (appUsers.isEmpty()) {
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, total));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(getUserSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, total, filters));
                     }
 
                     return enrichAppUsersWithConnectionStatus(appUsers, finalCurrentUserId, viewerContext)
@@ -434,6 +437,7 @@ public class AppUserServiceImpl implements AppUserService {
                                 return new PaginatedResponse<>(content, page, size, total, filters);
                             });
                 });
+
     }
 
     private Mono<UserResponse> enrichSingleUserWithConnectionStatus(AppUserEntity targetUser, ViewerContext viewerContext) {

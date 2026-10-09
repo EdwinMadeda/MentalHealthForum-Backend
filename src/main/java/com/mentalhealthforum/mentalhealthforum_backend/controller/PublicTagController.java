@@ -5,7 +5,6 @@ import com.mentalhealthforum.mentalhealthforum_backend.dto.StandardSuccessRespon
 import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.TagSortField;
 import com.mentalhealthforum.mentalhealthforum_backend.service.CategoryTagService;
-import io.swagger.v3.oas.annotations.Parameter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
@@ -63,7 +62,7 @@ public class PublicTagController {
     @GetMapping("/categories/{categoryId}")
     public Mono<ResponseEntity<StandardSuccessResponse<List<CategoryTagResponse>>>> getTagsForCategory(
             @PathVariable UUID categoryId) {
-        return categoryTagService.getTagsForCategory(categoryId)
+        return categoryTagService.getEnrichedTagsForCategory(categoryId)
                 .collectList()
                 .map(tags ->
                         ResponseEntity.ok(new StandardSuccessResponse<>("Tags retrieved successfully", tags)));

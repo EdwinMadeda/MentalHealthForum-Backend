@@ -17,7 +17,7 @@ public class CategoryResponse {
     private String slug;
     private String description;
     private String colorTheme;
-    private UUID parentCategoryId;
+    private CategoryDetails parentCategory;
     private ContentWarningType contentWarningType;
     private String contentWarningCustomText;
     private Boolean isActive;
@@ -30,7 +30,7 @@ public class CategoryResponse {
     private  Boolean isFocused;
 
     // Tags (flattened)
-    private List<CategoryTagResponse> tags;
+    private List<CategoryTagDetails> tags;
 
     // Thread metadata
     private Long threadCount;  // How many threads in this category

@@ -171,10 +171,13 @@ public class ReportServiceImpl implements ReportService {
                 ))
                 .flatMap(tuple -> {
                     List<ContentReportEntity> reports = tuple.getT1();
-                    long total = tuple.getT2();
+                    long totalCount = tuple.getT2();
 
                     if(reports.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(ReportSortField.getOwnReportsSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichReportsWithBatchData(reports, viewerContext)
@@ -182,7 +185,7 @@ public class ReportServiceImpl implements ReportService {
 
                                 FilterMetadata<ReportFilterDto> filters = buildOwnReportFilters(enrichedReports);
 
-                                return  new PaginatedResponse<>(enrichedReports.responses, page, size, total, filters);
+                                return  new PaginatedResponse<>(enrichedReports.responses, page, size, totalCount, filters);
 
                             });
                 });
@@ -241,22 +244,26 @@ public class ReportServiceImpl implements ReportService {
                 ))
                 .flatMap(tuple -> {
                     List<ContentReportEntity> reports = tuple.getT1();
-                    long total = tuple.getT2();
+                    long totalCount = tuple.getT2();
 
                     if(reports.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(ReportSortField.getAllReportsSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichReportsWithBatchData(reports, viewerContext)
                             .map(enrichedReports -> {
 
                                 FilterMetadata<ReportFilterDto> filters = buildAllReportFilters(enrichedReports);
-                                return  new PaginatedResponse<>(enrichedReports.responses, page, size, total, filters);
+                                return  new PaginatedResponse<>(enrichedReports.responses, page, size, totalCount, filters);
 
                             });
                 });
 
     }
+
 
     @Override
     public Mono<ReportResponse> getReportById(UUID reportId, ViewerContext viewerContext) {
@@ -843,11 +850,11 @@ public class ReportServiceImpl implements ReportService {
         boolean isVerified = viewerContext.isVerified();
 
         // Fetch reporter (if not anonymous)
-        Mono<UserDetails> reporterMono = report.getIsAnonymous()
-                ? Mono.just(AppUserEntity.defaultUser())
-                : appUserRepository.findAppUserByKeycloakId(report.getReporterId().toString())
+        Mono<UserDetails> reporterMono = report.getReporterId() != null
+                ? appUserRepository.findAppUserByKeycloakId(report.getReporterId().toString())
                   .map(AppUserEntity::toUserDetails)
-                  .defaultIfEmpty(AppUserEntity.defaultUser());
+                  .defaultIfEmpty(AppUserEntity.defaultUser())
+                : Mono.just(AppUserEntity.defaultUser());
 
 
         // Fetch reported user (if exists)
@@ -881,40 +888,40 @@ public class ReportServiceImpl implements ReportService {
                 : Mono.just(AppUserEntity.defaultUser());
 
 
-        Mono<Boolean> categoryVisibleMono =  threadMono.flatMap(thread ->
-                categoryRepository.isCategoryVisible(thread.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified));
+//        Mono<Boolean> categoryVisibleMono =  threadMono.flatMap(thread ->
+//                categoryRepository.isCategoryVisible(thread.getCategoryId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified));
 
         // Get all userId maps
-        Set<UUID> allUserIds = new HashSet<>();
-        if(report.getReporterId() != null) allUserIds.add(report.getReporterId());
-        if(report.getReportedUserId() != null) allUserIds.add(report.getReportedUserId());
-        if(report.getAssignedModeratorId() != null) allUserIds.add(report.getAssignedModeratorId());
-        if(report.getReviewedBy() != null) allUserIds.add(report.getReviewedBy());
-
-        Mono<Map<UUID, Boolean>> profileVisibilityMap = allUserIds.isEmpty()
-                ? Mono.just(Map.of())
-                : appUserRepository.checkProfileVisibilityBatch(new ArrayList<>(allUserIds), viewerId, isAdmin, isModeratorOrAdmin)
-                .collectMap(ProfileVisibilityRecord::userId, ProfileVisibilityRecord::visible);
+//        Set<UUID> allUserIds = new HashSet<>();
+//        if(report.getReporterId() != null) allUserIds.add(report.getReporterId());
+//        if(report.getReportedUserId() != null) allUserIds.add(report.getReportedUserId());
+//        if(report.getAssignedModeratorId() != null) allUserIds.add(report.getAssignedModeratorId());
+//        if(report.getReviewedBy() != null) allUserIds.add(report.getReviewedBy());
+//
+//        Mono<Map<UUID, Boolean>> profileVisibilityMap = allUserIds.isEmpty()
+//                ? Mono.just(Map.of())
+//                : appUserRepository.checkProfileVisibilityBatch(new ArrayList<>(allUserIds), viewerId, isAdmin, isModeratorOrAdmin)
+//                .collectMap(ProfileVisibilityRecord::userId, ProfileVisibilityRecord::visible);
 
         return Mono.zip(
                 reporterMono,
                 reportedUserMono,
                 threadMono,
                 assignedModeratorMono,
-                reviewedByMono,
-                categoryVisibleMono,
-                profileVisibilityMap
+                reviewedByMono
+//                categoryVisibleMono,
+//                profileVisibilityMap
         ).map(tuple -> {
 
-            Boolean canViewCategory = tuple.getT6();
-            Map<UUID, Boolean> profileVisible = tuple.getT7();
-
-            CanViewProfile canViewProfile = new CanViewProfile(
-                    profileVisible.getOrDefault(report.getReporterId(), false),
-                    profileVisible.getOrDefault(report.getReportedUserId(), false),
-                    profileVisible.getOrDefault(report.getAssignedModeratorId(), false),
-                    profileVisible.getOrDefault(report.getReviewedBy(), false)
-            );
+//            Boolean canViewCategory = tuple.getT6();
+//            Map<UUID, Boolean> profileVisible = tuple.getT7();
+//
+//            CanViewProfile canViewProfile = new CanViewProfile(
+//                    profileVisible.getOrDefault(report.getReporterId(), false),
+//                    profileVisible.getOrDefault(report.getReportedUserId(), false),
+//                    profileVisible.getOrDefault(report.getAssignedModeratorId(), false),
+//                    profileVisible.getOrDefault(report.getReviewedBy(), false)
+//            );
 
             return mapToTypedResponseWithData(
                     report,
@@ -922,9 +929,10 @@ public class ReportServiceImpl implements ReportService {
                     tuple.getT2(), // reportedUser
                     tuple.getT3(), // thread
                     tuple.getT4(), // assignedModerator
-                    tuple.getT5(),  // reviewedBy
-                    canViewCategory,
-                    canViewProfile);
+                    tuple.getT5()  // reviewedBy
+//                    canViewCategory,
+//                    canViewProfile
+            );
         });
     }
 
@@ -1017,44 +1025,44 @@ public class ReportServiceImpl implements ReportService {
                 .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails);
 
 
-        // Batch fetch associated categories
-        Mono<Map<UUID, UUID>> threadCategoryMapMono = threadIds.isEmpty()
-                ? Mono.just(Map.of())
-                : threadRepository
-                .findThreadsByIds(threadIds)
-                .collectMap(ThreadEntity::getId, ThreadEntity::getCategoryId);
+//        // Batch fetch associated categories
+//        Mono<Map<UUID, UUID>> threadCategoryMapMono = threadIds.isEmpty()
+//                ? Mono.just(Map.of())
+//                : threadRepository
+//                .findThreadsByIds(threadIds)
+//                .collectMap(ThreadEntity::getId, ThreadEntity::getCategoryId);
+//
+//        Mono<Map<UUID, Boolean>> categoryVisibilityMap =  threadCategoryMapMono.flatMap(threadCategoryMap -> {
+//
+//            List<UUID> categoryIds = threadCategoryMap.values().stream()
+//                    .filter(Objects::nonNull)
+//                    .distinct()
+//                    .toList();
+//
+//            log.info("Admin? {}", viewerContext.isAdmin());
+//            log.info("Category IDs to check: {}", categoryIds);
+//
+//            // Batch fetch category visibility
+//            return categoryIds.isEmpty()
+//                    ? Mono.just(Map.of())
+//                    : categoryRepository.checkCategoryVisibilityBatch(categoryIds, viewerId, isAdmin, isModeratorOrAdmin, isVerified)
+//                      .collectMap(CategoryVisibilityRecord::category_id, CategoryVisibilityRecord::visible);
+//
+//        });
 
-        Mono<Map<UUID, Boolean>> categoryVisibilityMap =  threadCategoryMapMono.flatMap(threadCategoryMap -> {
-
-            List<UUID> categoryIds = threadCategoryMap.values().stream()
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .toList();
-
-            log.info("Admin? {}", viewerContext.isAdmin());
-            log.info("Category IDs to check: {}", categoryIds);
-
-            // Batch fetch category visibility
-            return categoryIds.isEmpty()
-                    ? Mono.just(Map.of())
-                    : categoryRepository.checkCategoryVisibilityBatch(categoryIds, viewerId, isAdmin, isModeratorOrAdmin, isVerified)
-                      .collectMap(CategoryVisibilityRecord::category_id, CategoryVisibilityRecord::visible);
-
-        });
-
-        // Get all userId maps
-        Set<UUID> allUserIds = new HashSet<>();
-        reports.forEach(report -> {
-            if(report.getReporterId() != null) allUserIds.add(report.getReporterId());
-            if(report.getReportedUserId() != null) allUserIds.add(report.getReportedUserId());
-            if(report.getAssignedModeratorId() != null) allUserIds.add(report.getAssignedModeratorId());
-            if(report.getReviewedBy() != null) allUserIds.add(report.getReviewedBy());
-        });
-
-        Mono<Map<UUID, Boolean>> profileVisibilityMap = allUserIds.isEmpty()
-                ? Mono.just(Map.of())
-                : appUserRepository.checkProfileVisibilityBatch(new ArrayList<>(allUserIds), viewerId, isAdmin, isModeratorOrAdmin)
-                  .collectMap(ProfileVisibilityRecord::userId, ProfileVisibilityRecord::visible);
+//        // Get all userId maps
+//        Set<UUID> allUserIds = new HashSet<>();
+//        reports.forEach(report -> {
+//            if(report.getReporterId() != null) allUserIds.add(report.getReporterId());
+//            if(report.getReportedUserId() != null) allUserIds.add(report.getReportedUserId());
+//            if(report.getAssignedModeratorId() != null) allUserIds.add(report.getAssignedModeratorId());
+//            if(report.getReviewedBy() != null) allUserIds.add(report.getReviewedBy());
+//        });
+//
+//        Mono<Map<UUID, Boolean>> profileVisibilityMap = allUserIds.isEmpty()
+//                ? Mono.just(Map.of())
+//                : appUserRepository.checkProfileVisibilityBatch(new ArrayList<>(allUserIds), viewerId, isAdmin, isModeratorOrAdmin)
+//                  .collectMap(ProfileVisibilityRecord::userId, ProfileVisibilityRecord::visible);
 
 
         return Mono.zip(
@@ -1062,19 +1070,19 @@ public class ReportServiceImpl implements ReportService {
                 reportedUserMap,
                 threadsDetailMap,
                 assignedModeratorsMap,
-                reviewersMap,
-                categoryVisibilityMap,
-                profileVisibilityMap
+                reviewersMap
+//                categoryVisibilityMap,
+//                profileVisibilityMap
         ).map(tuple -> {
             Map<UUID, UserDetails> reporters = tuple.getT1();
             Map<UUID, UserDetails> reportedUsers = tuple.getT2();
             Map<UUID, ThreadDetails> threads = tuple.getT3();
             Map<UUID, UserDetails> assignedModerators = tuple.getT4();
             Map<UUID, UserDetails> reviewers = tuple.getT5();
-            Map<UUID, Boolean> categoryVisible = tuple.getT6();
-            Map<UUID, Boolean> profileVisible = tuple.getT7();
+//            Map<UUID, Boolean> categoryVisible = tuple.getT6();
+//            Map<UUID, Boolean> profileVisible = tuple.getT7();
 
-            log.info("Category visibility map: {}", categoryVisible);
+//            log.info("Category visibility map: {}", categoryVisible);
 
             List<ReportResponse> responses = reports.stream()
                     .map(report -> {
@@ -1083,15 +1091,15 @@ public class ReportServiceImpl implements ReportService {
                                 ? threads.getOrDefault(report.getThreadId(), ThreadEntity.defaultThread())
                                 : ThreadEntity.defaultThread();
 
-                        UUID categoryId = thread != null? thread.getCategoryId() : null;
-                        boolean canViewCategory = categoryId != null && categoryVisible.getOrDefault(categoryId, false);
-
-                        CanViewProfile canViewProfile = new CanViewProfile(
-                                profileVisible.getOrDefault(report.getReporterId(), false),
-                                profileVisible.getOrDefault(report.getReportedUserId(), false),
-                                profileVisible.getOrDefault(report.getAssignedModeratorId(), false),
-                                profileVisible.getOrDefault(report.getReviewedBy(), false)
-                        );
+//                        UUID categoryId = thread != null? thread.getCategoryId() : null;
+//                        boolean canViewCategory = categoryId != null && categoryVisible.getOrDefault(categoryId, false);
+//
+//                        CanViewProfile canViewProfile = new CanViewProfile(
+//                                profileVisible.getOrDefault(report.getReporterId(), false),
+//                                profileVisible.getOrDefault(report.getReportedUserId(), false),
+//                                profileVisible.getOrDefault(report.getAssignedModeratorId(), false),
+//                                profileVisible.getOrDefault(report.getReviewedBy(), false)
+//                        );
 
                         return mapToTypedResponseWithData(
                                 report,
@@ -1112,11 +1120,11 @@ public class ReportServiceImpl implements ReportService {
 
                                 report.getReviewedBy()  != null
                                         ? reviewers.getOrDefault(report.getReviewedBy(), AppUserEntity.defaultUser())
-                                        : AppUserEntity.defaultUser(),
-
-                                canViewCategory,
-
-                                canViewProfile
+                                        : AppUserEntity.defaultUser()
+//
+//                                canViewCategory,
+//
+//                                canViewProfile
 
                         );
                     })
@@ -1152,46 +1160,47 @@ public class ReportServiceImpl implements ReportService {
             UserDetails reportedUser,
             ThreadDetails thread,
             UserDetails assignedModerator,
-            UserDetails reviewer,
-            boolean canViewCategory,
-            CanViewProfile canViewProfile
+            UserDetails reviewer
+//            boolean canViewCategory,
+//            CanViewProfile canViewProfile
     ) {
 
-        UUID reporterId = report.getReporterId();
-        String reporterDisplayName = reporter.getDisplayName();
-        String reporterAvatarUrl = canViewProfile.reporter? reporter.getAvatarUrl(): null;
-
-        if(report.getIsAnonymous()){
-            reporterId = null;
-            reporterDisplayName = null;
-            reporterAvatarUrl = null;
-        }
-
-        String reportedUserAvatarUrl = canViewProfile.reportedUser? reportedUser.getAvatarUrl(): null;
-        String assignedModeratorAvatarUrl = canViewProfile.assignedModerator? assignedModerator.getAvatarUrl(): null;
-        String reviewerAvatarUrl = canViewProfile.reviewer? reviewer.getAvatarUrl(): null;
-
+//        UUID reporterId = report.getReporterId();
+//        String reporterDisplayName = reporter.getDisplayName();
+//        String reporterAvatarUrl = canViewProfile.reporter? reporter.getAvatarUrl(): null;
+//
+//        if(report.getIsAnonymous()){
+//            reporterId = null;
+//            reporterDisplayName = null;
+//            reporterAvatarUrl = null;
+//        }
+//
+//        String reportedUserAvatarUrl = canViewProfile.reportedUser? reportedUser.getAvatarUrl(): null;
+//        String assignedModeratorAvatarUrl = canViewProfile.assignedModerator? assignedModerator.getAvatarUrl(): null;
+//        String reviewerAvatarUrl = canViewProfile.reviewer? reviewer.getAvatarUrl(): null;
+//
+////        String threadTitle = canViewCategory? thread.getTitle() : "[Content Unavailable]";
+//
 //        String threadTitle = canViewCategory? thread.getTitle() : "[Content Unavailable]";
+//        String postContent = canViewCategory? report.getPostContent(): "[Content Unavailable]";
 
-        String threadTitle = canViewCategory? thread.getTitle() : "[Content Unavailable]";
-        String postContent = canViewCategory? report.getPostContent(): "[Content Unavailable]";
+        if(Boolean.TRUE.equals(report.getIsAnonymous())){
+            reporter = AppUserEntity.defaultUser();
+        }
 
         return switch (report.getTargetType()){
             case THREAD -> ThreadReportResponse.builder()
                     .id(report.getId())
 
                     // Reporter info
-                    .reporterId(reporterId)
-                    .reporterDisplayName(reporterDisplayName)
-                    .reporterAvatarUrl(reporterAvatarUrl)
+                    .reporter(reporter)
 
                     // Target info
                     .targetType(report.getTargetType())
-                    .threadId(report.getThreadId())
-                    .threadTitle(threadTitle)
-
+                    .thread(thread)
 
                     // Report details
+                    .isAnonymous(report.getIsAnonymous())
                     .reportCategory(report.getReportCategory())
                     .severity(report.getSeverity())
                     .reason(report.getReason())
@@ -1199,48 +1208,39 @@ public class ReportServiceImpl implements ReportService {
                     .status(report.getStatus())
 
                     // Moderation info
-                    .assignedModeratorId(report.getAssignedModeratorId())
-                    .assignedModeratorDisplayName(assignedModerator.getDisplayName())
-                    .assignedModeratorAvatarUrl(assignedModeratorAvatarUrl)
+                    .assignedModerator(assignedModerator)
                     .assignedAt(report.getAssignedAt())
                     .actionTaken(report.getActionTaken())
                     .actionTakenDetails(report.getActionTakenDetails())
                     .dismissalReason(report.getDismissalReason())
                     .resolutionNotes(report.getResolutionNotes())
                     .reviewedAt(report.getReviewedAt())
-                    .reviewedBy(report.getReviewedBy())
-                    .reviewedByDisplayName(reviewer.getDisplayName())
-                    .reviewedByAvatarUrl(reviewerAvatarUrl)
+                    .reviewer(reviewer)
 
                     // Timestamps
                     .reportedAt(report.getReportedAt())
                     .lastModifiedAt(report.getLastModifiedAt())
-                    .isAnonymous(report.getIsAnonymous())
                     .build();
 
             case POST -> PostReportResponse.builder()
                     .id(report.getId())
 
                     // Reporter info
-                    .reporterId(reporterId)
-                    .reporterDisplayName(reporterDisplayName)
-                    .reporterAvatarUrl(reporterAvatarUrl)
+                    .reporter(reporter)
 
                     // Target info
                     .targetType(report.getTargetType())
                     .postId(report.getPostId())
-                    .postContent(postContent)
+                    .postContent(report.getPostContent())
                     // Thread context - optional, but if threadId exists, thread should exist
-                    .threadId(report.getThreadId())
-                    .threadTitle(threadTitle)
+                    .thread(thread)
 
 
                     // Reported user - OPTIONAL for POST reports
-                    .reportedUserId(report.getReportedUserId())
-                    .reportedUserDisplayName(reportedUser.getDisplayName())
-                    .reportedUserAvatarUrl(reportedUserAvatarUrl)
+                    .reportedUser(reportedUser)
 
                     // Report details
+                    .isAnonymous(report.getIsAnonymous())
                     .reportCategory(report.getReportCategory())
                     .severity(report.getSeverity())
                     .reason(report.getReason())
@@ -1248,42 +1248,34 @@ public class ReportServiceImpl implements ReportService {
                     .status(report.getStatus())
 
                     // Moderation info
-                    .assignedModeratorId(report.getAssignedModeratorId())
-                    .assignedModeratorDisplayName(assignedModerator.getDisplayName())
-                    .assignedModeratorAvatarUrl(assignedModeratorAvatarUrl)
+                    .assignedModerator(assignedModerator)
                     .assignedAt(report.getAssignedAt())
                     .actionTaken(report.getActionTaken())
                     .actionTakenDetails(report.getActionTakenDetails())
                     .dismissalReason(report.getDismissalReason())
                     .resolutionNotes(report.getResolutionNotes())
                     .reviewedAt(report.getReviewedAt())
-                    .reviewedBy(report.getReviewedBy())
-                    .reviewedByDisplayName(reviewer.getDisplayName())
-                    .reviewedByAvatarUrl(reviewerAvatarUrl)
+                    .reviewer(reviewer)
 
                     // Timestamps
                     .reportedAt(report.getReportedAt())
                     .lastModifiedAt(report.getLastModifiedAt())
-                    .isAnonymous(report.getIsAnonymous())
                     .build();
 
             case USER -> UserReportResponse.builder()
                     .id(report.getId())
 
                     // Reporter info
-                    .reporterId(reporterId)
-                    .reporterDisplayName(reporterDisplayName)
-                    .reporterAvatarUrl(reporterAvatarUrl)
+                    .reporter(reporter)
 
                     // Target info
                     .targetType(report.getTargetType())
 
                     // User fields - REQUIRED
-                    .reportedUserId(report.getReportedUserId())
-                    .reportedUserDisplayName(reportedUser.getDisplayName())
-                    .reportedUserAvatarUrl(reportedUserAvatarUrl)
+                    .reportedUser(reportedUser)
 
                     // Report details
+                    .isAnonymous(report.getIsAnonymous())
                     .reportCategory(report.getReportCategory())
                     .severity(report.getSeverity())
                     .reason(report.getReason())
@@ -1291,23 +1283,18 @@ public class ReportServiceImpl implements ReportService {
                     .status(report.getStatus())
 
                     // Moderation info
-                    .assignedModeratorId(report.getAssignedModeratorId())
-                    .assignedModeratorDisplayName(assignedModerator.getDisplayName())
-                    .assignedModeratorAvatarUrl(assignedModeratorAvatarUrl)
+                    .assignedModerator(assignedModerator)
                     .assignedAt(report.getAssignedAt())
                     .actionTaken(report.getActionTaken())
                     .actionTakenDetails(report.getActionTakenDetails())
                     .dismissalReason(report.getDismissalReason())
                     .resolutionNotes(report.getResolutionNotes())
                     .reviewedAt(report.getReviewedAt())
-                    .reviewedBy(report.getReviewedBy())
-                    .reviewedByDisplayName(reviewer.getDisplayName())
-                    .reviewedByAvatarUrl(reviewer.getAvatarUrl())
+                    .reviewer(reviewer)
 
                     // Timestamps
                     .reportedAt(report.getReportedAt())
                     .lastModifiedAt(report.getLastModifiedAt())
-                    .isAnonymous(report.getIsAnonymous())
                     .build();
 
         };

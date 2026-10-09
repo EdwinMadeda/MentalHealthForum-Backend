@@ -32,6 +32,7 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class PostServiceImpl implements PostService {
@@ -395,24 +396,28 @@ public class PostServiceImpl implements PostService {
                         sortByField.getValue(), effectiveSortDirection,
                         size, offset)
                 .collectList()
-                .flatMap(posts -> {
+                .zipWith(postRepository.countPostsWithFilters(
+                        viewerId,
+                        isAdmin, isModeratorOrAdmin, isVerified,
+                        threadId, authorId, parentPostId,
+                        effectivePostType, hasContentWarning, isDeleted, false,
+                        effectiveSearch))
+                .flatMap(tuple -> {
+                    List<PostEntity> posts = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
                     if(posts.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(getPostSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
 
                     return enrichPostsWithBatchData(posts)
-                            .zipWith(postRepository.countPostsWithFilters(
-                                    viewerId,
-                                    isAdmin, isModeratorOrAdmin, isVerified,
-                                    threadId, authorId, parentPostId,
-                                    effectivePostType, hasContentWarning, isDeleted, false,
-                                    effectiveSearch))
-                            .map(tuple -> {
-                                EnrichedPostData enrichedPostData = tuple.getT1();
-                                long total = tuple.getT2();
+                            .map(enriched -> {
 
-                                FilterMetadata<PostFilterDto> filters = buildPostFilters(enrichedPostData);
-                                return new PaginatedResponse<>(enrichedPostData.responses, page, size, total, filters);
+                                FilterMetadata<PostFilterDto> filters = buildPostFilters(enriched);
+                                return new PaginatedResponse<>(enriched.responses, page, size, totalCount, filters);
                             });
                 });
 
@@ -475,9 +480,49 @@ public class PostServiceImpl implements PostService {
      * Uses individual queries since only one post is being fetched.
      */
     private Mono<PostResponse> enrichSinglePostWithData(PostEntity post) {
-        return appUserRepository.findAppUserByKeycloakId(post.getAuthorId().toString())
-                .map(AppUserEntity::toUserDetails)
-                .map(author -> mapResponseWithData(post, author));
+
+        Mono<ThreadDetails> threadMono = post.getThreadId() != null
+                ? threadRepository.findById(post.getThreadId())
+                  .map(ThreadEntity::toThreadDetails)
+                  .defaultIfEmpty(ThreadEntity.defaultThread())
+                : Mono.just(ThreadEntity.defaultThread());
+
+        Mono<PostDetails> parentPostMono = post.getParentPostId() != null
+                ? postRepository.findById(post.getParentPostId())
+                .map(PostEntity::toPostDetails)
+                .defaultIfEmpty(PostEntity.defaultPost())
+                : Mono.just(PostEntity.defaultPost());
+
+        // Get all userId maps
+        List<UUID> allUserIds = Stream.of(post.getAuthorId(), post.getEditedByUserId())
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch all users
+        Mono<Map<UUID, UserDetails>> usersMap = appUserRepository
+                .findAppUsersByKeycloakIds(allUserIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                .defaultIfEmpty(new HashMap<>());
+
+        return Mono.zip(
+                threadMono,
+
+                parentPostMono,
+
+                usersMap
+
+        ).map(tuple -> {
+                ThreadDetails thread = tuple.getT1();
+                PostDetails parentPost = tuple.getT2();
+                Map<UUID, UserDetails> users = tuple.getT3();
+
+                UserDetails author = users.getOrDefault(post.getAuthorId(), AppUserEntity.defaultUser());
+                UserDetails editor = users.getOrDefault(post.getEditedByUserId(), AppUserEntity.defaultUser());
+
+                return mapResponseWithData(post, thread, parentPost, author, editor);
+        });
+
     }
 
     /**
@@ -494,23 +539,29 @@ public class PostServiceImpl implements PostService {
             ));
         }
 
-        List<UUID> authorIds = posts.stream()
-                .map(PostEntity::getAuthorId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-
         List<UUID> threadIds = posts.stream()
                 .map(PostEntity::getThreadId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
 
-        // Batch fetch all authors
-        Mono<Map<UUID, UserDetails>> authorsMap = appUserRepository
-                .findAppUsersByKeycloakIds(authorIds)
-                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
-                .defaultIfEmpty(new HashMap<>());
+        List<UUID> parentPostIds = posts.stream()
+                .map(PostEntity::getParentPostId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<UUID> authorIds = posts.stream()
+                .map(PostEntity::getAuthorId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<UUID> editorIds = posts.stream()
+                .map(PostEntity::getEditedByUserId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
 
         // Batch fetch all threads
         Mono<Map<UUID, ThreadDetails>> threadsMap = threadRepository
@@ -518,22 +569,48 @@ public class PostServiceImpl implements PostService {
                 .collectMap(ThreadEntity::getId, ThreadEntity::toThreadDetails)
                 .defaultIfEmpty(new HashMap<>());
 
-        return Mono.zip(authorsMap, threadsMap)
+        // Batch fetch all parent posts
+        Mono<Map<UUID, PostDetails>> parentPostsMap = postRepository
+                .findPostsByIds(parentPostIds)
+                .collectMap(PostEntity::getId, PostEntity::toPostDetails)
+                .defaultIfEmpty(new HashMap<>());
+
+
+        List<UUID> allUserIds = posts.stream()
+                .flatMap(post -> Stream.of(post.getAuthorId(), post.getEditedByUserId()))
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch all users
+        Mono<Map<UUID, UserDetails>> usersMap = appUserRepository
+                .findAppUsersByKeycloakIds(allUserIds)
+                .collectMap(AppUserEntity::getKeycloakId, AppUserEntity::toUserDetails)
+                .defaultIfEmpty(new HashMap<>());
+
+
+        return Mono.zip(threadsMap, parentPostsMap, usersMap)
                 .map(tuple -> {
-                    Map<UUID, UserDetails> authors =  tuple.getT1();
-                    Map<UUID, ThreadDetails> threads = tuple.getT2();
+                    Map<UUID, ThreadDetails> threads = tuple.getT1();
+                    Map<UUID, PostDetails> parentPosts = tuple.getT2();
+                    Map<UUID, UserDetails> users =  tuple.getT3();
 
                     List<PostResponse> responses = posts.stream()
                             .map(post -> {
-                                UserDetails author = authors.get(post.getAuthorId());
-                                return mapResponseWithData(post, author);
+
+                                ThreadDetails thread = threads.getOrDefault(post.getThreadId(), ThreadEntity.defaultThread());
+                                PostDetails parentPost = parentPosts.getOrDefault(post.getParentPostId(), null);
+                                UserDetails author = users.getOrDefault(post.getAuthorId(), AppUserEntity.defaultUser());
+                                UserDetails editor = users.getOrDefault(post.getEditedByUserId(), null);
+
+                                return mapResponseWithData(post, thread, parentPost, author, editor);
                             })
                             .toList();
 
                     return new EnrichedPostData(
                             responses,
                             posts,
-                            authors,
+                            users,
                             threads
                     );
                 });
@@ -546,28 +623,39 @@ public class PostServiceImpl implements PostService {
      */
     private PostResponse mapResponseWithData(
         PostEntity post,
-        UserDetails author
+        ThreadDetails thread,
+        PostDetails parentPost,
+        UserDetails author,
+        UserDetails editor
     ) {
         return PostResponse.builder()
                 .id(post.getId())
-                .threadId(post.getThreadId())
-                .parentPostId(post.getParentPostId())
-                .authorId(post.getAuthorId())
-                .authorDisplayName(author.getDisplayName())
-                .authorAvatarUrl(author.getAvatarUrl())
+
+                .thread(thread)
+                .parentPost(parentPost)
+
+                .author(author)
                 .anonymousIdentifier(post.getAnonymousIdentifier())
+
                 .postType(post.getPostType())
                 .content(post.getContent())
                 .wordCount(post.getWordCount())
+
                 .contentWarningType(post.getContentWarningType())
                 .contentWarningCustomText(post.getContentWarningCustomText())
+
                 .isFlaggedForReview(false)
                 .isEdited(post.getIsEdited())
                 .editReason(post.getEditReasonType())
                 .editReasonCustomText(post.getEditReasonCustomText())
+                // .editedAt(post.getEditedAt()) // missing. Should be included in the entity
+                .editedBy(editor)
+
                 .isAnonymous(post.getIsAnonymous())
                 .isDeleted(post.getIsDeleted())
+
                 .reactionCount(post.getReactionCount())
+
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
                 .build();
@@ -577,7 +665,7 @@ public class PostServiceImpl implements PostService {
     private record EnrichedPostData(
             List<PostResponse> responses,
             List<PostEntity> posts,
-            Map<UUID, UserDetails> authors,
+            Map<UUID, UserDetails> users,
             Map<UUID, ThreadDetails> threads
     ){}
 
@@ -592,7 +680,7 @@ public class PostServiceImpl implements PostService {
                         Collectors.counting()
                 ));
 
-        List<FilterOption> authorOptions = data.authors.entrySet().stream()
+        List<FilterOption> authorOptions = data.users.entrySet().stream()
                 .map(entry -> {
                     UUID authorId = entry.getKey();
                     UserDetails author = entry.getValue();
@@ -605,6 +693,7 @@ public class PostServiceImpl implements PostService {
                             count
                     );
                 })
+                .filter(option -> option.getCount() > 0)
                 .sorted(Comparator.comparing(FilterOption::getLabel))
                 .toList();
 

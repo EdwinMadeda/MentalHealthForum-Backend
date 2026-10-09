@@ -33,7 +33,6 @@ import reactor.core.publisher.Mono;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 
 @Service
@@ -179,24 +178,26 @@ public class CategoryTagServiceImpl implements CategoryTagService {
                     size, offset
                 )
                 .collectList()
-                .flatMap(tags -> {
+                .zipWith(categoryTagRepository.countSearchTags(effectiveSearch))
+                .flatMap(tuple -> {
+                    List<CategoryTagEntity> tags = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
+                    FilterMetadata<Object> filters = FilterMetadata.builder()
+                            .sortOptions(getTagSortOptions())
+                            .build();
+
                     if(tags.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
+
                     return enrichTagsWithBatchData(tags)
-                            .zipWith(categoryTagRepository.countSearchTags(effectiveSearch))
-                            .map(tuple -> {
-                                List<CategoryTagResponse> content = tuple.getT1();
-                                long total = tuple.getT2();
-
-                                FilterMetadata<Object> filters = FilterMetadata.builder()
-                                        .sortOptions(getTagSortOptions())
-                                        .build();
-
-                                return new PaginatedResponse<>(content, page, size, total, filters);
-                            });
+                            .map(enriched ->
+                                    new PaginatedResponse<>(enriched, page, size, totalCount, filters)
+                            );
 
                 });
+
     }
 
     // ==================== CATEGORY-TAG ASSIGNMENTS ====================
@@ -315,7 +316,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
     }
 
     @Override
-    public Flux<CategoryTagResponse> getTagsForCategory(UUID categoryId){
+    public Flux<CategoryTagResponse> getEnrichedTagsForCategory(UUID categoryId){
         return categoryTagRepository.findByCategoryId(categoryId)
                 .flatMap(this::enrichSingleTagWithData);
     }
@@ -340,7 +341,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
 
         // Get current tags for this category
         return validateTagIds(newTagIds)
-                .then( getTagsForCategory(categoryId)
+                .then( getEnrichedTagsForCategory(categoryId)
                         .collectList()
                         .flatMap(existingTags -> {
                             // Tags to remove: IDs not in new list
@@ -614,8 +615,7 @@ public class CategoryTagServiceImpl implements CategoryTagService {
                 .name(tag.getName())
                 .slug(tag.getSlug())
                 .description(tag.getDescription())
-                .createdBy(tag.getCreatedBy())
-                .createdByDisplayName(creator.getDisplayName())
+                .createdBy(creator)
                 .usage(usage.intValue())
                 .createdAt(tag.getCreatedAt())
                 .updatedAt(tag.getUpdatedAt())

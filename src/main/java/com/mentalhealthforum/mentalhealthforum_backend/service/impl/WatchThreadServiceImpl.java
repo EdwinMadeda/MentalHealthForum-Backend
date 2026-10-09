@@ -3,6 +3,7 @@ package com.mentalhealthforum.mentalhealthforum_backend.service.impl;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.PaginatedResponse;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.ViewerContext;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.BookmarkStatusRecord;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchThreadRecord;
 import com.mentalhealthforum.mentalhealthforum_backend.dto.discovery.WatchThreadResponse;
@@ -22,6 +23,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.model.WatchThreadEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.AppUserService;
+import com.mentalhealthforum.mentalhealthforum_backend.service.CategoryService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.WatchThreadService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +45,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
     private final ThreadRepository threadRepository;
     private final ThreadBookmarkRepository threadBookmarkRepository;
     private final CategoryRepository categoryRepository;
+    private final CategoryService categoryService;
     private final AppUserRepository appUserRepository;
     private final AppUserService appUserService;
 
@@ -51,7 +54,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
             WatchThreadRepository watchThreadRepository,
             ThreadRepository threadRepository,
             ThreadBookmarkRepository threadBookmarkRepository,
-            CategoryRepository categoryRepository,
+            CategoryRepository categoryRepository, CategoryService categoryService,
             AppUserRepository appUserRepository,
             AppUserService appUserService) {
         this.transactionalOperator = transactionalOperator;
@@ -59,6 +62,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
         this.threadRepository = threadRepository;
         this.threadBookmarkRepository = threadBookmarkRepository;
         this.categoryRepository = categoryRepository;
+        this.categoryService = categoryService;
         this.appUserRepository = appUserRepository;
         this.appUserService = appUserService;
     }
@@ -128,33 +132,38 @@ public class WatchThreadServiceImpl implements WatchThreadService {
         String effectiveSortDirection = sortByField.determineSortDirection(sortDirection);
 
         return watchThreadRepository.findPaginatedByUserId(
-                viewerId,
-                isAdmin, isModeratorOrAdmin, isVerified,
-                categoryId, creatorId, effectiveThreadType, effectiveThreadStatus,
-                hasContentWarning, isBookmarked, notificationEnabled,
-                effectiveSearch,
-                sortByField.getValue(), effectiveSortDirection,
-                size, offset
+                        viewerId,
+                        isAdmin, isModeratorOrAdmin, isVerified,
+                        categoryId, creatorId, effectiveThreadType, effectiveThreadStatus,
+                        hasContentWarning, isBookmarked, notificationEnabled,
+                        effectiveSearch,
+                        sortByField.getValue(), effectiveSortDirection,
+                        size, offset
                 )
                 .collectList()
-                .flatMap(records -> {
+                .zipWith(watchThreadRepository.countByUserIdWithFilters(
+                        viewerId,
+                        isAdmin, isModeratorOrAdmin, isVerified,
+                        categoryId, creatorId, effectiveThreadType, effectiveThreadStatus,
+                        hasContentWarning, isBookmarked, notificationEnabled,
+                        effectiveSearch)
+                )
+                .flatMap(tuple -> {
+                    List<WatchThreadRecord> records = tuple.getT1();
+                    long totalCount = tuple.getT2();
+
                     if(records.isEmpty()){
-                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                        FilterMetadata<Object> filters = FilterMetadata.builder()
+                                .sortOptions(getWatchThreadSortOptions())
+                                .build();
+                        return Mono.just(new PaginatedResponse<>(List.of(), page, size, totalCount, filters));
                     }
                     return enrichWatchedThreadsWithBatchData(records, viewerId)
-                            .zipWith(watchThreadRepository.countByUserIdWithFilters(
-                                    viewerId,
-                                    isAdmin, isModeratorOrAdmin, isVerified,
-                                    categoryId, creatorId, effectiveThreadType, effectiveThreadStatus,
-                                    hasContentWarning, isBookmarked, notificationEnabled,
-                                    effectiveSearch)
-                            )
-                            .map(tuple -> {
-                                EnrichedWatchThreadData enrichedData = tuple.getT1();
-                                long total = tuple.getT2();
-                                FilterMetadata<WatchThreadFilterDto> filters = buildWatchThreadFilter(enrichedData);
+                            .map(enriched -> {
 
-                                return new PaginatedResponse<>(enrichedData.responses, page, size, total, filters);
+                                FilterMetadata<WatchThreadFilterDto> filters = buildWatchThreadFilter(enriched);
+
+                                return new PaginatedResponse<>(enriched.responses, page, size, totalCount, filters);
                             });
                 });
 
@@ -217,12 +226,14 @@ public class WatchThreadServiceImpl implements WatchThreadService {
     private Mono<WatchThreadResponse> enrichSingleWatchedThreadWithData(WatchThreadRecord record, UUID userId) {
         return Mono.zip(
                 appUserService.getUserDetails(record.creator_id()),
+                categoryService.getCategoryDetails(record.category_id()),
                 threadBookmarkRepository.existsByUserIdAndThreadId(userId, record.thread_id())
         ).map(tuple -> {
             UserDetails creator = tuple.getT1();
-            Boolean isBookmarked = tuple.getT2();
+            CategoryDetails category = tuple.getT2();
+            Boolean isBookmarked = tuple.getT3();
 
-            return mapResponseWithData(record, creator, isBookmarked);
+            return mapResponseWithData(record, creator, category, isBookmarked);
         });
     }
 
@@ -264,9 +275,9 @@ public class WatchThreadServiceImpl implements WatchThreadService {
                 .defaultIfEmpty(new HashMap<>());
 
         // Batch fetch category details
-        Mono<Map<UUID, CategoryEntity>> categoriesMap = categoryRepository
+        Mono<Map<UUID, CategoryDetails>> categoriesMap = categoryRepository
                 .findCategoriesByIds(categoryIds)
-                .collectMap(CategoryEntity::getId)
+                .collectMap(CategoryEntity::getId, CategoryEntity::toCategoryDetails)
                 .defaultIfEmpty(new HashMap<>());
 
         // Batch fetch bookmark status (for each watched thread)
@@ -282,15 +293,16 @@ public class WatchThreadServiceImpl implements WatchThreadService {
         return Mono.zip(creatorsMap, categoriesMap, bookmarkStatusMap)
                 .map(tuple -> {
                     Map<UUID, UserDetails> creators = tuple.getT1();
-                    Map<UUID, CategoryEntity> categories = tuple.getT2();
+                    Map<UUID, CategoryDetails> categories = tuple.getT2();
                     Map<UUID, Boolean> bookmarkStatus = tuple.getT3();
 
                     List<WatchThreadResponse> responses = records.stream()
                             .map(record -> {
                                 UserDetails creator = creators.get(record.creator_id());
+                                CategoryDetails category = categories.get(record.category_id());
                                 Boolean isBookmarked = bookmarkStatus.getOrDefault(record.thread_id(), false);
 
-                                return mapResponseWithData(record, creator, isBookmarked);
+                                return mapResponseWithData(record, creator, category, isBookmarked);
                             })
                             .toList();
 
@@ -306,6 +318,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
     private WatchThreadResponse mapResponseWithData(
         WatchThreadRecord record,
         UserDetails creator,
+        CategoryDetails category,
         Boolean isBookmarked
     ){
 
@@ -313,22 +326,11 @@ public class WatchThreadServiceImpl implements WatchThreadService {
                 .id(record.watch_id())
                 .notificationEnabled(record.notification_enabled())
                 .watchedAt(record.watched_at())
-                .threadId(record.thread_id())
-                .threadTitle(record.thread_title())
-                .threadType(ThreadType.fromString(record.thread_type()))
-                .threadStatus(ThreadStatus.fromString(record.thread_status()))
-                .categoryId(record.category_id())
-                .creatorId(record.creator_id())
-                .creatorDisplayName(creator.getDisplayName())
-                .creatorAvatarUrl(creator.getAvatarUrl())
-                .postCount(record.post_count())
-                .viewCount(record.view_count())
-                .lastActivityAt(record.last_activity_at())
-                .contentWarningType(ContentWarningType.fromString(record.content_warning_type()))
-                .isOpen(ThreadStatus.fromString(record.thread_status()) == ThreadStatus.OPEN)
+                .thread(record.toThreadDetails())
+                .category(category)
+                .creator(creator)
+
                 .isBookmarked(isBookmarked)
-                .isSticky(record.is_sticky())
-                .isFeatured(record.is_featured())
                 .build();
     }
 
@@ -336,7 +338,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
             List<WatchThreadResponse> responses,
             List<WatchThreadRecord> records,
             Map<UUID, UserDetails> creators,
-            Map<UUID, CategoryEntity> categories
+            Map<UUID, CategoryDetails> categories
     ) {}
 
     /**
@@ -376,7 +378,7 @@ public class WatchThreadServiceImpl implements WatchThreadService {
         List<FilterOption> categoryOptions = data.categories().entrySet().stream()
                 .map(entry -> {
                     UUID categoryId = entry.getKey();
-                    CategoryEntity category = entry.getValue();
+                    CategoryDetails category = entry.getValue();
                     long count = categoryCounts.getOrDefault(categoryId, 0L);
                     return FilterOption.ofEntity(
                             categoryId,

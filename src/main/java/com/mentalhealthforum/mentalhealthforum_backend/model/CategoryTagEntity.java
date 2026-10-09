@@ -1,6 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.model;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
+import com.mentalhealthforum.mentalhealthforum_backend.dto.forumCategoriesHierarchicalAndTagged.CategoryTagDetails;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -43,5 +43,25 @@ public class CategoryTagEntity {
     @LastModifiedDate
     @Column("updated_at")
     private Instant updatedAt;
+
+
+    // ==================== HELPER METHODS ====================
+
+    public CategoryTagDetails toCategoryTagDetails(){
+        return CategoryTagDetails.builder()
+                .id(this.id)
+                .name(this.name)
+                .slug(this.slug)
+                .build();
+    }
+
+
+    public static CategoryTagDetails defaultCategoryTag() {
+        return CategoryTagDetails.builder()
+                .id(null)
+                .name(null)
+                .slug(null)
+                .build();
+    }
 
 }

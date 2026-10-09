@@ -17,7 +17,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table("thread_bookmarks")
-public class ThreadBookmarkEntity {
+public class BookmarkEntity {
 
     @Id
     private UUID id;

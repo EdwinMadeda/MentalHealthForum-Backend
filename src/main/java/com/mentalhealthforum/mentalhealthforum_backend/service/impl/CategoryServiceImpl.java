@@ -15,6 +15,7 @@ import com.mentalhealthforum.mentalhealthforum_backend.enums.listings.CategorySo
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.ApiException;
 import com.mentalhealthforum.mentalhealthforum_backend.exception.error.InvalidPaginationException;
 import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryEntity;
+import com.mentalhealthforum.mentalhealthforum_backend.model.CategoryTagEntity;
 import com.mentalhealthforum.mentalhealthforum_backend.repository.*;
 import com.mentalhealthforum.mentalhealthforum_backend.service.CategoryService;
 import com.mentalhealthforum.mentalhealthforum_backend.service.CategoryTagService;
@@ -390,7 +391,7 @@ public class CategoryServiceImpl implements CategoryService {
                         categoryRepository.findChildCategoriesWithVisibility(root.getId(),viewerId, isAdmin ,isModeratorOrAdmin ,isVerified)
                                 .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext))
                                 .collectList(),
-                        categoryTagService.getTagsForCategory(root.getId())
+                        categoryTagService.getEnrichedTagsForCategory(root.getId())
                                 .collectList()
                 ))
                 .map(tuple -> new CategoryHierarchyDto(
@@ -420,6 +421,13 @@ public class CategoryServiceImpl implements CategoryService {
 
         return categoryRepository.findChildCategoriesWithVisibility(parentId, viewerId, isAdmin , isModeratorOrAdmin , isVerified )
                 .flatMap(category -> enrichSingleCategoryWithData(category, viewerContext));
+    }
+
+    @Override
+    public Mono<CategoryDetails> getCategoryDetails(UUID categoryId) {
+        return categoryRepository.findById(categoryId)
+                .map(CategoryEntity::toCategoryDetails)
+                .defaultIfEmpty(CategoryEntity.defaultCategory());
     }
 
     // ==================== PRIVATE HELPERS ====================
@@ -557,7 +565,10 @@ public class CategoryServiceImpl implements CategoryService {
             long total = tuple.getT2();
 
             if(categories.isEmpty()){
-                return Mono.just(new PaginatedResponse<>(List.of(), page, size, 0L));
+                FilterMetadata<Object> filters = FilterMetadata.builder()
+                        .sortOptions(getCategorySortOptions())
+                        .build();
+                return Mono.just(new PaginatedResponse<>(List.of(), page, size, total, filters));
             }
 
             return enrichCategoriesWithBatchData(categories, viewerContext)
@@ -583,15 +594,19 @@ public class CategoryServiceImpl implements CategoryService {
         boolean isVerified = viewerContext.isVerified();
 
         return Mono.zip(
+                getCategoryDetails(category.getParentCategoryId()),
                 focusCategoryService.isCategoryFocused(category.getId(), viewerContext),
-                categoryTagService.getTagsForCategory(category.getId()).collectList(),
+                categoryTagRepository.findByCategoryId(category.getId()).collectList(),
                 threadRepository.countActiveThreadsByCategory(category.getId(), viewerId, isAdmin, isModeratorOrAdmin, isVerified)
         ).map(tuple -> {
-            Boolean isFocused = tuple.getT1();
-            List<CategoryTagResponse> tags = tuple.getT2();
-            Long threadCount = tuple.getT3();
+            CategoryDetails parentCategory = tuple.getT1();
+            Boolean isFocused = tuple.getT2();
+            List<CategoryTagDetails> tags = tuple.getT3().stream()
+                    .map(CategoryTagEntity::toCategoryTagDetails)
+                    .toList();
+            Long threadCount = tuple.getT4();
 
-            return mapCategoryResponse(category, tags, isFocused, threadCount);
+            return mapCategoryResponse(category, parentCategory, tags, isFocused, threadCount);
         });
     }
 
@@ -629,7 +644,21 @@ public class CategoryServiceImpl implements CategoryService {
 
         List<UUID> categoryIds = categories.stream()
                 .map(CategoryEntity::getId)
+                .filter(Objects::nonNull)
+                .distinct()
                 .toList();
+
+        List<UUID> parentCategoryIds = categories.stream()
+                .map(CategoryEntity::getParentCategoryId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        // Batch fetch parent categories
+        Mono<Map<UUID, CategoryDetails>> parentCategoriesMap = categoryRepository
+                .findCategoriesByIds(parentCategoryIds)
+                .collectMap(CategoryEntity::getId, CategoryEntity::toCategoryDetails)
+                .defaultIfEmpty(new HashMap<>());
 
         // Batch fetch category tags for all categories
         Mono<List<CategoryTagWithCategoryId>> flatTagsListMono = categoryTagRepository
@@ -649,28 +678,34 @@ public class CategoryServiceImpl implements CategoryService {
                 .collectMap(ThreadCountRecord::category_id, ThreadCountRecord::count)
                 .defaultIfEmpty(new HashMap<>());
 
-        return Mono.zip(flatTagsListMono, focusedSet, threadCountsMap)
+        return Mono.zip(parentCategoriesMap, flatTagsListMono, focusedSet, threadCountsMap)
                 .map(tuple -> {
-                    List<CategoryTagWithCategoryId> flatTagsList = tuple.getT1();
-                    Set<UUID> focusIds = tuple.getT2();
-                    Map<UUID, Long> threadCounts = tuple.getT3();
+                    Map<UUID,  CategoryDetails> parentCategories = tuple.getT1();
+                    List<CategoryTagWithCategoryId> flatTagsList = tuple.getT2();
+                    Set<UUID> focusIds = tuple.getT3();
+                    Map<UUID, Long> threadCounts = tuple.getT4();
 
-                    Map<UUID, List<CategoryTagResponse>> tagsByCategory = flatTagsList.stream()
+                    Map<UUID, List<CategoryTagDetails>> tagsByCategory = flatTagsList.stream()
                             .collect(Collectors.groupingBy(
                                     CategoryTagWithCategoryId::category_id,
-                                    Collectors.mapping(this::mapToCategoryTag,
+                                    Collectors.mapping(CategoryTagWithCategoryId::toCategoryTagDetails,
                                             Collectors.toList())
                             ));
 
 
                     List<CategoryResponse> responses = categories.stream()
                         .map(category -> {
-                            List<CategoryTagResponse> tags = tagsByCategory.getOrDefault(
+                            CategoryDetails parentCategory = parentCategories.getOrDefault(
+                                    category.getParentCategoryId(),
+                                    CategoryEntity.defaultCategory()
+                            );
+
+                            List<CategoryTagDetails> tags = tagsByCategory.getOrDefault(
                                     category.getId(), List.of()
                             );
                             boolean isFocused = focusIds.contains(category.getId());
                             Long threadCount = threadCounts.getOrDefault(category.getId(), 0L);
-                            return mapCategoryResponse(category, tags, isFocused, threadCount);
+                            return mapCategoryResponse(category, parentCategory,  tags, isFocused, threadCount);
                         })
                         .toList();
 
@@ -685,7 +720,8 @@ public class CategoryServiceImpl implements CategoryService {
 
     private CategoryResponse mapCategoryResponse(
             CategoryEntity category,
-            List<CategoryTagResponse> tags,
+            CategoryDetails parentCategory,
+            List<CategoryTagDetails> tags,
             Boolean isFocused,
             Long threadCount) {
         return CategoryResponse.builder()
@@ -694,7 +730,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .slug(category.getSlug())
                 .description(category.getDescription())
                 .colorTheme(category.getColorTheme())
-                .parentCategoryId(category.getParentCategoryId())
+                .parentCategory(parentCategory)
                 .contentWarningType(category.getContentWarningType())
                 .contentWarningCustomText(category.getContentWarningCustomText())
                 .sortOrder(category.getSortOrder())
@@ -713,18 +749,6 @@ public class CategoryServiceImpl implements CategoryService {
             List<CategoryEntity> categories,
             List<CategoryTagWithCategoryId> flatTags
     ) {}
-
-    private CategoryTagResponse mapToCategoryTag(CategoryTagWithCategoryId record){
-        return CategoryTagResponse.builder()
-                .id(record.id())
-                .name(record.name())
-                .slug(record.slug())
-                .description(record.description())
-                .createdBy(record.created_by())
-                .createdAt(record.created_at())
-                .updatedAt(record.updated_at())
-                .build();
-    }
 
     private FilterMetadata<CategoryFilterDto> buildCategoryFilters(EnrichedCategoryData data){
         // Build tag options

@@ -1,5 +1,6 @@
 package com.mentalhealthforum.mentalhealthforum_backend.dto.contentReportsComprehensiveSafety;
 
+import com.mentalhealthforum.mentalhealthforum_backend.dto.userProfileAndIdentity.user.UserDetails;
 import com.mentalhealthforum.mentalhealthforum_backend.enums.*;
 import java.time.Instant;
 import java.util.UUID;
@@ -16,22 +17,19 @@ public interface ReportResponse {
     ModerationAction getActionTaken();
     String getActionTakenDetails();
     DismissalReason getDismissalReason();
-    Instant getReportedAt();
+
     Instant getLastModifiedAt();
     Boolean getIsAnonymous();
 
     // Reporter info
-    UUID getReporterId();
-    String getReporterDisplayName();
-    String getReporterAvatarUrl();
+    UserDetails getReporter();
+    Instant getReportedAt();
 
     // Moderation info
-    UUID getAssignedModeratorId();
-    String getAssignedModeratorDisplayName();
-    String getAssignedModeratorAvatarUrl();
+    UserDetails getAssignedModerator();
+    UserDetails getReviewer();
+
     Instant getAssignedAt();
     Instant getReviewedAt();
-    UUID getReviewedBy();
-    String getReviewedByDisplayName();
-    String getReviewedByAvatarUrl();
+
 }
